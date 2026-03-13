@@ -2,74 +2,102 @@ import { Injectable, NgZone } from '@angular/core';
 import { Subject } from 'rxjs';
 import type { LogEntry } from '../models/electron-api';
 
+/** Default config returned when running outside Electron (e.g. ng serve in a browser). */
+const STUB_CONFIG = {
+    gameCapture: { captureSource: 'primary', targetFps: 30 },
+    monitoredRegions: [],
+    overlayGroups: [],
+};
+
 /**
  * Provides Angular components with access to the Electron main process
  * via the preload-exposed `window.fundidoApi`.
+ *
+ * When running outside Electron (e.g. `ng serve` in a regular browser),
+ * all calls return safe stub responses so the UI can be developed without
+ * the Electron shell.
  *
  * All IPC callbacks are piped through NgZone.run() so Angular change
  * detection picks up the updates.
  */
 @Injectable({ providedIn: 'root' })
 export class ElectronService {
-  private readonly debugLog$ = new Subject<LogEntry>();
-  private readonly stateUpdated$ = new Subject<any>();
+    private readonly debugLog$ = new Subject<LogEntry>();
+    private readonly stateUpdated$ = new Subject<any>();
 
-  public readonly debugLogStream = this.debugLog$.asObservable();
-  public readonly stateUpdateStream = this.stateUpdated$.asObservable();
+    public readonly debugLogStream = this.debugLog$.asObservable();
+    public readonly stateUpdateStream = this.stateUpdated$.asObservable();
 
-  constructor(private readonly ngZone: NgZone) {
-    this.registerIpcListeners();
-  }
+    public readonly isRunningInElectron: boolean;
 
-  // -- Configuration --------------------------------------------------------
+    constructor(private readonly ngZone: NgZone) {
+        this.isRunningInElectron = !!window.fundidoApi;
 
-  public async loadConfig(): Promise<any> {
-    return window.fundidoApi.loadConfig();
-  }
+        if (this.isRunningInElectron) {
+            this.registerIpcListeners();
+        } else {
+            console.warn('[ElectronService] window.fundidoApi not found — running in stub mode.');
+        }
+    }
 
-  public async saveConfig(config: any): Promise<{ success: boolean }> {
-    return window.fundidoApi.saveConfig(config);
-  }
+    // -- Configuration --------------------------------------------------------
 
-  public async exportRegions(): Promise<string> {
-    return window.fundidoApi.exportRegions();
-  }
+    public async loadConfig(): Promise<any> {
+        if (!this.isRunningInElectron) return STUB_CONFIG;
+        return window.fundidoApi.loadConfig();
+    }
 
-  public async importRegions(json: string): Promise<{ success: boolean; regionCount?: number; error?: string }> {
-    return window.fundidoApi.importRegions(json);
-  }
+    public async saveConfig(config: any): Promise<{ success: boolean }> {
+        if (!this.isRunningInElectron) return { success: true };
+        return window.fundidoApi.saveConfig(config);
+    }
 
-  public async exportOverlayGroups(): Promise<string> {
-    return window.fundidoApi.exportOverlayGroups();
-  }
+    public async exportRegions(): Promise<string> {
+        if (!this.isRunningInElectron) return '[]';
+        return window.fundidoApi.exportRegions();
+    }
 
-  public async importOverlayGroups(json: string): Promise<{ success: boolean; groupCount?: number; error?: string }> {
-    return window.fundidoApi.importOverlayGroups(json);
-  }
+    public async importRegions(json: string): Promise<{ success: boolean; regionCount?: number; error?: string }> {
+        if (!this.isRunningInElectron) return { success: true, regionCount: 0 };
+        return window.fundidoApi.importRegions(json);
+    }
 
-  // -- Capture --------------------------------------------------------------
+    public async exportOverlayGroups(): Promise<string> {
+        if (!this.isRunningInElectron) return '[]';
+        return window.fundidoApi.exportOverlayGroups();
+    }
 
-  public async startCapture(): Promise<{ success: boolean }> {
-    return window.fundidoApi.startCapture();
-  }
+    public async importOverlayGroups(json: string): Promise<{ success: boolean; groupCount?: number; error?: string }> {
+        if (!this.isRunningInElectron) return { success: true, groupCount: 0 };
+        return window.fundidoApi.importOverlayGroups(json);
+    }
 
-  public async stopCapture(): Promise<{ success: boolean }> {
-    return window.fundidoApi.stopCapture();
-  }
+    // -- Capture --------------------------------------------------------------
 
-  public async getCaptureStatus(): Promise<{ isCapturing: boolean }> {
-    return window.fundidoApi.getCaptureStatus();
-  }
+    public async startCapture(): Promise<{ success: boolean }> {
+        if (!this.isRunningInElectron) return { success: true };
+        return window.fundidoApi.startCapture();
+    }
 
-  // -- IPC listeners --------------------------------------------------------
+    public async stopCapture(): Promise<{ success: boolean }> {
+        if (!this.isRunningInElectron) return { success: true };
+        return window.fundidoApi.stopCapture();
+    }
 
-  private registerIpcListeners(): void {
-    window.fundidoApi.onDebugLog((entry: LogEntry) => {
-      this.ngZone.run(() => this.debugLog$.next(entry));
-    });
+    public async getCaptureStatus(): Promise<{ isCapturing: boolean }> {
+        if (!this.isRunningInElectron) return { isCapturing: false };
+        return window.fundidoApi.getCaptureStatus();
+    }
 
-    window.fundidoApi.onStateUpdated((frameState: any) => {
-      this.ngZone.run(() => this.stateUpdated$.next(frameState));
-    });
-  }
+    // -- IPC listeners --------------------------------------------------------
+
+    private registerIpcListeners(): void {
+        window.fundidoApi.onDebugLog((entry: LogEntry) => {
+            this.ngZone.run(() => this.debugLog$.next(entry));
+        });
+
+        window.fundidoApi.onStateUpdated((frameState: any) => {
+            this.ngZone.run(() => this.stateUpdated$.next(frameState));
+        });
+    }
 }
