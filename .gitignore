@@ -1,0 +1,15 @@
+node_modules/
+dist/
+release/
+native/build/
+ui/.angular/
+*.js.map
+
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp

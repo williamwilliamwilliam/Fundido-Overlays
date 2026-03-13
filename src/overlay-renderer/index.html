@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fundido Overlay</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: #ffffff;
+      user-select: none;
+    }
+
+    #overlay-container {
+      position: absolute;
+      display: flex;
+      gap: 4px;
+    }
+
+    .overlay-item {
+      transition: opacity 0.15s ease;
+    }
+
+    .overlay-item.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .overlay-icon img {
+      max-width: 48px;
+      max-height: 48px;
+    }
+
+    .overlay-text {
+      background: rgba(0, 0, 0, 0.6);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .overlay-mirror canvas {
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+  </style>
+</head>
+<body>
+  <div id="overlay-container"></div>
+
+  <script>
+    /**
+     * Overlay renderer — receives configuration and frame state from the
+     * main process via the overlayApi preload bridge and renders overlays.
+     *
+     * This is intentionally vanilla JS to keep overlay windows lightweight.
+     */
+
+    let overlayGroup = null;
+    let currentFrameState = null;
+
+    // Wait for the main process to send us our group configuration.
+    window.overlayApi.onInit((group) => {
+      overlayGroup = group;
+      applyGroupLayout(group);
+      renderOverlayElements(group);
+    });
+
+    // React to frame state updates by toggling overlay visibility.
+    window.overlayApi.onFrameState((frameState) => {
+      currentFrameState = frameState;
+      if (overlayGroup) {
+        updateOverlayVisibility(overlayGroup, frameState);
+      }
+    });
+
+    function applyGroupLayout(group) {
+      const container = document.getElementById('overlay-container');
+      const position = group.position;
+
+      if (position.mode === 'absolute') {
+        container.style.left = position.x + 'px';
+        container.style.top = position.y + 'px';
+      }
+
+      const directionToFlexDirection = {
+        right: 'row',
+        left: 'row-reverse',
+        down: 'column',
+        up: 'column-reverse',
+      };
+      container.style.flexDirection = directionToFlexDirection[group.growDirection] || 'row';
+
+      const alignmentToAlignItems = {
+        start: 'flex-start',
+        center: 'center',
+        end: 'flex-end',
+      };
+      container.style.alignItems = alignmentToAlignItems[group.alignment] || 'flex-start';
+    }
+
+    function renderOverlayElements(group) {
+      const container = document.getElementById('overlay-container');
+      container.innerHTML = '';
+
+      for (const overlay of group.overlays) {
+        const element = document.createElement('div');
+        element.classList.add('overlay-item');
+        element.dataset.overlayId = overlay.id;
+
+        if (overlay.contentType === 'icon') {
+          element.classList.add('overlay-icon');
+          const img = document.createElement('img');
+          img.src = overlay.content;
+          img.alt = overlay.name;
+          element.appendChild(img);
+        } else if (overlay.contentType === 'text') {
+          element.classList.add('overlay-text');
+          element.textContent = overlay.content;
+        } else if (overlay.contentType === 'regionMirror') {
+          element.classList.add('overlay-mirror');
+          const canvas = document.createElement('canvas');
+          canvas.width = 128;
+          canvas.height = 128;
+          element.appendChild(canvas);
+        }
+
+        container.appendChild(element);
+      }
+    }
+
+    function updateOverlayVisibility(group, frameState) {
+      for (const overlay of group.overlays) {
+        const element = document.querySelector(`[data-overlay-id="${overlay.id}"]`);
+        if (!element) continue;
+
+        const allConditionsMet = overlay.visibilityConditions.every((condition) => {
+          const regionState = frameState.regionStates.find(
+            (rs) => rs.monitoredRegionId === condition.monitoredRegionId
+          );
+          if (!regionState) return false;
+
+          const calcResult = regionState.calculationResults.find(
+            (cr) => cr.stateCalculationId === condition.stateCalculationId
+          );
+          if (!calcResult) return false;
+
+          return calcResult.currentValue === condition.requiredStateValue;
+        });
+
+        const hasNoConditions = overlay.visibilityConditions.length === 0;
+        const shouldBeVisible = hasNoConditions || allConditionsMet;
+
+        if (shouldBeVisible) {
+          element.classList.remove('hidden');
+        } else {
+          element.classList.add('hidden');
+        }
+      }
+    }
+  </script>
+</body>
+</html>
