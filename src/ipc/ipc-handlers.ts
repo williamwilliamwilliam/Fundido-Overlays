@@ -16,8 +16,50 @@ export function registerIpcHandlers(
   previewService: PreviewFrameService,
   overlayWindowManager: OverlayWindowManager,
   currentConfigRef: { config: FundidoConfig },
-  workingRegionsRef: { regions: any[] | null }
+  workingRegionsRef: { regions: any[] | null },
+  globalEnabledRef: { enabled: boolean }
 ): void {
+
+  // -------------------------------------------------------------------------
+  // Global toggle
+  // -------------------------------------------------------------------------
+
+  ipcMain.handle(IpcChannels.GLOBAL_ENABLE, (_event: IpcMainInvokeEvent) => {
+    logger.info(LogCategory.General, 'Global enable — starting capture and overlays.');
+    globalEnabledRef.enabled = true;
+
+    // Start capture if it was enabled in config
+    const captureWasEnabled = currentConfigRef.config.gameCapture.captureEnabled;
+    if (captureWasEnabled && !captureService.getIsCapturing()) {
+      const captureConfig = currentConfigRef.config.gameCapture;
+      captureService.start(captureConfig);
+      const captureSourceString = captureConfig.captureSource;
+      const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
+      previewService.setCaptureDisplayIndex(displayIndex);
+      previewService.start(currentConfigRef.config.preview);
+    }
+
+    // Restore overlay windows
+    overlayWindowManager.syncOverlayWindows(currentConfigRef.config.overlayGroups || []);
+    return { success: true };
+  });
+
+  ipcMain.handle(IpcChannels.GLOBAL_DISABLE, (_event: IpcMainInvokeEvent) => {
+    logger.info(LogCategory.General, 'Global disable — stopping capture and hiding overlays.');
+    globalEnabledRef.enabled = false;
+
+    // Stop capture (but don't change captureEnabled in config — we want it to resume on re-enable)
+    captureService.stop();
+    previewService.stop();
+
+    // Close all overlay windows
+    overlayWindowManager.closeAll();
+    return { success: true };
+  });
+
+  ipcMain.handle(IpcChannels.GLOBAL_STATUS, (_event: IpcMainInvokeEvent) => {
+    return { enabled: globalEnabledRef.enabled };
+  });
 
   // -------------------------------------------------------------------------
   // Configuration

@@ -102,6 +102,11 @@ const workingRegionsRef: { regions: any[] | null } = {
   regions: null,
 };
 
+/** Global on/off switch. When disabled, capture and overlays are all stopped. */
+const globalEnabledRef: { enabled: boolean } = {
+  enabled: true,
+};
+
 // ---------------------------------------------------------------------------
 // Main window
 // ---------------------------------------------------------------------------
@@ -237,7 +242,7 @@ function setupCaptureToOverlayPipeline(): void {
 app.whenReady().then(() => {
   logger.info(LogCategory.General, 'Fundido Overlays starting up.');
 
-  registerIpcHandlers(configService, captureService, previewService, overlayWindowManager, currentConfigRef, workingRegionsRef);
+  registerIpcHandlers(configService, captureService, previewService, overlayWindowManager, currentConfigRef, workingRegionsRef, globalEnabledRef);
   createMainWindow();
   setupCaptureToOverlayPipeline();
 

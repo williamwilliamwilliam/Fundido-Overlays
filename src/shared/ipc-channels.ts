@@ -6,6 +6,13 @@
  */
 
 // ---------------------------------------------------------------------------
+// Global toggle
+// ---------------------------------------------------------------------------
+export const GLOBAL_ENABLE = 'global:enable';
+export const GLOBAL_DISABLE = 'global:disable';
+export const GLOBAL_STATUS = 'global:status';
+
+// ---------------------------------------------------------------------------
 // Configuration persistence
 // ---------------------------------------------------------------------------
 export const CONFIG_LOAD = 'config:load';

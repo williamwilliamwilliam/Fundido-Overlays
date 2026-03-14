@@ -17,6 +17,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 // IPC channel names (mirrored from src/shared/ipc-channels.ts)
 // ---------------------------------------------------------------------------
 const IPC = {
+  GLOBAL_ENABLE:               'global:enable',
+  GLOBAL_DISABLE:              'global:disable',
+  GLOBAL_STATUS:               'global:status',
   CONFIG_LOAD:                 'config:load',
   CONFIG_SAVE:                 'config:save',
   CONFIG_EXPORT_REGIONS:       'config:export-regions',
@@ -42,6 +45,16 @@ const IPC = {
 // ---------------------------------------------------------------------------
 
 const fundidoApi = {
+  // -- Global toggle ----------------------------------------------------------
+  globalEnable: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC.GLOBAL_ENABLE),
+
+  globalDisable: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC.GLOBAL_DISABLE),
+
+  globalStatus: (): Promise<{ enabled: boolean }> =>
+    ipcRenderer.invoke(IPC.GLOBAL_STATUS),
+
   // -- Configuration --------------------------------------------------------
   loadConfig: (): Promise<any> =>
     ipcRenderer.invoke(IPC.CONFIG_LOAD),

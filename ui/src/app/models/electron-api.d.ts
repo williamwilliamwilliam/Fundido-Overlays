@@ -31,6 +31,9 @@ export interface PreviewFrameData {
 }
 
 export interface FundidoApi {
+  globalEnable(): Promise<{ success: boolean }>;
+  globalDisable(): Promise<{ success: boolean }>;
+  globalStatus(): Promise<{ enabled: boolean }>;
   loadConfig(): Promise<any>;
   saveConfig(config: any): Promise<{ success: boolean }>;
   exportRegions(): Promise<string>;
