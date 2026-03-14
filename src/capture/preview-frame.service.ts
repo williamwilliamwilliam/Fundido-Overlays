@@ -69,16 +69,16 @@ export class PreviewFrameService {
     this.latestFrame = frame;
   }
 
-  public start(config: PreviewConfig): void {
+  public start(config: PreviewConfig, fps: number): void {
     if (this.isRunning) {
       this.stop();
     }
 
-    const intervalMilliseconds = Math.round(1000 / config.previewFps);
+    const intervalMilliseconds = Math.round(1000 / fps);
 
     logger.info(
       LogCategory.Capture,
-      `Preview started: ${config.previewFps}fps, scale=${config.previewScale}, method=${config.downsampleMethod}, jpeg=${config.jpegQuality}%`
+      `Preview started: ${fps}fps, scale=${config.previewScale}, method=${config.downsampleMethod}, jpeg=${config.jpegQuality}%`
     );
 
     this.isRunning = true;

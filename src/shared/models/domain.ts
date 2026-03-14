@@ -62,8 +62,6 @@ export interface GameCaptureConfig {
 export type PreviewDownsampleMethod = 'nearestNeighbor' | 'bilinear' | 'skip';
 
 export interface PreviewConfig {
-  /** Target frames per second for sending preview images to the UI (1–60). */
-  previewFps: number;
   /** Scale factor for the preview image (0.1 = 10% of original, 1.0 = full size). */
   previewScale: number;
   /** Downsampling method used to shrink the preview. */

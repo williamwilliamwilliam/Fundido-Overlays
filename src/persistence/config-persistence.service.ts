@@ -17,7 +17,6 @@ function buildDefaultConfig(): FundidoConfig {
   };
 
   const defaultPreview: PreviewConfig = {
-    previewFps: 10,
     previewScale: 0.5,
     downsampleMethod: 'bilinear',
     jpegQuality: 70,

@@ -265,7 +265,7 @@ app.whenReady().then(() => {
     const captureSourceString = captureConfig.captureSource;
     const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
     previewService.setCaptureDisplayIndex(displayIndex);
-    previewService.start(currentConfigRef.config.preview);
+    previewService.start(currentConfigRef.config.preview, currentConfigRef.config.gameCapture.targetFps);
   }
 });
 
