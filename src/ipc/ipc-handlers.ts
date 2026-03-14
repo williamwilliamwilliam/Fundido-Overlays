@@ -107,4 +107,15 @@ export function registerIpcHandlers(
     logger.debug(LogCategory.Ipc, 'CAPTURE_LIST_DISPLAYS invoked');
     return captureService.listDisplays();
   });
+
+  // -------------------------------------------------------------------------
+  // Screen Position Picker
+  // -------------------------------------------------------------------------
+
+  ipcMain.handle(IpcChannels.PICKER_PICK_POSITION, async (_event: IpcMainInvokeEvent) => {
+    logger.debug(LogCategory.Ipc, 'PICKER_PICK_POSITION invoked');
+    const { pickScreenPosition } = require('../picker/screen-position-picker');
+    const result = await pickScreenPosition();
+    return result;
+  });
 }

@@ -38,6 +38,7 @@ export interface FundidoApi {
   stopCapture(): Promise<{ success: boolean }>;
   getCaptureStatus(): Promise<{ isCapturing: boolean; isNativeAvailable: boolean }>;
   listDisplays(): Promise<DisplayInfo[]>;
+  pickPosition(): Promise<{ x: number; y: number } | null>;
   onDebugLog(callback: (entry: LogEntry) => void): void;
   onStateUpdated(callback: (frameState: any) => void): void;
   onPreviewFrame(callback: (previewData: PreviewFrameData) => void): void;

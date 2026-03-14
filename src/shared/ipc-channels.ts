@@ -37,6 +37,11 @@ export const OVERLAY_HIDE = 'overlay:hide';
 export const OVERLAY_UPDATE = 'overlay:update';
 
 // ---------------------------------------------------------------------------
+// Screen picker
+// ---------------------------------------------------------------------------
+export const PICKER_PICK_POSITION = 'picker:pick-position';
+
+// ---------------------------------------------------------------------------
 // Debug logging
 // ---------------------------------------------------------------------------
 export const DEBUG_LOG = 'debug:log';

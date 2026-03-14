@@ -1,0 +1,9 @@
+{
+  "name": "fundido-dxgi-capture",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DXGI Desktop Duplication capture addon for Fundido Overlays",
+  "dependencies": {
+    "node-addon-api": "^7.0.0"
+  }
+}

@@ -45,6 +45,9 @@ import { ElectronService } from '../../services/electron.service';
         <div class="region-bounds">
           <label>X <input type="number" [(ngModel)]="region.bounds.x" /></label>
           <label>Y <input type="number" [(ngModel)]="region.bounds.y" /></label>
+          <button class="pick-btn" (click)="pickPosition(region)" title="Click a point on screen to set X, Y">
+            {{ pickingRegionId === region.id ? 'Picking...' : 'Pick XY' }}
+          </button>
           <label>W <input type="number" [(ngModel)]="region.bounds.width" /></label>
           <label>H <input type="number" [(ngModel)]="region.bounds.height" /></label>
         </div>
@@ -135,6 +138,21 @@ import { ElectronService } from '../../services/electron.service';
 
     .region-bounds input[type="number"] { width: 70px; }
 
+    .pick-btn {
+      font-size: 0.8rem;
+      padding: 2px 10px;
+      background-color: var(--color-bg-panel);
+      border: 1px solid var(--color-accent);
+      color: var(--color-accent);
+      border-radius: var(--radius-sm);
+      white-space: nowrap;
+    }
+
+    .pick-btn:hover {
+      background-color: var(--color-accent);
+      color: var(--color-text-primary);
+    }
+
     .section-label {
       font-size: 0.85rem;
       color: var(--color-text-secondary);
@@ -176,6 +194,7 @@ export class MonitoredRegionsComponent implements OnInit {
   regions: any[] = [];
   showImportDialog = false;
   importJsonText = '';
+  pickingRegionId: string | null = null;
 
   constructor(private readonly electronService: ElectronService) {}
 
@@ -196,6 +215,18 @@ export class MonitoredRegionsComponent implements OnInit {
 
   removeRegion(index: number): void {
     this.regions.splice(index, 1);
+  }
+
+  async pickPosition(region: any): Promise<void> {
+    this.pickingRegionId = region.id;
+    const result = await this.electronService.pickPosition();
+
+    if (result !== null) {
+      region.bounds.x = result.x;
+      region.bounds.y = result.y;
+    }
+
+    this.pickingRegionId = null;
   }
 
   async exportRegions(): Promise<void> {

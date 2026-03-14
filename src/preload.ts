@@ -30,6 +30,7 @@ const IPC = {
   CAPTURE_PREVIEW_FRAME:       'capture:preview-frame',
   STATE_UPDATED:               'state:updated',
   DEBUG_LOG:                   'debug:log',
+  PICKER_PICK_POSITION:        'picker:pick-position',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -68,6 +69,10 @@ const fundidoApi = {
 
   listDisplays: (): Promise<Array<{ adapterIndex: number; outputIndex: number; name: string; width: number; height: number }>> =>
     ipcRenderer.invoke(IPC.CAPTURE_LIST_DISPLAYS),
+
+  // -- Screen picker --------------------------------------------------------
+  pickPosition: (): Promise<{ x: number; y: number } | null> =>
+    ipcRenderer.invoke(IPC.PICKER_PICK_POSITION),
 
   // -- Debug log listener ---------------------------------------------------
   onDebugLog: (callback: (entry: any) => void): void => {

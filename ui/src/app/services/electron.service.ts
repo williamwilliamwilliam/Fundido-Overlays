@@ -99,6 +99,13 @@ export class ElectronService {
     return window.fundidoApi.listDisplays();
   }
 
+  // -- Screen picker --------------------------------------------------------
+
+  public async pickPosition(): Promise<{ x: number; y: number } | null> {
+    if (!this.isRunningInElectron) return null;
+    return window.fundidoApi.pickPosition();
+  }
+
   // -- IPC listeners --------------------------------------------------------
 
   private registerIpcListeners(): void {
