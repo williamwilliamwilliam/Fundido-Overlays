@@ -4,10 +4,10 @@ import type { LogEntry, PreviewFrameData } from '../models/electron-api';
 
 /** Default config returned when running outside Electron (e.g. ng serve in a browser). */
 const STUB_CONFIG = {
-  gameCapture: { captureSource: 'primary', targetFps: 30 },
-  preview: { previewFps: 10, previewScale: 0.5, downsampleMethod: 'bilinear', jpegQuality: 70 },
-  monitoredRegions: [],
-  overlayGroups: [],
+    gameCapture: { captureSource: 'primary', targetFps: 30 },
+    preview: { previewFps: 10, previewScale: 0.5, downsampleMethod: 'bilinear', jpegQuality: 70 },
+    monitoredRegions: [],
+    overlayGroups: [],
 };
 
 /**
@@ -23,128 +23,141 @@ const STUB_CONFIG = {
  */
 @Injectable({ providedIn: 'root' })
 export class ElectronService {
-  private readonly debugLog$ = new Subject<LogEntry>();
-  private readonly stateUpdated$ = new Subject<any>();
-  private readonly previewFrame$ = new Subject<PreviewFrameData>();
+    private readonly debugLog$ = new Subject<LogEntry>();
+    private readonly stateUpdated$ = new Subject<any>();
+    private readonly previewFrame$ = new Subject<PreviewFrameData>();
 
-  public readonly debugLogStream = this.debugLog$.asObservable();
-  public readonly stateUpdateStream = this.stateUpdated$.asObservable();
-  public readonly previewFrameStream = this.previewFrame$.asObservable();
+    public readonly debugLogStream = this.debugLog$.asObservable();
+    public readonly stateUpdateStream = this.stateUpdated$.asObservable();
+    public readonly previewFrameStream = this.previewFrame$.asObservable();
 
-  public readonly isRunningInElectron: boolean;
+    public readonly isRunningInElectron: boolean;
 
-  constructor(private readonly ngZone: NgZone) {
-    this.isRunningInElectron = !!window.fundidoApi;
+    constructor(private readonly ngZone: NgZone) {
+        this.isRunningInElectron = !!window.fundidoApi;
 
-    if (this.isRunningInElectron) {
-      this.registerIpcListeners();
-    } else {
-      console.warn('[ElectronService] window.fundidoApi not found — running in stub mode.');
+        if (this.isRunningInElectron) {
+            this.registerIpcListeners();
+        } else {
+            console.warn('[ElectronService] window.fundidoApi not found — running in stub mode.');
+        }
     }
-  }
 
-  // -- Configuration --------------------------------------------------------
+    // -- Configuration --------------------------------------------------------
 
-  public async loadConfig(): Promise<any> {
-    if (!this.isRunningInElectron) return STUB_CONFIG;
-    return window.fundidoApi.loadConfig();
-  }
-
-  public async saveConfig(config: any): Promise<{ success: boolean }> {
-    if (!this.isRunningInElectron) return { success: true };
-    return window.fundidoApi.saveConfig(config);
-  }
-
-  public async exportRegions(): Promise<string> {
-    if (!this.isRunningInElectron) return '[]';
-    return window.fundidoApi.exportRegions();
-  }
-
-  public async importRegions(json: string): Promise<{ success: boolean; regionCount?: number; error?: string }> {
-    if (!this.isRunningInElectron) return { success: true, regionCount: 0 };
-    return window.fundidoApi.importRegions(json);
-  }
-
-  public async exportOverlayGroups(): Promise<string> {
-    if (!this.isRunningInElectron) return '[]';
-    return window.fundidoApi.exportOverlayGroups();
-  }
-
-  public async importOverlayGroups(json: string): Promise<{ success: boolean; groupCount?: number; error?: string }> {
-    if (!this.isRunningInElectron) return { success: true, groupCount: 0 };
-    return window.fundidoApi.importOverlayGroups(json);
-  }
-
-  // -- Capture --------------------------------------------------------------
-
-  public async startCapture(): Promise<{ success: boolean }> {
-    if (!this.isRunningInElectron) return { success: true };
-    return window.fundidoApi.startCapture();
-  }
-
-  public async stopCapture(): Promise<{ success: boolean }> {
-    if (!this.isRunningInElectron) return { success: true };
-    return window.fundidoApi.stopCapture();
-  }
-
-  public async getCaptureStatus(): Promise<{ isCapturing: boolean; isNativeAvailable: boolean }> {
-    if (!this.isRunningInElectron) return { isCapturing: false, isNativeAvailable: false };
-    return window.fundidoApi.getCaptureStatus();
-  }
-
-  public async listDisplays(): Promise<Array<{ adapterIndex: number; outputIndex: number; name: string; width: number; height: number }>> {
-    if (!this.isRunningInElectron) {
-      return [{ adapterIndex: 0, outputIndex: 0, name: 'Stub Display (not in Electron)', width: 1920, height: 1080 }];
+    public async loadConfig(): Promise<any> {
+        if (!this.isRunningInElectron) return STUB_CONFIG;
+        return window.fundidoApi.loadConfig();
     }
-    return window.fundidoApi.listDisplays();
-  }
 
-  // -- Screen picker --------------------------------------------------------
+    public async saveConfig(config: any): Promise<{ success: boolean }> {
+        if (!this.isRunningInElectron) return { success: true };
+        return window.fundidoApi.saveConfig(config);
+    }
 
-  private readonly pickerRegionUpdate$ = new Subject<{ x: number; y: number; width: number; height: number }>();
-  public readonly pickerRegionUpdateStream = this.pickerRegionUpdate$.asObservable();
+    public async exportRegions(): Promise<string> {
+        if (!this.isRunningInElectron) return '[]';
+        return window.fundidoApi.exportRegions();
+    }
 
-  public async pickRegion(): Promise<{ x: number; y: number; width: number; height: number } | null> {
-    if (!this.isRunningInElectron) return null;
-    return window.fundidoApi.pickRegion();
-  }
+    public async importRegions(json: string): Promise<{ success: boolean; regionCount?: number; error?: string }> {
+        if (!this.isRunningInElectron) return { success: true, regionCount: 0 };
+        return window.fundidoApi.importRegions(json);
+    }
 
-  // -- Working regions/groups (live evaluation) ------------------------------
+    public async exportOverlayGroups(): Promise<string> {
+        if (!this.isRunningInElectron) return '[]';
+        return window.fundidoApi.exportOverlayGroups();
+    }
 
-  public async setWorkingRegions(regions: any[]): Promise<void> {
-    if (!this.isRunningInElectron) return;
-    await window.fundidoApi.setWorkingRegions(regions);
-  }
+    public async importOverlayGroups(json: string): Promise<{ success: boolean; groupCount?: number; error?: string }> {
+        if (!this.isRunningInElectron) return { success: true, groupCount: 0 };
+        return window.fundidoApi.importOverlayGroups(json);
+    }
 
-  public async setWorkingGroups(groups: any[]): Promise<void> {
-    if (!this.isRunningInElectron) return;
-    await window.fundidoApi.setWorkingGroups(groups);
-  }
+    // -- Capture --------------------------------------------------------------
 
-  // -- File dialogs -----------------------------------------------------------
+    public async startCapture(): Promise<{ success: boolean }> {
+        if (!this.isRunningInElectron) return { success: true };
+        return window.fundidoApi.startCapture();
+    }
 
-  public async openFileDialog(options?: any): Promise<string | null> {
-    if (!this.isRunningInElectron) return null;
-    return window.fundidoApi.openFileDialog(options);
-  }
+    public async stopCapture(): Promise<{ success: boolean }> {
+        if (!this.isRunningInElectron) return { success: true };
+        return window.fundidoApi.stopCapture();
+    }
 
-  // -- IPC listeners --------------------------------------------------------
+    public async getCaptureStatus(): Promise<{ isCapturing: boolean; isNativeAvailable: boolean }> {
+        if (!this.isRunningInElectron) return { isCapturing: false, isNativeAvailable: false };
+        return window.fundidoApi.getCaptureStatus();
+    }
 
-  private registerIpcListeners(): void {
-    window.fundidoApi.onDebugLog((entry: LogEntry) => {
-      this.ngZone.run(() => this.debugLog$.next(entry));
-    });
+    /**
+     * Restarts capture if it's currently running. Used when settings change
+     * so they take effect immediately without manual stop/start.
+     */
+    public async restartCaptureIfRunning(): Promise<void> {
+        if (!this.isRunningInElectron) return;
+        const status = await this.getCaptureStatus();
+        if (status.isCapturing) {
+            await this.stopCapture();
+            await this.startCapture();
+        }
+    }
 
-    window.fundidoApi.onPickerRegionUpdate((region) => {
-      this.ngZone.run(() => this.pickerRegionUpdate$.next(region));
-    });
+    public async listDisplays(): Promise<Array<{ adapterIndex: number; outputIndex: number; name: string; width: number; height: number }>> {
+        if (!this.isRunningInElectron) {
+            return [{ adapterIndex: 0, outputIndex: 0, name: 'Stub Display (not in Electron)', width: 1920, height: 1080 }];
+        }
+        return window.fundidoApi.listDisplays();
+    }
 
-    window.fundidoApi.onStateUpdated((frameState: any) => {
-      this.ngZone.run(() => this.stateUpdated$.next(frameState));
-    });
+    // -- Screen picker --------------------------------------------------------
 
-    window.fundidoApi.onPreviewFrame((previewData: PreviewFrameData) => {
-      this.ngZone.run(() => this.previewFrame$.next(previewData));
-    });
-  }
+    private readonly pickerRegionUpdate$ = new Subject<{ x: number; y: number; width: number; height: number }>();
+    public readonly pickerRegionUpdateStream = this.pickerRegionUpdate$.asObservable();
+
+    public async pickRegion(): Promise<{ x: number; y: number; width: number; height: number } | null> {
+        if (!this.isRunningInElectron) return null;
+        return window.fundidoApi.pickRegion();
+    }
+
+    // -- Working regions/groups (live evaluation) ------------------------------
+
+    public async setWorkingRegions(regions: any[]): Promise<void> {
+        if (!this.isRunningInElectron) return;
+        await window.fundidoApi.setWorkingRegions(regions);
+    }
+
+    public async setWorkingGroups(groups: any[]): Promise<void> {
+        if (!this.isRunningInElectron) return;
+        await window.fundidoApi.setWorkingGroups(groups);
+    }
+
+    // -- File dialogs -----------------------------------------------------------
+
+    public async openFileDialog(options?: any): Promise<string | null> {
+        if (!this.isRunningInElectron) return null;
+        return window.fundidoApi.openFileDialog(options);
+    }
+
+    // -- IPC listeners --------------------------------------------------------
+
+    private registerIpcListeners(): void {
+        window.fundidoApi.onDebugLog((entry: LogEntry) => {
+            this.ngZone.run(() => this.debugLog$.next(entry));
+        });
+
+        window.fundidoApi.onPickerRegionUpdate((region) => {
+            this.ngZone.run(() => this.pickerRegionUpdate$.next(region));
+        });
+
+        window.fundidoApi.onStateUpdated((frameState: any) => {
+            this.ngZone.run(() => this.stateUpdated$.next(frameState));
+        });
+
+        window.fundidoApi.onPreviewFrame((previewData: PreviewFrameData) => {
+            this.ngZone.run(() => this.previewFrame$.next(previewData));
+        });
+    }
 }
