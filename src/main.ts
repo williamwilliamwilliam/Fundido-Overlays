@@ -243,7 +243,8 @@ app.whenReady().then(() => {
 
   // Pipe preview frames to overlay windows for region mirror rendering
   previewService.setOnPreviewFrameSent((previewData) => {
-    overlayWindowManager.broadcastPreviewFrame(previewData);
+    const monitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions ?? [];
+    overlayWindowManager.broadcastPreviewFrame(previewData, monitoredRegions);
   });
 
   // Create overlay windows for any groups defined in the saved config

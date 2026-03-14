@@ -227,6 +227,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
             background: transparent;
             border: 1px solid transparent;
             padding: var(--spacing-xs);
+            flex: 1;
         }
         .name-input:focus { border-color: var(--color-accent); }
 
@@ -500,6 +501,18 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
         const isCtrlS = (event.ctrlKey || event.metaKey) && event.key === 's';
         if (isCtrlS) {
             event.preventDefault();
+            if (this.hasUnsavedChanges) {
+                this.saveAllRegions();
+            }
+        }
+
+        const isEnterInInput = event.key === 'Enter' && (
+            event.target instanceof HTMLInputElement ||
+            event.target instanceof HTMLSelectElement
+        );
+        if (isEnterInInput) {
+            event.preventDefault();
+            (event.target as HTMLElement).blur();
             if (this.hasUnsavedChanges) {
                 this.saveAllRegions();
             }
