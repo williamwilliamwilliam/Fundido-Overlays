@@ -117,7 +117,7 @@ export interface MonitoredRegion {
 // Overlays
 // ---------------------------------------------------------------------------
 
-export type OverlayContentType = 'icon' | 'text' | 'regionMirror';
+export type OverlayContentType = 'text' | 'image' | 'regionMirror';
 
 export type GrowDirection = 'right' | 'left' | 'down' | 'up';
 export type Alignment = 'start' | 'center' | 'end';
@@ -126,46 +126,90 @@ export type OverlayPositionMode = 'absolute' | 'relativeToCursor';
 
 export interface OverlayPositionAbsolute {
   mode: 'absolute';
-  /** Pixels from the left edge of the screen. */
   x: number;
-  /** Pixels from the top edge of the screen. */
   y: number;
 }
 
 export interface OverlayPositionRelativeToCursor {
   mode: 'relativeToCursor';
-  /** Horizontal offset from the cursor, in pixels. */
   offsetX: number;
-  /** Vertical offset from the cursor, in pixels. */
   offsetY: number;
 }
 
 export type OverlayPosition = OverlayPositionAbsolute | OverlayPositionRelativeToCursor;
 
-/**
- * A condition that must be met for an overlay to be visible.
- * Evaluated as: monitoredRegion[stateCalculationId].currentValue === requiredStateValue
- */
-export interface OverlayVisibilityCondition {
-  monitoredRegionId: MonitoredRegionId;
-  stateCalculationId: StateCalculationId;
-  requiredStateValue: string;
+// -- Overlay content configs per type --
+
+export interface OverlayTextConfig {
+  text: string;
+  fontSize: number;
+  fontFamily: string;
+  fontWeight: 'normal' | 'bold';
+  fontStyle: 'normal' | 'italic';
+  color: string;
+  backgroundColor: string;
+  padding: number;
 }
 
-/** An individual overlay element that reacts to state. */
+export interface OverlaySizeConfig {
+  /** If set, fixed width in pixels. */
+  width?: number;
+  /** If set, fixed height in pixels. */
+  height?: number;
+  /** If set, max width in pixels. */
+  maxWidth?: number;
+  /** If set, max height in pixels. */
+  maxHeight?: number;
+  /** If set, scale factor (1.0 = original size). Overrides width/height. */
+  scale?: number;
+}
+
+export interface OverlayImageConfig {
+  /** Absolute path to the image file on disk. */
+  filePath: string;
+  size: OverlaySizeConfig;
+}
+
+export interface OverlayRegionMirrorConfig {
+  monitoredRegionId: MonitoredRegionId;
+  size: OverlaySizeConfig;
+}
+
+// -- Rules engine --
+
+export type RuleOperator = 'equals' | 'notEquals';
+
+export interface RuleCondition {
+  monitoredRegionId: MonitoredRegionId;
+  stateCalculationId: StateCalculationId;
+  operator: RuleOperator;
+  value: string;
+}
+
+export type RuleAction = 'show' | 'hide' | 'opacity';
+
+export interface OverlayRule {
+  id: string;
+  /** All conditions must be true for this rule to match (AND logic). */
+  conditions: RuleCondition[];
+  action: RuleAction;
+  /** For 'opacity' action, the opacity value (0–1). */
+  opacityValue?: number;
+}
+
+/** An individual overlay element with typed content and a rules engine. */
 export interface Overlay {
   id: OverlayId;
   name: string;
   contentType: OverlayContentType;
+  textConfig?: OverlayTextConfig;
+  imageConfig?: OverlayImageConfig;
+  regionMirrorConfig?: OverlayRegionMirrorConfig;
   /**
-   * Interpreted based on contentType:
-   * - 'icon': path to an image file
-   * - 'text': the text string to display
-   * - 'regionMirror': the MonitoredRegionId to mirror
+   * Rules evaluated top-down. First matching rule's action is taken.
+   * If no rules match, the overlay is shown at full opacity (default visible).
    */
-  content: string;
-  /** All conditions must be true for this overlay to display. */
-  visibilityConditions: OverlayVisibilityCondition[];
+  rules: OverlayRule[];
 }
 
 /** A group that controls layout and positioning for a set of overlays. */
@@ -175,6 +219,8 @@ export interface OverlayGroup {
   position: OverlayPosition;
   growDirection: GrowDirection;
   alignment: Alignment;
+  /** Gap between overlays in pixels. */
+  gap: number;
   overlays: Overlay[];
 }
 

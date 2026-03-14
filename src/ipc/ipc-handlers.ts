@@ -144,4 +144,9 @@ export function registerIpcHandlers(
     workingRegionsRef.regions = regions;
     return { success: true };
   });
+
+  ipcMain.handle(IpcChannels.GROUPS_SET_WORKING, (_event: IpcMainInvokeEvent, groups: any[] | null) => {
+    // For now, just acknowledge. Overlay window manager sync will come later.
+    return { success: true };
+  });
 }
