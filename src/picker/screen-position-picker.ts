@@ -78,14 +78,24 @@ export function pickScreenRegion(
         alwaysOnTop: true,
         skipTaskbar: true,
         resizable: false,
-        fullscreen: false,
+        fullscreenable: true,
         webPreferences: {
           contextIsolation: false,
           nodeIntegration: true,
         },
       });
 
+      // Force the window above the taskbar
       pickerWindow.setAlwaysOnTop(true, 'screen-saver');
+      pickerWindow.setVisibleOnAllWorkspaces(true);
+
+      // Use setBounds after creation to ensure we cover the full display including taskbar
+      pickerWindow.setBounds({
+        x: display.bounds.x,
+        y: display.bounds.y,
+        width: display.bounds.width,
+        height: display.bounds.height,
+      });
 
       const pickerHtml = buildRegionPickerHtml(display.bounds.x, display.bounds.y);
       pickerWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pickerHtml)}`);

@@ -358,9 +358,16 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   /**
    * For each region, draws the corresponding cropped area of the preview
    * frame onto its canvas element.
+   *
+   * Region bounds are in screen-absolute coordinates (from the picker).
+   * The captured frame covers a single display starting at (displayOriginX, displayOriginY).
+   * We subtract the display origin to get frame-relative coordinates.
    */
   private renderAllRegionPreviews(): void {
     if (!this.previewImage || !this.latestPreviewFrame) return;
+
+    const displayOriginX = this.latestPreviewFrame.displayOriginX || 0;
+    const displayOriginY = this.latestPreviewFrame.displayOriginY || 0;
 
     for (const region of this.regions) {
       const hasNoBounds = region.bounds.width <= 0 || region.bounds.height <= 0;
@@ -372,12 +379,16 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       const context = canvas.getContext('2d');
       if (!context) continue;
 
-      // Map screen coordinates to preview image coordinates
+      // Convert screen-absolute bounds to frame-relative coordinates
+      const frameRelativeX = region.bounds.x - displayOriginX;
+      const frameRelativeY = region.bounds.y - displayOriginY;
+
+      // Scale from original capture resolution to the downsampled preview image
       const scaleX = this.previewImage.naturalWidth / this.latestPreviewFrame.originalWidth;
       const scaleY = this.previewImage.naturalHeight / this.latestPreviewFrame.originalHeight;
 
-      const sourceX = region.bounds.x * scaleX;
-      const sourceY = region.bounds.y * scaleY;
+      const sourceX = frameRelativeX * scaleX;
+      const sourceY = frameRelativeY * scaleY;
       const sourceWidth = region.bounds.width * scaleX;
       const sourceHeight = region.bounds.height * scaleY;
 

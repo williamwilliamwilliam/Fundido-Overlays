@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, screen } from 'electron';
 import { CapturedFrame } from './game-capture.service';
 import { PreviewConfig } from '../shared';
 import { logger, LogCategory } from '../shared/logger';
@@ -15,9 +15,30 @@ export class PreviewFrameService {
   private latestFrame: CapturedFrame | null = null;
   private mainWindow: BrowserWindow | null = null;
   private isRunning = false;
+  private displayOriginX = 0;
+  private displayOriginY = 0;
 
   public setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
+  }
+
+  /**
+   * Sets which display is being captured so we can include its screen
+   * origin in the preview frame data. This lets the UI convert between
+   * screen-absolute coordinates (from the picker) and frame-relative
+   * coordinates (for cropping the preview).
+   */
+  public setCaptureDisplayIndex(displayIndex: number): void {
+    const allDisplays = screen.getAllDisplays();
+    const isValidIndex = displayIndex >= 0 && displayIndex < allDisplays.length;
+    if (isValidIndex) {
+      this.displayOriginX = allDisplays[displayIndex].bounds.x;
+      this.displayOriginY = allDisplays[displayIndex].bounds.y;
+    } else {
+      this.displayOriginX = 0;
+      this.displayOriginY = 0;
+    }
+    logger.debug(LogCategory.Capture, `Display origin set to (${this.displayOriginX}, ${this.displayOriginY})`);
   }
 
   /**
@@ -81,6 +102,8 @@ export class PreviewFrameService {
       originalHeight: frame.height,
       previewWidth: downsampled.width,
       previewHeight: downsampled.height,
+      displayOriginX: this.displayOriginX,
+      displayOriginY: this.displayOriginY,
     });
   }
 

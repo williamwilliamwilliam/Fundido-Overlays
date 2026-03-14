@@ -84,7 +84,14 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IpcChannels.CAPTURE_START, (_event: IpcMainInvokeEvent) => {
     logger.debug(LogCategory.Ipc, 'CAPTURE_START invoked');
-    captureService.start(currentConfigRef.config.gameCapture);
+    const captureConfig = currentConfigRef.config.gameCapture;
+    captureService.start(captureConfig);
+
+    // Tell the preview service which display we're capturing so it can
+    // include the display origin for coordinate mapping.
+    const captureSourceString = captureConfig.captureSource;
+    const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
+    previewService.setCaptureDisplayIndex(displayIndex);
     previewService.start(currentConfigRef.config.preview);
     return { success: true };
   });

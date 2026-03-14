@@ -25,6 +25,8 @@ export interface PreviewFrameData {
   originalHeight: number;
   previewWidth: number;
   previewHeight: number;
+  displayOriginX: number;
+  displayOriginY: number;
 }
 
 export interface FundidoApi {
