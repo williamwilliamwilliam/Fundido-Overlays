@@ -94,6 +94,10 @@ export function registerIpcHandlers(
     const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
     previewService.setCaptureDisplayIndex(displayIndex);
     previewService.start(currentConfigRef.config.preview);
+
+    // Persist so capture auto-starts on next launch
+    currentConfigRef.config.gameCapture.captureEnabled = true;
+    configService.save(currentConfigRef.config);
     return { success: true };
   });
 
@@ -101,6 +105,9 @@ export function registerIpcHandlers(
     logger.debug(LogCategory.Ipc, 'CAPTURE_STOP invoked');
     captureService.stop();
     previewService.stop();
+
+    currentConfigRef.config.gameCapture.captureEnabled = false;
+    configService.save(currentConfigRef.config);
     return { success: true };
   });
 

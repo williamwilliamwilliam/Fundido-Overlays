@@ -1,8 +1,8 @@
 import { BrowserWindow, screen } from 'electron';
 import {
-  OverlayGroup,
-  OverlayGroupId,
-  FrameState,
+    OverlayGroup,
+    OverlayGroupId,
+    FrameState,
 } from '../shared';
 import { logger, LogCategory } from '../shared/logger';
 
@@ -13,109 +13,152 @@ import { logger, LogCategory } from '../shared/logger';
  * isolated and makes it straightforward to position groups independently.
  */
 export class OverlayWindowManager {
-  private overlayWindowsByGroupId = new Map<OverlayGroupId, BrowserWindow>();
+    private overlayWindowsByGroupId = new Map<OverlayGroupId, BrowserWindow>();
+    private cursorTrackingInterval: ReturnType<typeof setInterval> | null = null;
+    private hasCursorFollowingGroups = false;
 
-  /**
-   * Creates, updates, or removes overlay windows to match the given groups.
-   * Call this whenever the overlay group configuration changes.
-   */
-  public syncOverlayWindows(overlayGroups: OverlayGroup[]): void {
-    const activeGroupIds = new Set(overlayGroups.map((group) => group.id));
+    /**
+     * Creates, updates, or removes overlay windows to match the given groups.
+     * Call this whenever the overlay group configuration changes.
+     */
+    public syncOverlayWindows(overlayGroups: OverlayGroup[]): void {
+        const activeGroupIds = new Set(overlayGroups.map((group) => group.id));
 
-    // Close windows for groups that no longer exist
-    for (const [groupId, window] of this.overlayWindowsByGroupId) {
-      const groupWasRemoved = !activeGroupIds.has(groupId);
-      if (groupWasRemoved) {
-        logger.info(LogCategory.Overlay, `Closing overlay window for removed group: ${groupId}`);
-        if (!window.isDestroyed()) window.close();
-        this.overlayWindowsByGroupId.delete(groupId);
-      }
+        // Close windows for groups that no longer exist
+        for (const [groupId, window] of this.overlayWindowsByGroupId) {
+            const groupWasRemoved = !activeGroupIds.has(groupId);
+            if (groupWasRemoved) {
+                logger.info(LogCategory.Overlay, `Closing overlay window for removed group: ${groupId}`);
+                if (!window.isDestroyed()) window.close();
+                this.overlayWindowsByGroupId.delete(groupId);
+            }
+        }
+
+        // Create or update windows for each group
+        for (const group of overlayGroups) {
+            const existingWindow = this.overlayWindowsByGroupId.get(group.id);
+            if (existingWindow && !existingWindow.isDestroyed()) {
+                existingWindow.webContents.send('overlay:init', group);
+            } else {
+                this.createOverlayWindow(group);
+            }
+        }
+
+        // Start or stop cursor tracking based on whether any group uses relativeToCursor
+        this.hasCursorFollowingGroups = overlayGroups.some(
+            (group) => group.position.mode === 'relativeToCursor'
+        );
+        this.updateCursorTracking();
     }
 
-    // Create or update windows for each group
-    for (const group of overlayGroups) {
-      const existingWindow = this.overlayWindowsByGroupId.get(group.id);
-      if (existingWindow && !existingWindow.isDestroyed()) {
-        existingWindow.webContents.send('overlay:init', group);
-      } else {
-        this.createOverlayWindow(group);
-      }
+    /**
+     * Pushes updated frame state to all overlay windows so they can
+     * re-evaluate rules and update their display.
+     */
+    public broadcastFrameState(frameState: FrameState): void {
+        for (const [_groupId, window] of this.overlayWindowsByGroupId) {
+            if (!window.isDestroyed()) {
+                window.webContents.send('overlay:frame-state', frameState);
+            }
+        }
     }
-  }
 
-  /**
-   * Pushes updated frame state to all overlay windows so they can
-   * re-evaluate rules and update their display.
-   */
-  public broadcastFrameState(frameState: FrameState): void {
-    for (const [_groupId, window] of this.overlayWindowsByGroupId) {
-      if (!window.isDestroyed()) {
-        window.webContents.send('overlay:frame-state', frameState);
-      }
+    /**
+     * Sends preview frame data to overlay windows for region mirror rendering.
+     */
+    public broadcastPreviewFrame(previewData: any): void {
+        for (const [_groupId, window] of this.overlayWindowsByGroupId) {
+            if (!window.isDestroyed()) {
+                window.webContents.send('overlay:preview-frame', previewData);
+            }
+        }
     }
-  }
 
-  /**
-   * Sends preview frame data to overlay windows for region mirror rendering.
-   */
-  public broadcastPreviewFrame(previewData: any): void {
-    for (const [_groupId, window] of this.overlayWindowsByGroupId) {
-      if (!window.isDestroyed()) {
-        window.webContents.send('overlay:preview-frame', previewData);
-      }
+    /**
+     * Closes all overlay windows. Called on app shutdown.
+     */
+    public closeAll(): void {
+        this.stopCursorTracking();
+        for (const [_groupId, window] of this.overlayWindowsByGroupId) {
+            if (!window.isDestroyed()) {
+                window.close();
+            }
+        }
+        this.overlayWindowsByGroupId.clear();
     }
-  }
 
-  /**
-   * Closes all overlay windows. Called on app shutdown.
-   */
-  public closeAll(): void {
-    for (const [_groupId, window] of this.overlayWindowsByGroupId) {
-      if (!window.isDestroyed()) {
-        window.close();
-      }
+    /**
+     * Starts or stops the cursor polling interval based on whether
+     * any overlay group uses relativeToCursor positioning.
+     */
+    private updateCursorTracking(): void {
+        if (this.hasCursorFollowingGroups && !this.cursorTrackingInterval) {
+            this.startCursorTracking();
+        } else if (!this.hasCursorFollowingGroups && this.cursorTrackingInterval) {
+            this.stopCursorTracking();
+        }
     }
-    this.overlayWindowsByGroupId.clear();
-  }
 
-  private createOverlayWindow(group: OverlayGroup): void {
-    logger.info(LogCategory.Overlay, `Creating overlay window for group: "${group.name}" (${group.id})`);
+    private startCursorTracking(): void {
+        const cursorPollIntervalMs = 16; // ~60fps cursor tracking
+        this.cursorTrackingInterval = setInterval(() => {
+            const cursorPoint = screen.getCursorScreenPoint();
+            for (const [_groupId, window] of this.overlayWindowsByGroupId) {
+                if (!window.isDestroyed()) {
+                    window.webContents.send('overlay:cursor-position', {
+                        x: cursorPoint.x,
+                        y: cursorPoint.y,
+                    });
+                }
+            }
+        }, cursorPollIntervalMs);
+    }
 
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const displayBounds = primaryDisplay.bounds;
+    private stopCursorTracking(): void {
+        if (this.cursorTrackingInterval) {
+            clearInterval(this.cursorTrackingInterval);
+            this.cursorTrackingInterval = null;
+        }
+    }
 
-    const overlayWindow = new BrowserWindow({
-      x: displayBounds.x,
-      y: displayBounds.y,
-      width: displayBounds.width,
-      height: displayBounds.height,
-      transparent: true,
-      frame: false,
-      alwaysOnTop: true,
-      skipTaskbar: true,
-      resizable: false,
-      focusable: false,
-      hasShadow: false,
-      webPreferences: {
-        contextIsolation: false,
-        nodeIntegration: true,
-        webSecurity: false, // Allow loading local file:// images from data URL origin
-      },
-    });
+    private createOverlayWindow(group: OverlayGroup): void {
+        logger.info(LogCategory.Overlay, `Creating overlay window for group: "${group.name}" (${group.id})`);
 
-    overlayWindow.setIgnoreMouseEvents(true);
-    overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+        const primaryDisplay = screen.getPrimaryDisplay();
+        const displayBounds = primaryDisplay.bounds;
 
-    // Load inline HTML as a data URL to avoid file path issues between src/ and dist/
-    const html = buildOverlayRendererHtml();
-    overlayWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+        const overlayWindow = new BrowserWindow({
+            x: displayBounds.x,
+            y: displayBounds.y,
+            width: displayBounds.width,
+            height: displayBounds.height,
+            transparent: true,
+            frame: false,
+            alwaysOnTop: true,
+            skipTaskbar: true,
+            resizable: false,
+            focusable: false,
+            hasShadow: false,
+            webPreferences: {
+                contextIsolation: false,
+                nodeIntegration: true,
+                webSecurity: false, // Allow loading local file:// images from data URL origin
+            },
+        });
 
-    overlayWindow.webContents.once('did-finish-load', () => {
-      overlayWindow.webContents.send('overlay:init', group);
-    });
+        overlayWindow.setIgnoreMouseEvents(true);
+        overlayWindow.setAlwaysOnTop(true, 'screen-saver');
 
-    this.overlayWindowsByGroupId.set(group.id, overlayWindow);
-  }
+        // Load inline HTML as a data URL to avoid file path issues between src/ and dist/
+        const html = buildOverlayRendererHtml();
+        overlayWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+        overlayWindow.webContents.once('did-finish-load', () => {
+            overlayWindow.webContents.send('overlay:init', group);
+        });
+
+        this.overlayWindowsByGroupId.set(group.id, overlayWindow);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +166,7 @@ export class OverlayWindowManager {
 // ---------------------------------------------------------------------------
 
 function buildOverlayRendererHtml(): string {
-  return `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -162,12 +205,26 @@ function buildOverlayRendererHtml(): string {
     if (overlayGroup) evaluateRules(overlayGroup, frameState);
   });
 
+  ipcRenderer.on('overlay:cursor-position', (_event, cursor) => {
+    if (!overlayGroup) return;
+    const p = overlayGroup.position;
+    if (p.mode === 'relativeToCursor') {
+      const c = document.getElementById('overlay-container');
+      c.style.left = (cursor.x + (p.offsetX || 0)) + 'px';
+      c.style.top = (cursor.y + (p.offsetY || 0)) + 'px';
+    }
+  });
+
   function applyGroupLayout(group) {
     const c = document.getElementById('overlay-container');
     const p = group.position;
     if (p.mode === 'absolute') {
       c.style.left = p.x + 'px';
       c.style.top = p.y + 'px';
+    } else if (p.mode === 'relativeToCursor') {
+      // Initial position will be set by cursor-position events
+      c.style.left = '0px';
+      c.style.top = '0px';
     }
     const dirMap = { right: 'row', left: 'row-reverse', down: 'column', up: 'column-reverse' };
     c.style.flexDirection = dirMap[group.growDirection] || 'row';

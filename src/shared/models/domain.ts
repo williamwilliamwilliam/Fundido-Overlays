@@ -51,6 +51,8 @@ export interface GameCaptureConfig {
   captureSource: string;
   /** Target frames per second for the capture loop (1–60). */
   targetFps: number;
+  /** Whether capture should be running. Persisted so it auto-starts on next launch. */
+  captureEnabled: boolean;
 }
 
 // ---------------------------------------------------------------------------

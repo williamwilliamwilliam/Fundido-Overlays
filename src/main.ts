@@ -248,6 +248,19 @@ app.whenReady().then(() => {
 
   // Create overlay windows for any groups defined in the saved config
   overlayWindowManager.syncOverlayWindows(currentConfigRef.config.overlayGroups);
+
+  // Auto-start capture if it was running when the app last closed
+  const shouldAutoStartCapture = currentConfigRef.config.gameCapture.captureEnabled === true;
+  if (shouldAutoStartCapture) {
+    logger.info(LogCategory.General, 'Auto-starting capture (was enabled on last exit).');
+    const captureConfig = currentConfigRef.config.gameCapture;
+    captureService.start(captureConfig);
+
+    const captureSourceString = captureConfig.captureSource;
+    const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
+    previewService.setCaptureDisplayIndex(displayIndex);
+    previewService.start(currentConfigRef.config.preview);
+  }
 });
 
 app.on('window-all-closed', () => {
