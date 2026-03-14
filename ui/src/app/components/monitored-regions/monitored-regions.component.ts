@@ -63,8 +63,8 @@ import type { PreviewFrameData } from '../../models/electron-api';
             <canvas
               [id]="'preview-' + region.id"
               class="preview-canvas"
-              width="120"
-              height="80">
+              [width]="getPreviewCanvasWidth(region)"
+              [height]="getPreviewCanvasHeight(region)">
             </canvas>
             <span class="preview-label">Live preview</span>
           </div>
@@ -200,6 +200,8 @@ import type { PreviewFrameData } from '../../models/electron-api';
       border: 1px solid var(--color-border);
       border-radius: var(--radius-sm);
       background-color: #000;
+      max-width: 160px;
+      max-height: 120px;
     }
 
     .placeholder-preview {
@@ -314,6 +316,38 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     return region.bounds.width > 0 && region.bounds.height > 0;
   }
 
+  /**
+   * Computes the canvas width for a region's preview, maintaining the
+   * picked region's aspect ratio while fitting within a max bounding box.
+   */
+  getPreviewCanvasWidth(region: any): number {
+    const maxPreviewWidth = 160;
+    const maxPreviewHeight = 120;
+    const regionAspectRatio = region.bounds.width / region.bounds.height;
+
+    const widthIfConstrainedByHeight = maxPreviewHeight * regionAspectRatio;
+    const fitsWithinWidthConstraint = widthIfConstrainedByHeight <= maxPreviewWidth;
+
+    if (fitsWithinWidthConstraint) {
+      return Math.round(widthIfConstrainedByHeight);
+    }
+    return maxPreviewWidth;
+  }
+
+  getPreviewCanvasHeight(region: any): number {
+    const maxPreviewWidth = 160;
+    const maxPreviewHeight = 120;
+    const regionAspectRatio = region.bounds.width / region.bounds.height;
+
+    const heightIfConstrainedByWidth = maxPreviewWidth / regionAspectRatio;
+    const fitsWithinHeightConstraint = heightIfConstrainedByWidth <= maxPreviewHeight;
+
+    if (fitsWithinHeightConstraint) {
+      return Math.round(heightIfConstrainedByWidth);
+    }
+    return maxPreviewHeight;
+  }
+
   async pickRegion(region: any): Promise<void> {
     this.pickingRegionId = region.id;
     const result = await this.electronService.pickRegion();
@@ -359,15 +393,19 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
    * For each region, draws the corresponding cropped area of the preview
    * frame onto its canvas element.
    *
-   * Region bounds are in screen-absolute coordinates (from the picker).
-   * The captured frame covers a single display starting at (displayOriginX, displayOriginY).
-   * We subtract the display origin to get frame-relative coordinates.
+   * Coordinate conversion:
+   * 1. Region bounds are in screen-absolute logical pixels (from the picker / Electron's screen API).
+   * 2. Subtract the display's logical origin to get display-relative logical coords.
+   * 3. Multiply by the display's DPI scale factor to get physical pixel coords
+   *    (matching the DXGI capture buffer which is at native resolution).
+   * 4. Scale from native capture resolution to the downsampled preview image.
    */
   private renderAllRegionPreviews(): void {
     if (!this.previewImage || !this.latestPreviewFrame) return;
 
     const displayOriginX = this.latestPreviewFrame.displayOriginX || 0;
     const displayOriginY = this.latestPreviewFrame.displayOriginY || 0;
+    const dpiScaleFactor = this.latestPreviewFrame.displayScaleFactor || 1;
 
     for (const region of this.regions) {
       const hasNoBounds = region.bounds.width <= 0 || region.bounds.height <= 0;
@@ -379,18 +417,24 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       const context = canvas.getContext('2d');
       if (!context) continue;
 
-      // Convert screen-absolute bounds to frame-relative coordinates
-      const frameRelativeX = region.bounds.x - displayOriginX;
-      const frameRelativeY = region.bounds.y - displayOriginY;
+      // Step 1-2: Convert screen-absolute logical coords to display-relative logical coords
+      const displayRelativeLogicalX = region.bounds.x - displayOriginX;
+      const displayRelativeLogicalY = region.bounds.y - displayOriginY;
 
-      // Scale from original capture resolution to the downsampled preview image
-      const scaleX = this.previewImage.naturalWidth / this.latestPreviewFrame.originalWidth;
-      const scaleY = this.previewImage.naturalHeight / this.latestPreviewFrame.originalHeight;
+      // Step 3: Convert logical coords to physical (native) pixel coords
+      const physicalX = displayRelativeLogicalX * dpiScaleFactor;
+      const physicalY = displayRelativeLogicalY * dpiScaleFactor;
+      const physicalWidth = region.bounds.width * dpiScaleFactor;
+      const physicalHeight = region.bounds.height * dpiScaleFactor;
 
-      const sourceX = frameRelativeX * scaleX;
-      const sourceY = frameRelativeY * scaleY;
-      const sourceWidth = region.bounds.width * scaleX;
-      const sourceHeight = region.bounds.height * scaleY;
+      // Step 4: Scale from native capture resolution to the downsampled preview image
+      const previewScaleX = this.previewImage.naturalWidth / this.latestPreviewFrame.originalWidth;
+      const previewScaleY = this.previewImage.naturalHeight / this.latestPreviewFrame.originalHeight;
+
+      const sourceX = physicalX * previewScaleX;
+      const sourceY = physicalY * previewScaleY;
+      const sourceWidth = physicalWidth * previewScaleX;
+      const sourceHeight = physicalHeight * previewScaleY;
 
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(

@@ -27,6 +27,7 @@ export interface PreviewFrameData {
   previewHeight: number;
   displayOriginX: number;
   displayOriginY: number;
+  displayScaleFactor: number;
 }
 
 export interface FundidoApi {

@@ -17,6 +17,7 @@ export class PreviewFrameService {
   private isRunning = false;
   private displayOriginX = 0;
   private displayOriginY = 0;
+  private displayScaleFactor = 1;
 
   public setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
@@ -24,21 +25,30 @@ export class PreviewFrameService {
 
   /**
    * Sets which display is being captured so we can include its screen
-   * origin in the preview frame data. This lets the UI convert between
-   * screen-absolute coordinates (from the picker) and frame-relative
-   * coordinates (for cropping the preview).
+   * origin and DPI scale factor in the preview frame data.
+   *
+   * This lets the UI convert between screen-absolute coordinates (from
+   * the picker, which are in DPI-scaled logical pixels) and frame-relative
+   * coordinates (which are in native physical pixels, since DXGI captures
+   * at native resolution).
    */
   public setCaptureDisplayIndex(displayIndex: number): void {
     const allDisplays = screen.getAllDisplays();
     const isValidIndex = displayIndex >= 0 && displayIndex < allDisplays.length;
     if (isValidIndex) {
-      this.displayOriginX = allDisplays[displayIndex].bounds.x;
-      this.displayOriginY = allDisplays[displayIndex].bounds.y;
+      const display = allDisplays[displayIndex];
+      this.displayOriginX = display.bounds.x;
+      this.displayOriginY = display.bounds.y;
+      this.displayScaleFactor = display.scaleFactor || 1;
     } else {
       this.displayOriginX = 0;
       this.displayOriginY = 0;
+      this.displayScaleFactor = 1;
     }
-    logger.debug(LogCategory.Capture, `Display origin set to (${this.displayOriginX}, ${this.displayOriginY})`);
+    logger.info(
+      LogCategory.Capture,
+      `Display origin: (${this.displayOriginX}, ${this.displayOriginY}), scaleFactor: ${this.displayScaleFactor}`
+    );
   }
 
   /**
@@ -104,6 +114,7 @@ export class PreviewFrameService {
       previewHeight: downsampled.height,
       displayOriginX: this.displayOriginX,
       displayOriginY: this.displayOriginY,
+      displayScaleFactor: this.displayScaleFactor,
     });
   }
 
