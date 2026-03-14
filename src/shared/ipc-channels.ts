@@ -28,6 +28,7 @@ export const CAPTURE_LIST_DISPLAYS = 'capture:list-displays';
 // State calculation
 // ---------------------------------------------------------------------------
 export const STATE_UPDATED = 'state:updated';
+export const REGIONS_SET_WORKING = 'regions:set-working';
 
 // ---------------------------------------------------------------------------
 // Overlay management

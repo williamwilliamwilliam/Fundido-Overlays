@@ -29,6 +29,7 @@ const IPC = {
   CAPTURE_LIST_DISPLAYS:       'capture:list-displays',
   CAPTURE_PREVIEW_FRAME:       'capture:preview-frame',
   STATE_UPDATED:               'state:updated',
+  REGIONS_SET_WORKING:         'regions:set-working',
   DEBUG_LOG:                   'debug:log',
   PICKER_START:                'picker:start',
   PICKER_REGION_UPDATE:        'picker:region-update',
@@ -74,6 +75,10 @@ const fundidoApi = {
   // -- Screen picker --------------------------------------------------------
   pickRegion: (): Promise<{ x: number; y: number; width: number; height: number } | null> =>
     ipcRenderer.invoke(IPC.PICKER_START),
+
+  // -- Working regions (live evaluation without saving) ---------------------
+  setWorkingRegions: (regions: any[]): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC.REGIONS_SET_WORKING, regions),
 
   onPickerRegionUpdate: (callback: (region: { x: number; y: number; width: number; height: number }) => void): void => {
     ipcRenderer.on(IPC.PICKER_REGION_UPDATE, (_event, region) => {

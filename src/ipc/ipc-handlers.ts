@@ -17,7 +17,8 @@ export function registerIpcHandlers(
   configService: ConfigPersistenceService,
   captureService: GameCaptureService,
   previewService: PreviewFrameService,
-  currentConfigRef: { config: FundidoConfig }
+  currentConfigRef: { config: FundidoConfig },
+  workingRegionsRef: { regions: any[] | null }
 ): void {
 
   // -------------------------------------------------------------------------
@@ -133,5 +134,14 @@ export function registerIpcHandlers(
 
     const result = await pickScreenRegion(onRegionUpdate);
     return result;
+  });
+
+  // -------------------------------------------------------------------------
+  // Working Regions (unsaved, for live evaluation)
+  // -------------------------------------------------------------------------
+
+  ipcMain.handle(IpcChannels.REGIONS_SET_WORKING, (_event: IpcMainInvokeEvent, regions: any[] | null) => {
+    workingRegionsRef.regions = regions;
+    return { success: true };
   });
 }

@@ -24,6 +24,16 @@ const currentConfigRef: { config: FundidoConfig } = {
   config: configService.load(),
 };
 
+/**
+ * Working copy of monitored regions pushed from the UI.
+ * The evaluation pipeline uses these instead of the persisted config
+ * so users can see median colors and state results while still editing.
+ * Set to null when no working copy has been pushed (falls back to saved config).
+ */
+const workingRegionsRef: { regions: any[] | null } = {
+  regions: null,
+};
+
 // ---------------------------------------------------------------------------
 // Main window
 // ---------------------------------------------------------------------------
@@ -72,8 +82,9 @@ function setupCaptureToOverlayPipeline(): void {
     // Feed frame to preview service (it picks up the latest at its own FPS)
     previewService.onFrameCaptured(frame);
 
-    // Evaluate state for monitored regions
-    const monitoredRegions = currentConfigRef.config.monitoredRegions;
+    // Use working regions from the UI if available, otherwise fall back to saved config.
+    // This lets the UI see median colors and state results for unsaved regions.
+    const monitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions;
 
     const hasNoRegionsToEvaluate = monitoredRegions.length === 0;
     if (hasNoRegionsToEvaluate) {
@@ -120,7 +131,7 @@ function setupCaptureToOverlayPipeline(): void {
 app.whenReady().then(() => {
   logger.info(LogCategory.General, 'Fundido Overlays starting up.');
 
-  registerIpcHandlers(configService, captureService, previewService, currentConfigRef);
+  registerIpcHandlers(configService, captureService, previewService, currentConfigRef, workingRegionsRef);
   createMainWindow();
   setupCaptureToOverlayPipeline();
 

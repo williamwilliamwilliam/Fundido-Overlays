@@ -494,6 +494,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   async ngOnInit(): Promise<void> {
     const config = await this.electronService.loadConfig();
     this.regions = config.monitoredRegions || [];
+    this.pushWorkingRegions();
 
     this.previewSubscription = this.electronService.previewFrameStream.subscribe((frame) => {
       this.latestPreviewFrame = frame;
@@ -508,6 +509,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
         pickingRegion.bounds.y = region.y;
         pickingRegion.bounds.width = region.width;
         pickingRegion.bounds.height = region.height;
+        this.pushWorkingRegions();
       }
     });
 
@@ -520,6 +522,8 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     this.previewSubscription?.unsubscribe();
     this.pickerUpdateSubscription?.unsubscribe();
     this.stateSubscription?.unsubscribe();
+    // Clear working regions so the pipeline falls back to saved config
+    this.electronService.setWorkingRegions(null as any);
   }
 
   // ---------------------------------------------------------------------------
@@ -534,10 +538,12 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       stateCalculations: [],
     };
     this.regions.push(newRegion);
+    this.pushWorkingRegions();
   }
 
   removeRegion(index: number): void {
     this.regions.splice(index, 1);
+    this.pushWorkingRegions();
   }
 
   hasValidBounds(region: any): boolean {
@@ -556,10 +562,12 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       colorStateMappings: [],
     };
     region.stateCalculations.push(newCalc);
+    this.pushWorkingRegions();
   }
 
   removeStateCalculation(region: any, index: number): void {
     region.stateCalculations.splice(index, 1);
+    this.pushWorkingRegions();
   }
 
   addMapping(calc: any): void {
@@ -567,16 +575,19 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       color: { red: 0, green: 0, blue: 0 },
       stateValue: '',
     });
+    this.pushWorkingRegions();
   }
 
   removeMapping(calc: any, index: number): void {
     calc.colorStateMappings.splice(index, 1);
+    this.pushWorkingRegions();
   }
 
   onMappingColorChanged(mapping: any, hexValue: string): void {
     const rgb = hexToRgb(hexValue);
     if (rgb) {
       mapping.color = rgb;
+      this.pushWorkingRegions();
     }
   }
 
@@ -588,6 +599,15 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     const config = await this.electronService.loadConfig();
     config.monitoredRegions = this.regions;
     await this.electronService.saveConfig(config);
+    this.pushWorkingRegions();
+  }
+
+  /**
+   * Pushes the current in-memory regions to the backend so the evaluation
+   * pipeline uses them immediately, without requiring a save first.
+   */
+  private pushWorkingRegions(): void {
+    this.electronService.setWorkingRegions(this.regions);
   }
 
   // ---------------------------------------------------------------------------
@@ -654,6 +674,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       region.bounds.y = result.y;
       region.bounds.width = result.width;
       region.bounds.height = result.height;
+      this.pushWorkingRegions();
     }
 
     this.pickingRegionId = null;
@@ -675,6 +696,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       this.regions = config.monitoredRegions || [];
       this.showImportDialog = false;
       this.importJsonText = '';
+      this.pushWorkingRegions();
     }
   }
 

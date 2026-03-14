@@ -109,6 +109,13 @@ export class ElectronService {
     return window.fundidoApi.pickRegion();
   }
 
+  // -- Working regions (live evaluation) ------------------------------------
+
+  public async setWorkingRegions(regions: any[]): Promise<void> {
+    if (!this.isRunningInElectron) return;
+    await window.fundidoApi.setWorkingRegions(regions);
+  }
+
   // -- IPC listeners --------------------------------------------------------
 
   private registerIpcListeners(): void {
