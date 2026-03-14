@@ -101,9 +101,12 @@ export class ElectronService {
 
   // -- Screen picker --------------------------------------------------------
 
-  public async pickPosition(): Promise<{ x: number; y: number } | null> {
+  private readonly pickerRegionUpdate$ = new Subject<{ x: number; y: number; width: number; height: number }>();
+  public readonly pickerRegionUpdateStream = this.pickerRegionUpdate$.asObservable();
+
+  public async pickRegion(): Promise<{ x: number; y: number; width: number; height: number } | null> {
     if (!this.isRunningInElectron) return null;
-    return window.fundidoApi.pickPosition();
+    return window.fundidoApi.pickRegion();
   }
 
   // -- IPC listeners --------------------------------------------------------
@@ -111,6 +114,10 @@ export class ElectronService {
   private registerIpcListeners(): void {
     window.fundidoApi.onDebugLog((entry: LogEntry) => {
       this.ngZone.run(() => this.debugLog$.next(entry));
+    });
+
+    window.fundidoApi.onPickerRegionUpdate((region) => {
+      this.ngZone.run(() => this.pickerRegionUpdate$.next(region));
     });
 
     window.fundidoApi.onStateUpdated((frameState: any) => {

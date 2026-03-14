@@ -30,7 +30,8 @@ const IPC = {
   CAPTURE_PREVIEW_FRAME:       'capture:preview-frame',
   STATE_UPDATED:               'state:updated',
   DEBUG_LOG:                   'debug:log',
-  PICKER_PICK_POSITION:        'picker:pick-position',
+  PICKER_START:                'picker:start',
+  PICKER_REGION_UPDATE:        'picker:region-update',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -71,8 +72,14 @@ const fundidoApi = {
     ipcRenderer.invoke(IPC.CAPTURE_LIST_DISPLAYS),
 
   // -- Screen picker --------------------------------------------------------
-  pickPosition: (): Promise<{ x: number; y: number } | null> =>
-    ipcRenderer.invoke(IPC.PICKER_PICK_POSITION),
+  pickRegion: (): Promise<{ x: number; y: number; width: number; height: number } | null> =>
+    ipcRenderer.invoke(IPC.PICKER_START),
+
+  onPickerRegionUpdate: (callback: (region: { x: number; y: number; width: number; height: number }) => void): void => {
+    ipcRenderer.on(IPC.PICKER_REGION_UPDATE, (_event, region) => {
+      callback(region);
+    });
+  },
 
   // -- Debug log listener ---------------------------------------------------
   onDebugLog: (callback: (entry: any) => void): void => {

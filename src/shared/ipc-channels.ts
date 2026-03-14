@@ -39,7 +39,10 @@ export const OVERLAY_UPDATE = 'overlay:update';
 // ---------------------------------------------------------------------------
 // Screen picker
 // ---------------------------------------------------------------------------
-export const PICKER_PICK_POSITION = 'picker:pick-position';
+export const PICKER_START = 'picker:start';
+export const PICKER_REGION_UPDATE = 'picker:region-update';
+export const PICKER_CONFIRM = 'picker:confirm';
+export const PICKER_CANCEL = 'picker:cancel';
 
 // ---------------------------------------------------------------------------
 // Debug logging

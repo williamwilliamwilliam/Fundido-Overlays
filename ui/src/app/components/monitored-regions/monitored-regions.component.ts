@@ -1,7 +1,9 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Subscription } from 'rxjs';
 import { ElectronService } from '../../services/electron.service';
+import type { PreviewFrameData } from '../../models/electron-api';
 
 @Component({
   selector: 'app-monitored-regions',
@@ -42,26 +44,45 @@ import { ElectronService } from '../../services/electron.service';
           <input [(ngModel)]="region.name" placeholder="Region name" class="name-input" />
           <button class="danger-text" (click)="removeRegion(regionIndex)">Remove</button>
         </div>
-        <div class="region-bounds">
-          <label>X <input type="number" [(ngModel)]="region.bounds.x" /></label>
-          <label>Y <input type="number" [(ngModel)]="region.bounds.y" /></label>
-          <button class="pick-btn" (click)="pickPosition(region)" title="Click a point on screen to set X, Y">
-            {{ pickingRegionId === region.id ? 'Picking...' : 'Pick XY' }}
-          </button>
-          <label>W <input type="number" [(ngModel)]="region.bounds.width" /></label>
-          <label>H <input type="number" [(ngModel)]="region.bounds.height" /></label>
+
+        <div class="region-bounds-row">
+          <div class="region-bounds">
+            <label>X <input type="number" [(ngModel)]="region.bounds.x" /></label>
+            <label>Y <input type="number" [(ngModel)]="region.bounds.y" /></label>
+            <label>W <input type="number" [(ngModel)]="region.bounds.width" /></label>
+            <label>H <input type="number" [(ngModel)]="region.bounds.height" /></label>
+            <button
+              class="pick-btn"
+              (click)="pickRegion(region)"
+              [disabled]="pickingRegionId !== null">
+              {{ pickingRegionId === region.id ? 'Picking...' : 'Pick Region' }}
+            </button>
+          </div>
+
+          <div class="region-preview" *ngIf="hasValidBounds(region) && latestPreviewFrame">
+            <canvas
+              [id]="'preview-' + region.id"
+              class="preview-canvas"
+              width="120"
+              height="80">
+            </canvas>
+            <span class="preview-label">Live preview</span>
+          </div>
+          <div class="region-preview placeholder-preview" *ngIf="!latestPreviewFrame || !hasValidBounds(region)">
+            <span class="preview-label">{{ !latestPreviewFrame ? 'Start capture for preview' : 'Set bounds' }}</span>
+          </div>
         </div>
+
         <p class="section-label">State Calculations</p>
         <div *ngFor="let calc of region.stateCalculations; let calcIndex = index" class="calc-card">
           <input [(ngModel)]="calc.name" placeholder="Calculation name" class="name-input" />
           <span class="calc-type">{{ calc.type }}</span>
-          <!-- Color-state mappings would be edited here -->
         </div>
       </div>
     </div>
   `,
   styles: [`
-    .page { max-width: 900px; }
+    .page { max-width: 1000px; }
     h2 { margin-bottom: var(--spacing-sm); }
     .description { color: var(--color-text-secondary); margin-bottom: var(--spacing-lg); }
 
@@ -122,10 +143,18 @@ import { ElectronService } from '../../services/electron.service';
 
     .name-input:focus { border-color: var(--color-accent); }
 
+    .region-bounds-row {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--spacing-lg);
+      margin-bottom: var(--spacing-md);
+    }
+
     .region-bounds {
       display: flex;
       gap: var(--spacing-md);
-      margin-bottom: var(--spacing-md);
+      align-items: center;
+      flex-wrap: wrap;
     }
 
     .region-bounds label {
@@ -140,7 +169,7 @@ import { ElectronService } from '../../services/electron.service';
 
     .pick-btn {
       font-size: 0.8rem;
-      padding: 2px 10px;
+      padding: 4px 12px;
       background-color: var(--color-bg-panel);
       border: 1px solid var(--color-accent);
       color: var(--color-accent);
@@ -148,9 +177,45 @@ import { ElectronService } from '../../services/electron.service';
       white-space: nowrap;
     }
 
-    .pick-btn:hover {
+    .pick-btn:hover:not(:disabled) {
       background-color: var(--color-accent);
       color: var(--color-text-primary);
+    }
+
+    .pick-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .region-preview {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    .preview-canvas {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background-color: #000;
+    }
+
+    .placeholder-preview {
+      width: 120px;
+      height: 80px;
+      border: 1px dashed var(--color-border);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .preview-label {
+      font-size: 0.7rem;
+      color: var(--color-text-secondary);
+      text-align: center;
     }
 
     .section-label {
@@ -190,17 +255,45 @@ import { ElectronService } from '../../services/electron.service';
     .danger-text:hover { text-decoration: underline; }
   `],
 })
-export class MonitoredRegionsComponent implements OnInit {
+export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   regions: any[] = [];
   showImportDialog = false;
   importJsonText = '';
   pickingRegionId: string | null = null;
+  latestPreviewFrame: PreviewFrameData | null = null;
+
+  private previewSubscription: Subscription | null = null;
+  private pickerUpdateSubscription: Subscription | null = null;
+  private previewImage: HTMLImageElement | null = null;
 
   constructor(private readonly electronService: ElectronService) {}
 
   async ngOnInit(): Promise<void> {
     const config = await this.electronService.loadConfig();
     this.regions = config.monitoredRegions || [];
+
+    // Subscribe to preview frames for rendering region thumbnails
+    this.previewSubscription = this.electronService.previewFrameStream.subscribe((frame) => {
+      this.latestPreviewFrame = frame;
+      this.updatePreviewImage(frame);
+      this.renderAllRegionPreviews();
+    });
+
+    // Subscribe to live picker region updates
+    this.pickerUpdateSubscription = this.electronService.pickerRegionUpdateStream.subscribe((region) => {
+      const pickingRegion = this.regions.find((r: any) => r.id === this.pickingRegionId);
+      if (pickingRegion) {
+        pickingRegion.bounds.x = region.x;
+        pickingRegion.bounds.y = region.y;
+        pickingRegion.bounds.width = region.width;
+        pickingRegion.bounds.height = region.height;
+      }
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.previewSubscription?.unsubscribe();
+    this.pickerUpdateSubscription?.unsubscribe();
   }
 
   addRegion(): void {
@@ -217,13 +310,19 @@ export class MonitoredRegionsComponent implements OnInit {
     this.regions.splice(index, 1);
   }
 
-  async pickPosition(region: any): Promise<void> {
+  hasValidBounds(region: any): boolean {
+    return region.bounds.width > 0 && region.bounds.height > 0;
+  }
+
+  async pickRegion(region: any): Promise<void> {
     this.pickingRegionId = region.id;
-    const result = await this.electronService.pickPosition();
+    const result = await this.electronService.pickRegion();
 
     if (result !== null) {
       region.bounds.x = result.x;
       region.bounds.y = result.y;
+      region.bounds.width = result.width;
+      region.bounds.height = result.height;
     }
 
     this.pickingRegionId = null;
@@ -232,7 +331,6 @@ export class MonitoredRegionsComponent implements OnInit {
   async exportRegions(): Promise<void> {
     const json = await this.electronService.exportRegions();
     await navigator.clipboard.writeText(json);
-    // TODO: Show a toast notification
   }
 
   async importRegions(): Promise<void> {
@@ -242,6 +340,53 @@ export class MonitoredRegionsComponent implements OnInit {
       this.regions = config.monitoredRegions || [];
       this.showImportDialog = false;
       this.importJsonText = '';
+    }
+  }
+
+  /**
+   * Keeps an in-memory Image object loaded with the latest preview frame
+   * so we can draw cropped regions from it onto canvases.
+   */
+  private updatePreviewImage(frame: PreviewFrameData): void {
+    const image = new Image();
+    image.onload = () => {
+      this.previewImage = image;
+    };
+    image.src = frame.imageDataUrl;
+  }
+
+  /**
+   * For each region, draws the corresponding cropped area of the preview
+   * frame onto its canvas element.
+   */
+  private renderAllRegionPreviews(): void {
+    if (!this.previewImage || !this.latestPreviewFrame) return;
+
+    for (const region of this.regions) {
+      const hasNoBounds = region.bounds.width <= 0 || region.bounds.height <= 0;
+      if (hasNoBounds) continue;
+
+      const canvas = document.getElementById('preview-' + region.id) as HTMLCanvasElement;
+      if (!canvas) continue;
+
+      const context = canvas.getContext('2d');
+      if (!context) continue;
+
+      // Map screen coordinates to preview image coordinates
+      const scaleX = this.previewImage.naturalWidth / this.latestPreviewFrame.originalWidth;
+      const scaleY = this.previewImage.naturalHeight / this.latestPreviewFrame.originalHeight;
+
+      const sourceX = region.bounds.x * scaleX;
+      const sourceY = region.bounds.y * scaleY;
+      const sourceWidth = region.bounds.width * scaleX;
+      const sourceHeight = region.bounds.height * scaleY;
+
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(
+        this.previewImage,
+        sourceX, sourceY, sourceWidth, sourceHeight,
+        0, 0, canvas.width, canvas.height
+      );
     }
   }
 }

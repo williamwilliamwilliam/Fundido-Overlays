@@ -1,4 +1,4 @@
-import { ipcMain, IpcMainInvokeEvent } from 'electron';
+import { ipcMain, IpcMainInvokeEvent, BrowserWindow } from 'electron';
 import * as IpcChannels from '../shared/ipc-channels';
 import { FundidoConfig, MonitoredRegion, OverlayGroup } from '../shared';
 import { ConfigPersistenceService } from '../persistence/config-persistence.service';
@@ -109,13 +109,22 @@ export function registerIpcHandlers(
   });
 
   // -------------------------------------------------------------------------
-  // Screen Position Picker
+  // Screen Region Picker
   // -------------------------------------------------------------------------
 
-  ipcMain.handle(IpcChannels.PICKER_PICK_POSITION, async (_event: IpcMainInvokeEvent) => {
-    logger.debug(LogCategory.Ipc, 'PICKER_PICK_POSITION invoked');
-    const { pickScreenPosition } = require('../picker/screen-position-picker');
-    const result = await pickScreenPosition();
+  ipcMain.handle(IpcChannels.PICKER_START, async (_event: IpcMainInvokeEvent) => {
+    logger.debug(LogCategory.Ipc, 'PICKER_START invoked');
+    const { pickScreenRegion } = require('../picker/screen-position-picker');
+
+    // Forward live region updates to the renderer so the UI can show a preview
+    const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const onRegionUpdate = (region: any) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IpcChannels.PICKER_REGION_UPDATE, region);
+      }
+    };
+
+    const result = await pickScreenRegion(onRegionUpdate);
     return result;
   });
 }
