@@ -166,6 +166,8 @@ import { ElectronService } from '../../services/electron.service';
                                 </select>
                             </label>
                             <label>Scale <input type="number" step="0.1" [(ngModel)]="overlay.regionMirrorConfig.size.scale" (ngModelChange)="onFieldChanged()" style="width:60px" /></label>
+                            <label>Max W <input type="number" [(ngModel)]="overlay.regionMirrorConfig.size.maxWidth" (ngModelChange)="onFieldChanged()" style="width:60px" /></label>
+                            <label>Max H <input type="number" [(ngModel)]="overlay.regionMirrorConfig.size.maxHeight" (ngModelChange)="onFieldChanged()" style="width:60px" /></label>
                         </div>
                     </div>
 
@@ -399,7 +401,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
         this.groups.push({
             id: crypto.randomUUID(), name: 'New Group',
             position: { mode: 'absolute', x: 100, y: 100 },
-            growDirection: 'right', alignment: 'start', gap: 4, overlays: [],
+            growDirection: 'right', alignment: 'start', gap: 0, overlays: [],
         });
         this.hasUnsavedChanges = true;
     }
