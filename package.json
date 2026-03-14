@@ -4,7 +4,7 @@
   "description": "Game overlay tool that captures frames, evaluates screen regions, and displays responsive overlays.",
   "main": "dist/electron/main.js",
   "scripts": {
-    "postinstall": "cd ui && npm install && cd ../native && npx node-gyp rebuild --msvs_version=2022",
+    "postinstall": "cd ui && npm install && cd ../native && npm install",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build:angular": "cd ui && ng build --configuration production",
     "build:native": "cd native && npx node-gyp rebuild --msvs_version=2022",
@@ -22,7 +22,6 @@
     "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "@types/jest": "^30.0.0",
     "@types/node": "^20.11.0",
     "@types/uuid": "^9.0.7",
     "concurrently": "^8.2.0",
@@ -30,6 +29,7 @@
     "electron-builder": "^24.9.0",
     "eslint": "^8.56.0",
     "jest": "^29.7.0",
+    "node-gyp": "^10.3.0",
     "ts-jest": "^29.1.0",
     "typescript": "^5.3.0",
     "wait-on": "^7.2.0"
