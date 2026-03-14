@@ -19,6 +19,14 @@ export interface DisplayInfo {
   height: number;
 }
 
+export interface PreviewFrameData {
+  imageDataUrl: string;
+  originalWidth: number;
+  originalHeight: number;
+  previewWidth: number;
+  previewHeight: number;
+}
+
 export interface FundidoApi {
   loadConfig(): Promise<any>;
   saveConfig(config: any): Promise<{ success: boolean }>;
@@ -32,6 +40,7 @@ export interface FundidoApi {
   listDisplays(): Promise<DisplayInfo[]>;
   onDebugLog(callback: (entry: LogEntry) => void): void;
   onStateUpdated(callback: (frameState: any) => void): void;
+  onPreviewFrame(callback: (previewData: PreviewFrameData) => void): void;
 }
 
 declare global {

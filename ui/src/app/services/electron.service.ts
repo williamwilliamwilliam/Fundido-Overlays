@@ -1,10 +1,11 @@
 import { Injectable, NgZone } from '@angular/core';
 import { Subject } from 'rxjs';
-import type { LogEntry } from '../models/electron-api';
+import type { LogEntry, PreviewFrameData } from '../models/electron-api';
 
 /** Default config returned when running outside Electron (e.g. ng serve in a browser). */
 const STUB_CONFIG = {
   gameCapture: { captureSource: 'primary', targetFps: 30 },
+  preview: { previewFps: 10, previewScale: 0.5, downsampleMethod: 'bilinear', jpegQuality: 70 },
   monitoredRegions: [],
   overlayGroups: [],
 };
@@ -24,9 +25,11 @@ const STUB_CONFIG = {
 export class ElectronService {
   private readonly debugLog$ = new Subject<LogEntry>();
   private readonly stateUpdated$ = new Subject<any>();
+  private readonly previewFrame$ = new Subject<PreviewFrameData>();
 
   public readonly debugLogStream = this.debugLog$.asObservable();
   public readonly stateUpdateStream = this.stateUpdated$.asObservable();
+  public readonly previewFrameStream = this.previewFrame$.asObservable();
 
   public readonly isRunningInElectron: boolean;
 
@@ -105,6 +108,10 @@ export class ElectronService {
 
     window.fundidoApi.onStateUpdated((frameState: any) => {
       this.ngZone.run(() => this.stateUpdated$.next(frameState));
+    });
+
+    window.fundidoApi.onPreviewFrame((previewData: PreviewFrameData) => {
+      this.ngZone.run(() => this.previewFrame$.next(previewData));
     });
   }
 }

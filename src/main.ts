@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron';
 import * as path from 'path';
 import { ConfigPersistenceService } from './persistence/config-persistence.service';
 import { GameCaptureService } from './capture/game-capture.service';
+import { PreviewFrameService } from './capture/preview-frame.service';
 import { OverlayWindowManager } from './overlay/overlay-window-manager';
 import { evaluateFrameState } from './state/state-calculation.service';
 import { registerIpcHandlers } from './ipc/ipc-handlers';
@@ -15,11 +16,12 @@ import * as IpcChannels from './shared/ipc-channels';
 
 const configService = new ConfigPersistenceService();
 const captureService = new GameCaptureService();
+const previewService = new PreviewFrameService();
 const overlayWindowManager = new OverlayWindowManager();
 
 /** Mutable reference so IPC handlers can read/write the active config. */
 const currentConfigRef: { config: FundidoConfig } = {
-    config: configService.load(),
+  config: configService.load(),
 };
 
 // ---------------------------------------------------------------------------
@@ -29,60 +31,65 @@ const currentConfigRef: { config: FundidoConfig } = {
 let mainWindow: BrowserWindow | null = null;
 
 function createMainWindow(): void {
-    const isDevelopmentMode = process.argv.includes('--dev');
+  const isDevelopmentMode = process.argv.includes('--dev');
 
-    mainWindow = new BrowserWindow({
-        width: 1280,
-        height: 800,
-        title: 'Fundido Overlays',
-        webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
-            contextIsolation: true,
-            nodeIntegration: false,
-        },
-    });
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    title: 'Fundido Overlays',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
 
-    logger.setMainWindow(mainWindow);
+  logger.setMainWindow(mainWindow);
+  previewService.setMainWindow(mainWindow);
 
-    if (isDevelopmentMode) {
-        const angularDevServerUrl = 'http://localhost:4241';
-        mainWindow.loadURL(angularDevServerUrl);
-        mainWindow.webContents.openDevTools();
-        logger.info(LogCategory.General, `Dev mode — loading Angular from ${angularDevServerUrl}`);
-    } else {
-        const angularDistPath = path.join(__dirname, '..', 'dist', 'ui', 'browser', 'index.html');
-        mainWindow.loadFile(angularDistPath);
-        logger.info(LogCategory.General, 'Production mode — loading bundled Angular app.');
-    }
+  if (isDevelopmentMode) {
+    const angularDevServerUrl = 'http://localhost:4241';
+    mainWindow.loadURL(angularDevServerUrl);
+    mainWindow.webContents.openDevTools();
+    logger.info(LogCategory.General, `Dev mode — loading Angular from ${angularDevServerUrl}`);
+  } else {
+    const angularDistPath = path.join(__dirname, '..', 'dist', 'ui', 'browser', 'index.html');
+    mainWindow.loadFile(angularDistPath);
+    logger.info(LogCategory.General, 'Production mode — loading bundled Angular app.');
+  }
 
-    mainWindow.on('closed', () => {
-        mainWindow = null;
-    });
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
 // ---------------------------------------------------------------------------
-// Capture → State → Overlay pipeline
+// Capture → Preview + State → Overlay pipeline
 // ---------------------------------------------------------------------------
 
 function setupCaptureToOverlayPipeline(): void {
-    captureService.setFrameCapturedCallback((frame) => {
-        const monitoredRegions = currentConfigRef.config.monitoredRegions;
+  captureService.setFrameCapturedCallback((frame) => {
+    // Feed frame to preview service (it picks up the latest at its own FPS)
+    previewService.onFrameCaptured(frame);
 
-        const hasNoRegionsToEvaluate = monitoredRegions.length === 0;
-        if (hasNoRegionsToEvaluate) {
-            return;
-        }
+    // Evaluate state for monitored regions
+    const monitoredRegions = currentConfigRef.config.monitoredRegions;
 
-        const frameState = evaluateFrameState(frame, monitoredRegions);
+    const hasNoRegionsToEvaluate = monitoredRegions.length === 0;
+    if (hasNoRegionsToEvaluate) {
+      return;
+    }
 
-        // Push state to overlay windows
-        overlayWindowManager.broadcastFrameState(frameState);
+    const frameState = evaluateFrameState(frame, monitoredRegions);
 
-        // Push state to the Angular UI for the debug console / live preview
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send(IpcChannels.STATE_UPDATED, frameState);
-        }
-    });
+    // Push state to overlay windows
+    overlayWindowManager.broadcastFrameState(frameState);
+
+    // Push state to the Angular UI for the debug console / live preview
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IpcChannels.STATE_UPDATED, frameState);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -90,24 +97,25 @@ function setupCaptureToOverlayPipeline(): void {
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(() => {
-    logger.info(LogCategory.General, 'Fundido Overlays starting up.');
+  logger.info(LogCategory.General, 'Fundido Overlays starting up.');
 
-    registerIpcHandlers(configService, captureService, currentConfigRef);
-    createMainWindow();
-    setupCaptureToOverlayPipeline();
+  registerIpcHandlers(configService, captureService, previewService, currentConfigRef);
+  createMainWindow();
+  setupCaptureToOverlayPipeline();
 
-    // Create overlay windows for any groups defined in the saved config
-    overlayWindowManager.syncOverlayWindows(currentConfigRef.config.overlayGroups);
+  // Create overlay windows for any groups defined in the saved config
+  overlayWindowManager.syncOverlayWindows(currentConfigRef.config.overlayGroups);
 });
 
 app.on('window-all-closed', () => {
-    logger.info(LogCategory.General, 'All windows closed — shutting down.');
-    captureService.stop();
-    overlayWindowManager.closeAll();
-    app.quit();
+  logger.info(LogCategory.General, 'All windows closed — shutting down.');
+  captureService.stop();
+  previewService.stop();
+  overlayWindowManager.closeAll();
+  app.quit();
 });
 
 app.on('before-quit', () => {
-    configService.save(currentConfigRef.config);
-    logger.info(LogCategory.General, 'Configuration saved on exit.');
+  configService.save(currentConfigRef.config);
+  logger.info(LogCategory.General, 'Configuration saved on exit.');
 });

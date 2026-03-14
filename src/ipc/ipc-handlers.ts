@@ -3,6 +3,7 @@ import * as IpcChannels from '../shared/ipc-channels';
 import { FundidoConfig, MonitoredRegion, OverlayGroup } from '../shared';
 import { ConfigPersistenceService } from '../persistence/config-persistence.service';
 import { GameCaptureService } from '../capture/game-capture.service';
+import { PreviewFrameService } from '../capture/preview-frame.service';
 import { logger, LogCategory } from '../shared/logger';
 
 /**
@@ -15,6 +16,7 @@ import { logger, LogCategory } from '../shared/logger';
 export function registerIpcHandlers(
   configService: ConfigPersistenceService,
   captureService: GameCaptureService,
+  previewService: PreviewFrameService,
   currentConfigRef: { config: FundidoConfig }
 ): void {
 
@@ -83,12 +85,14 @@ export function registerIpcHandlers(
   ipcMain.handle(IpcChannels.CAPTURE_START, (_event: IpcMainInvokeEvent) => {
     logger.debug(LogCategory.Ipc, 'CAPTURE_START invoked');
     captureService.start(currentConfigRef.config.gameCapture);
+    previewService.start(currentConfigRef.config.preview);
     return { success: true };
   });
 
   ipcMain.handle(IpcChannels.CAPTURE_STOP, (_event: IpcMainInvokeEvent) => {
     logger.debug(LogCategory.Ipc, 'CAPTURE_STOP invoked');
     captureService.stop();
+    previewService.stop();
     return { success: true };
   });
 

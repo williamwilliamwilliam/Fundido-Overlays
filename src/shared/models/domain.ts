@@ -49,8 +49,25 @@ export interface RgbColor {
 export interface GameCaptureConfig {
   /** Display index or window title to capture. */
   captureSource: string;
-  /** Target frames per second for the capture loop. */
+  /** Target frames per second for the capture loop (1–60). */
   targetFps: number;
+}
+
+// ---------------------------------------------------------------------------
+// Preview Settings
+// ---------------------------------------------------------------------------
+
+export type PreviewDownsampleMethod = 'nearestNeighbor' | 'bilinear' | 'skip';
+
+export interface PreviewConfig {
+  /** Target frames per second for sending preview images to the UI (1–60). */
+  previewFps: number;
+  /** Scale factor for the preview image (0.1 = 10% of original, 1.0 = full size). */
+  previewScale: number;
+  /** Downsampling method used to shrink the preview. */
+  downsampleMethod: PreviewDownsampleMethod;
+  /** JPEG quality for the preview image (1–100). Higher = sharper but more data. */
+  jpegQuality: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +184,7 @@ export interface OverlayGroup {
 
 export interface FundidoConfig {
   gameCapture: GameCaptureConfig;
+  preview: PreviewConfig;
   monitoredRegions: MonitoredRegion[];
   overlayGroups: OverlayGroup[];
 }

@@ -17,18 +17,19 @@ import { contextBridge, ipcRenderer } from 'electron';
 // IPC channel names (mirrored from src/shared/ipc-channels.ts)
 // ---------------------------------------------------------------------------
 const IPC = {
-    CONFIG_LOAD:                 'config:load',
-    CONFIG_SAVE:                 'config:save',
-    CONFIG_EXPORT_REGIONS:       'config:export-regions',
-    CONFIG_IMPORT_REGIONS:       'config:import-regions',
-    CONFIG_EXPORT_OVERLAY_GROUPS:'config:export-overlay-groups',
-    CONFIG_IMPORT_OVERLAY_GROUPS:'config:import-overlay-groups',
-    CAPTURE_START:               'capture:start',
-    CAPTURE_STOP:                'capture:stop',
-    CAPTURE_STATUS:              'capture:status',
-    CAPTURE_LIST_DISPLAYS:       'capture:list-displays',
-    STATE_UPDATED:               'state:updated',
-    DEBUG_LOG:                   'debug:log',
+  CONFIG_LOAD:                 'config:load',
+  CONFIG_SAVE:                 'config:save',
+  CONFIG_EXPORT_REGIONS:       'config:export-regions',
+  CONFIG_IMPORT_REGIONS:       'config:import-regions',
+  CONFIG_EXPORT_OVERLAY_GROUPS:'config:export-overlay-groups',
+  CONFIG_IMPORT_OVERLAY_GROUPS:'config:import-overlay-groups',
+  CAPTURE_START:               'capture:start',
+  CAPTURE_STOP:                'capture:stop',
+  CAPTURE_STATUS:              'capture:status',
+  CAPTURE_LIST_DISPLAYS:       'capture:list-displays',
+  CAPTURE_PREVIEW_FRAME:       'capture:preview-frame',
+  STATE_UPDATED:               'state:updated',
+  DEBUG_LOG:                   'debug:log',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -36,51 +37,58 @@ const IPC = {
 // ---------------------------------------------------------------------------
 
 const fundidoApi = {
-    // -- Configuration --------------------------------------------------------
-    loadConfig: (): Promise<any> =>
-        ipcRenderer.invoke(IPC.CONFIG_LOAD),
+  // -- Configuration --------------------------------------------------------
+  loadConfig: (): Promise<any> =>
+    ipcRenderer.invoke(IPC.CONFIG_LOAD),
 
-    saveConfig: (config: any): Promise<{ success: boolean }> =>
-        ipcRenderer.invoke(IPC.CONFIG_SAVE, config),
+  saveConfig: (config: any): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC.CONFIG_SAVE, config),
 
-    exportRegions: (): Promise<string> =>
-        ipcRenderer.invoke(IPC.CONFIG_EXPORT_REGIONS),
+  exportRegions: (): Promise<string> =>
+    ipcRenderer.invoke(IPC.CONFIG_EXPORT_REGIONS),
 
-    importRegions: (json: string): Promise<{ success: boolean; regionCount?: number; error?: string }> =>
-        ipcRenderer.invoke(IPC.CONFIG_IMPORT_REGIONS, json),
+  importRegions: (json: string): Promise<{ success: boolean; regionCount?: number; error?: string }> =>
+    ipcRenderer.invoke(IPC.CONFIG_IMPORT_REGIONS, json),
 
-    exportOverlayGroups: (): Promise<string> =>
-        ipcRenderer.invoke(IPC.CONFIG_EXPORT_OVERLAY_GROUPS),
+  exportOverlayGroups: (): Promise<string> =>
+    ipcRenderer.invoke(IPC.CONFIG_EXPORT_OVERLAY_GROUPS),
 
-    importOverlayGroups: (json: string): Promise<{ success: boolean; groupCount?: number; error?: string }> =>
-        ipcRenderer.invoke(IPC.CONFIG_IMPORT_OVERLAY_GROUPS, json),
+  importOverlayGroups: (json: string): Promise<{ success: boolean; groupCount?: number; error?: string }> =>
+    ipcRenderer.invoke(IPC.CONFIG_IMPORT_OVERLAY_GROUPS, json),
 
-    // -- Capture --------------------------------------------------------------
-    startCapture: (): Promise<{ success: boolean }> =>
-        ipcRenderer.invoke(IPC.CAPTURE_START),
+  // -- Capture --------------------------------------------------------------
+  startCapture: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC.CAPTURE_START),
 
-    stopCapture: (): Promise<{ success: boolean }> =>
-        ipcRenderer.invoke(IPC.CAPTURE_STOP),
+  stopCapture: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC.CAPTURE_STOP),
 
-    getCaptureStatus: (): Promise<{ isCapturing: boolean; isNativeAvailable: boolean }> =>
-        ipcRenderer.invoke(IPC.CAPTURE_STATUS),
+  getCaptureStatus: (): Promise<{ isCapturing: boolean; isNativeAvailable: boolean }> =>
+    ipcRenderer.invoke(IPC.CAPTURE_STATUS),
 
-    listDisplays: (): Promise<Array<{ adapterIndex: number; outputIndex: number; name: string; width: number; height: number }>> =>
-        ipcRenderer.invoke(IPC.CAPTURE_LIST_DISPLAYS),
+  listDisplays: (): Promise<Array<{ adapterIndex: number; outputIndex: number; name: string; width: number; height: number }>> =>
+    ipcRenderer.invoke(IPC.CAPTURE_LIST_DISPLAYS),
 
-    // -- Debug log listener ---------------------------------------------------
-    onDebugLog: (callback: (entry: any) => void): void => {
-        ipcRenderer.on(IPC.DEBUG_LOG, (_event, entry) => {
-            callback(entry);
-        });
-    },
+  // -- Debug log listener ---------------------------------------------------
+  onDebugLog: (callback: (entry: any) => void): void => {
+    ipcRenderer.on(IPC.DEBUG_LOG, (_event, entry) => {
+      callback(entry);
+    });
+  },
 
-    // -- State updates listener -----------------------------------------------
-    onStateUpdated: (callback: (frameState: unknown) => void): void => {
-        ipcRenderer.on(IPC.STATE_UPDATED, (_event, frameState) => {
-            callback(frameState);
-        });
-    },
+  // -- State updates listener -----------------------------------------------
+  onStateUpdated: (callback: (frameState: unknown) => void): void => {
+    ipcRenderer.on(IPC.STATE_UPDATED, (_event, frameState) => {
+      callback(frameState);
+    });
+  },
+
+  // -- Preview frame listener -----------------------------------------------
+  onPreviewFrame: (callback: (previewData: any) => void): void => {
+    ipcRenderer.on(IPC.CAPTURE_PREVIEW_FRAME, (_event, previewData) => {
+      callback(previewData);
+    });
+  },
 };
 
 contextBridge.exposeInMainWorld('fundidoApi', fundidoApi);

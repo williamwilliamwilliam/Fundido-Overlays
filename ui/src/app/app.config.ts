@@ -4,14 +4,16 @@ import { provideRouter, Routes } from '@angular/router';
 import { CapturePreviewComponent } from './components/capture-preview/capture-preview.component';
 import { MonitoredRegionsComponent } from './components/monitored-regions/monitored-regions.component';
 import { OverlayGroupsComponent } from './components/overlay-groups/overlay-groups.component';
+import { SettingsComponent } from './components/settings/settings.component';
 
 const routes: Routes = [
-    { path: '', redirectTo: 'capture', pathMatch: 'full' },
-    { path: 'capture', component: CapturePreviewComponent },
-    { path: 'regions', component: MonitoredRegionsComponent },
-    { path: 'overlays', component: OverlayGroupsComponent },
+  { path: '', redirectTo: 'capture', pathMatch: 'full' },
+  { path: 'capture', component: CapturePreviewComponent },
+  { path: 'regions', component: MonitoredRegionsComponent },
+  { path: 'overlays', component: OverlayGroupsComponent },
+  { path: 'settings', component: SettingsComponent },
 ];
 
 export const appConfig: ApplicationConfig = {
-    providers: [provideRouter(routes)],
+  providers: [provideRouter(routes)],
 };
