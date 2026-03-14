@@ -11,7 +11,10 @@
         [
           "OS=='win'",
           {
-            "libraries": ["-ld3d11", "-ldxgi"]
+            "libraries": [
+              "d3d11.lib",
+              "dxgi.lib"
+            ]
           }
         ]
       ]

@@ -11,6 +11,14 @@ export interface LogEntry {
   data?: unknown;
 }
 
+export interface DisplayInfo {
+  adapterIndex: number;
+  outputIndex: number;
+  name: string;
+  width: number;
+  height: number;
+}
+
 export interface FundidoApi {
   loadConfig(): Promise<any>;
   saveConfig(config: any): Promise<{ success: boolean }>;
@@ -20,7 +28,8 @@ export interface FundidoApi {
   importOverlayGroups(json: string): Promise<{ success: boolean; groupCount?: number; error?: string }>;
   startCapture(): Promise<{ success: boolean }>;
   stopCapture(): Promise<{ success: boolean }>;
-  getCaptureStatus(): Promise<{ isCapturing: boolean }>;
+  getCaptureStatus(): Promise<{ isCapturing: boolean; isNativeAvailable: boolean }>;
+  listDisplays(): Promise<DisplayInfo[]>;
   onDebugLog(callback: (entry: LogEntry) => void): void;
   onStateUpdated(callback: (frameState: any) => void): void;
 }

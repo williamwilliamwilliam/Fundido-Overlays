@@ -9,6 +9,8 @@ A Windows desktop application that captures game frames, evaluates user-defined 
 - Node.js 20+ and npm 10+
 - Angular CLI: `npm install -g @angular/cli`
 - Visual Studio Build Tools with "Desktop development with C++" (for native addon)
+  - https://visualstudio.microsoft.com/visual-cpp-build-tools/
+  - Desktop development with C++
 - Python 3.x (for node-gyp)
 
 ### Setup
@@ -26,7 +28,7 @@ cd ui && npm install && cd ..
 npm run start:dev
 ```
 
-This launches Angular on `localhost:4200` and Electron in dev mode concurrently.
+This launches Angular on `localhost:4241` and Electron in dev mode concurrently.
 
 ### Build a Release
 

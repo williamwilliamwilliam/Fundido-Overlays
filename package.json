@@ -4,14 +4,14 @@
   "description": "Game overlay tool that captures frames, evaluates screen regions, and displays responsive overlays.",
   "main": "dist/electron/main.js",
   "scripts": {
-    "postinstall": "cd ui && npm install",
+    "postinstall": "cd ui && npm install && cd ../native && npx node-gyp rebuild --msvs_version=2022",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build:angular": "cd ui && ng build --configuration production",
-    "build:native": "cd native && node-gyp rebuild",
+    "build:native": "cd native && npx node-gyp rebuild --msvs_version=2022",
     "build:all": "npm run build:native && npm run build:electron && npm run build:angular",
     "start": "npm run build:electron && electron .",
     "start:dev": "concurrently \"npm run build:electron -- --watch\" \"cd ui && ng serve\" \"wait-on http://localhost:4241 && electron . --dev\"",
-    "watch": "concurrently \"npm run build:electron -- --watch\" \"cd ui && ng serve\" \"wait-on http://localhost:4241 && electron . --dev\"",
+    "watch": "npm run build:native && npm run start:dev",
     "package": "npm run build:all && electron-builder",
     "test:electron": "jest --config jest.config.js",
     "test:ui": "cd ui && ng test",
@@ -22,6 +22,7 @@
     "uuid": "^9.0.0"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.11.0",
     "@types/uuid": "^9.0.7",
     "concurrently": "^8.2.0",

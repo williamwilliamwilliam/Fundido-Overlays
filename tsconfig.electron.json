@@ -23,5 +23,5 @@
     }
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "ui"]
+  "exclude": ["node_modules", "ui", "src/**/*.spec.ts"]
 }

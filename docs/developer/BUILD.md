@@ -6,7 +6,7 @@
 - **Angular CLI** (`npm install -g @angular/cli`)
 - **Python 3.x** (required by `node-gyp` for native addon compilation)
 - **Visual Studio Build Tools** (Windows) with the "Desktop development with C++" workload
-  - Needed for compiling the DXGI native addon via `node-gyp`
+    - Needed for compiling the DXGI native addon via `node-gyp`
 - **Git**
 
 ## Repository Setup
@@ -56,7 +56,7 @@ fundido-overlays/
 The dev workflow runs three things concurrently:
 
 1. The Electron main process (compiled TypeScript, watching for changes)
-2. The Angular dev server on `http://localhost:4200`
+2. The Angular dev server on `http://localhost:4241`
 3. Electron loads the Angular dev server URL instead of the built files
 
 ```bash

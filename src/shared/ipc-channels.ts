@@ -22,6 +22,7 @@ export const CAPTURE_START = 'capture:start';
 export const CAPTURE_STOP = 'capture:stop';
 export const CAPTURE_FRAME = 'capture:frame';
 export const CAPTURE_STATUS = 'capture:status';
+export const CAPTURE_LIST_DISPLAYS = 'capture:list-displays';
 
 // ---------------------------------------------------------------------------
 // State calculation

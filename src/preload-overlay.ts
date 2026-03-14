@@ -3,22 +3,24 @@
  *
  * Exposes a minimal API for receiving overlay configuration
  * and frame-state updates from the main process.
+ *
+ * IMPORTANT: Preload scripts run in a sandboxed context and cannot use
+ * relative require() imports. Channel names are inlined here.
  */
 import { contextBridge, ipcRenderer } from 'electron';
-import type { OverlayGroup, FrameState } from './shared';
 
 const overlayApi = {
-  onInit: (callback: (group: OverlayGroup) => void): void => {
-    ipcRenderer.on('overlay:init', (_event, group: OverlayGroup) => {
-      callback(group);
-    });
-  },
+    onInit: (callback: (group: any) => void): void => {
+        ipcRenderer.on('overlay:init', (_event, group) => {
+            callback(group);
+        });
+    },
 
-  onFrameState: (callback: (frameState: FrameState) => void): void => {
-    ipcRenderer.on('overlay:frame-state', (_event, frameState: FrameState) => {
-      callback(frameState);
-    });
-  },
+    onFrameState: (callback: (frameState: any) => void): void => {
+        ipcRenderer.on('overlay:frame-state', (_event, frameState) => {
+            callback(frameState);
+        });
+    },
 };
 
 contextBridge.exposeInMainWorld('overlayApi', overlayApi);

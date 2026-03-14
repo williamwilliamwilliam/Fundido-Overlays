@@ -93,6 +93,14 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle(IpcChannels.CAPTURE_STATUS, (_event: IpcMainInvokeEvent) => {
-    return { isCapturing: captureService.getIsCapturing() };
+    return {
+      isCapturing: captureService.getIsCapturing(),
+      isNativeAvailable: captureService.getIsNativeAvailable(),
+    };
+  });
+
+  ipcMain.handle(IpcChannels.CAPTURE_LIST_DISPLAYS, (_event: IpcMainInvokeEvent) => {
+    logger.debug(LogCategory.Ipc, 'CAPTURE_LIST_DISPLAYS invoked');
+    return captureService.listDisplays();
   });
 }
