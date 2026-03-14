@@ -10,41 +10,16 @@
       height: 100%;
       background: transparent;
       overflow: hidden;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      color: #ffffff;
       user-select: none;
     }
 
     #overlay-container {
       position: absolute;
       display: flex;
-      gap: 4px;
     }
 
     .overlay-item {
       transition: opacity 0.15s ease;
-    }
-
-    .overlay-item.hidden {
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .overlay-icon img {
-      max-width: 48px;
-      max-height: 48px;
-    }
-
-    .overlay-text {
-      background: rgba(0, 0, 0, 0.6);
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 14px;
-      white-space: nowrap;
-    }
-
-    .overlay-mirror canvas {
-      border: 1px solid rgba(255, 255, 255, 0.2);
     }
   </style>
 </head>
@@ -54,28 +29,33 @@
   <script>
     /**
      * Overlay renderer — receives configuration and frame state from the
-     * main process via the overlayApi preload bridge and renders overlays.
+     * main process via IPC and renders overlays.
      *
-     * This is intentionally vanilla JS to keep overlay windows lightweight.
+     * Uses nodeIntegration since this is an internal window, not user content.
      */
+    const { ipcRenderer } = require('electron');
 
     let overlayGroup = null;
     let currentFrameState = null;
 
-    // Wait for the main process to send us our group configuration.
-    window.overlayApi.onInit((group) => {
+    ipcRenderer.on('overlay:init', (_event, group) => {
       overlayGroup = group;
       applyGroupLayout(group);
       renderOverlayElements(group);
+      // Apply defaults immediately (before any frame state arrives)
+      applyDefaults(group);
     });
 
-    // React to frame state updates by toggling overlay visibility.
-    window.overlayApi.onFrameState((frameState) => {
+    ipcRenderer.on('overlay:frame-state', (_event, frameState) => {
       currentFrameState = frameState;
       if (overlayGroup) {
-        updateOverlayVisibility(overlayGroup, frameState);
+        evaluateRules(overlayGroup, frameState);
       }
     });
+
+    // -----------------------------------------------------------------------
+    // Layout
+    // -----------------------------------------------------------------------
 
     function applyGroupLayout(group) {
       const container = document.getElementById('overlay-container');
@@ -86,21 +66,18 @@
         container.style.top = position.y + 'px';
       }
 
-      const directionToFlexDirection = {
-        right: 'row',
-        left: 'row-reverse',
-        down: 'column',
-        up: 'column-reverse',
-      };
-      container.style.flexDirection = directionToFlexDirection[group.growDirection] || 'row';
+      const directionMap = { right: 'row', left: 'row-reverse', down: 'column', up: 'column-reverse' };
+      container.style.flexDirection = directionMap[group.growDirection] || 'row';
 
-      const alignmentToAlignItems = {
-        start: 'flex-start',
-        center: 'center',
-        end: 'flex-end',
-      };
-      container.style.alignItems = alignmentToAlignItems[group.alignment] || 'flex-start';
+      const alignMap = { start: 'flex-start', center: 'center', end: 'flex-end' };
+      container.style.alignItems = alignMap[group.alignment] || 'flex-start';
+
+      container.style.gap = (group.gap || 4) + 'px';
     }
+
+    // -----------------------------------------------------------------------
+    // Rendering
+    // -----------------------------------------------------------------------
 
     function renderOverlayElements(group) {
       const container = document.getElementById('overlay-container');
@@ -111,55 +88,142 @@
         element.classList.add('overlay-item');
         element.dataset.overlayId = overlay.id;
 
-        if (overlay.contentType === 'icon') {
-          element.classList.add('overlay-icon');
-          const img = document.createElement('img');
-          img.src = overlay.content;
-          img.alt = overlay.name;
-          element.appendChild(img);
-        } else if (overlay.contentType === 'text') {
-          element.classList.add('overlay-text');
-          element.textContent = overlay.content;
+        if (overlay.contentType === 'text' && overlay.textConfig) {
+          renderTextOverlay(element, overlay.textConfig);
+        } else if (overlay.contentType === 'image' && overlay.imageConfig) {
+          renderImageOverlay(element, overlay.imageConfig);
         } else if (overlay.contentType === 'regionMirror') {
-          element.classList.add('overlay-mirror');
-          const canvas = document.createElement('canvas');
-          canvas.width = 128;
-          canvas.height = 128;
-          element.appendChild(canvas);
+          renderRegionMirrorOverlay(element, overlay.regionMirrorConfig);
         }
 
         container.appendChild(element);
       }
     }
 
-    function updateOverlayVisibility(group, frameState) {
+    function renderTextOverlay(element, config) {
+      element.style.fontFamily = config.fontFamily || 'Segoe UI';
+      element.style.fontSize = (config.fontSize || 16) + 'px';
+      element.style.fontWeight = config.fontWeight || 'normal';
+      element.style.fontStyle = config.fontStyle || 'normal';
+      element.style.color = config.color || '#ffffff';
+      element.style.backgroundColor = config.backgroundColor || 'rgba(0,0,0,0.6)';
+      element.style.padding = (config.padding || 4) + 'px';
+      element.style.borderRadius = '4px';
+      element.style.whiteSpace = 'nowrap';
+      element.textContent = config.text || '';
+    }
+
+    function renderImageOverlay(element, config) {
+      if (!config || !config.filePath) return;
+      const img = document.createElement('img');
+      img.src = config.filePath;
+      img.alt = '';
+
+      const size = config.size || {};
+      if (size.scale && size.scale !== 1.0) {
+        img.style.transform = 'scale(' + size.scale + ')';
+        img.style.transformOrigin = 'top left';
+      }
+      if (size.width) img.style.width = size.width + 'px';
+      if (size.height) img.style.height = size.height + 'px';
+      if (size.maxWidth) img.style.maxWidth = size.maxWidth + 'px';
+      if (size.maxHeight) img.style.maxHeight = size.maxHeight + 'px';
+
+      element.appendChild(img);
+    }
+
+    function renderRegionMirrorOverlay(element, config) {
+      if (!config) return;
+      const canvas = document.createElement('canvas');
+      const size = config.size || {};
+      canvas.width = size.width || 128;
+      canvas.height = size.height || 128;
+      if (size.scale) {
+        canvas.style.transform = 'scale(' + size.scale + ')';
+        canvas.style.transformOrigin = 'top left';
+      }
+      element.appendChild(canvas);
+    }
+
+    // -----------------------------------------------------------------------
+    // Defaults (before any rules/frame state)
+    // -----------------------------------------------------------------------
+
+    function applyDefaults(group) {
       for (const overlay of group.overlays) {
-        const element = document.querySelector(`[data-overlay-id="${overlay.id}"]`);
+        const element = document.querySelector('[data-overlay-id="' + overlay.id + '"]');
         if (!element) continue;
 
-        const allConditionsMet = overlay.visibilityConditions.every((condition) => {
-          const regionState = frameState.regionStates.find(
-            (rs) => rs.monitoredRegionId === condition.monitoredRegionId
-          );
-          if (!regionState) return false;
+        const isVisibleByDefault = overlay.defaultVisible !== false;
+        const defaultOpacity = overlay.defaultOpacity !== undefined ? overlay.defaultOpacity : 1;
 
-          const calcResult = regionState.calculationResults.find(
-            (cr) => cr.stateCalculationId === condition.stateCalculationId
-          );
-          if (!calcResult) return false;
-
-          return calcResult.currentValue === condition.requiredStateValue;
-        });
-
-        const hasNoConditions = overlay.visibilityConditions.length === 0;
-        const shouldBeVisible = hasNoConditions || allConditionsMet;
-
-        if (shouldBeVisible) {
-          element.classList.remove('hidden');
-        } else {
-          element.classList.add('hidden');
-        }
+        element.style.display = isVisibleByDefault ? '' : 'none';
+        element.style.opacity = String(defaultOpacity);
       }
+    }
+
+    // -----------------------------------------------------------------------
+    // Rules evaluation
+    // -----------------------------------------------------------------------
+
+    function evaluateRules(group, frameState) {
+      for (const overlay of group.overlays) {
+        const element = document.querySelector('[data-overlay-id="' + overlay.id + '"]');
+        if (!element) continue;
+
+        // Start with defaults
+        const isVisibleByDefault = overlay.defaultVisible !== false;
+        const defaultOpacity = overlay.defaultOpacity !== undefined ? overlay.defaultOpacity : 1;
+
+        let resolvedVisible = isVisibleByDefault;
+        let resolvedOpacity = defaultOpacity;
+
+        // Evaluate rules top-down, first match wins
+        const rules = overlay.rules || [];
+        for (const rule of rules) {
+          const allConditionsMet = evaluateConditions(rule.conditions, frameState);
+          if (allConditionsMet) {
+            if (rule.action === 'show') {
+              resolvedVisible = true;
+              resolvedOpacity = 1;
+            } else if (rule.action === 'hide') {
+              resolvedVisible = false;
+            } else if (rule.action === 'opacity') {
+              resolvedVisible = true;
+              resolvedOpacity = rule.opacityValue !== undefined ? rule.opacityValue : 1;
+            }
+            break; // First match wins
+          }
+        }
+
+        element.style.display = resolvedVisible ? '' : 'none';
+        element.style.opacity = String(resolvedOpacity);
+      }
+    }
+
+    function evaluateConditions(conditions, frameState) {
+      if (!conditions || conditions.length === 0) return true;
+
+      for (const condition of conditions) {
+        const regionState = frameState.regionStates.find(
+          rs => rs.monitoredRegionId === condition.monitoredRegionId
+        );
+        if (!regionState) return false;
+
+        const calcResult = regionState.calculationResults.find(
+          cr => cr.stateCalculationId === condition.stateCalculationId
+        );
+        if (!calcResult) return false;
+
+        const currentValue = calcResult.currentValue;
+        const isEquals = condition.operator === 'equals';
+        const isNotEquals = condition.operator === 'notEquals';
+
+        if (isEquals && currentValue !== condition.value) return false;
+        if (isNotEquals && currentValue === condition.value) return false;
+      }
+
+      return true;
     }
   </script>
 </body>

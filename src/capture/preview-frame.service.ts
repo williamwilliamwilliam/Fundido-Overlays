@@ -18,9 +18,18 @@ export class PreviewFrameService {
   private displayOriginX = 0;
   private displayOriginY = 0;
   private displayScaleFactor = 1;
+  private onPreviewFrameSentCallback: ((previewData: any) => void) | null = null;
 
   public setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
+  }
+
+  /**
+   * Sets a callback that fires each time a preview frame is encoded and sent.
+   * Used to pipe preview data to overlay windows for region mirror rendering.
+   */
+  public setOnPreviewFrameSent(callback: (previewData: any) => void): void {
+    this.onPreviewFrameSentCallback = callback;
   }
 
   /**
@@ -106,7 +115,7 @@ export class PreviewFrameService {
     const downsampled = this.downsampleFrame(frame, config);
     const base64Jpeg = this.encodeBgraToBase64Jpeg(downsampled.buffer, downsampled.width, downsampled.height, config.jpegQuality);
 
-    this.mainWindow!.webContents.send('capture:preview-frame', {
+    const previewData = {
       imageDataUrl: `data:image/jpeg;base64,${base64Jpeg}`,
       originalWidth: frame.width,
       originalHeight: frame.height,
@@ -115,7 +124,14 @@ export class PreviewFrameService {
       displayOriginX: this.displayOriginX,
       displayOriginY: this.displayOriginY,
       displayScaleFactor: this.displayScaleFactor,
-    });
+    };
+
+    this.mainWindow!.webContents.send('capture:preview-frame', previewData);
+
+    // Also pipe to overlay windows for region mirror rendering
+    if (this.onPreviewFrameSentCallback) {
+      this.onPreviewFrameSentCallback(previewData);
+    }
   }
 
   private downsampleFrame(

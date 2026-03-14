@@ -47,6 +47,11 @@ export const PICKER_CONFIRM = 'picker:confirm';
 export const PICKER_CANCEL = 'picker:cancel';
 
 // ---------------------------------------------------------------------------
+// File dialogs
+// ---------------------------------------------------------------------------
+export const DIALOG_OPEN_FILE = 'dialog:open-file';
+
+// ---------------------------------------------------------------------------
 // Debug logging
 // ---------------------------------------------------------------------------
 export const DEBUG_LOG = 'debug:log';

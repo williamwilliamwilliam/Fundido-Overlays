@@ -26,11 +26,7 @@ import { ElectronService } from '../../services/electron.service';
       </div>
 
       <div *ngIf="showImportDialog" class="import-dialog">
-        <textarea
-          [(ngModel)]="importJsonText"
-          placeholder="Paste overlay group JSON here..."
-          rows="6">
-        </textarea>
+        <textarea [(ngModel)]="importJsonText" placeholder="Paste overlay group JSON here..." rows="6"></textarea>
         <div class="import-actions">
           <button class="primary" (click)="importGroups()">Import</button>
           <button (click)="showImportDialog = false">Cancel</button>
@@ -41,22 +37,20 @@ import { ElectronService } from '../../services/electron.service';
         No overlay groups defined yet. Click "+ Add Group" to get started.
       </div>
 
+      <!-- ======================== GROUP CARD ======================== -->
       <div *ngFor="let group of groups; let groupIndex = index" class="group-card">
         <div class="group-header">
           <input [(ngModel)]="group.name" (ngModelChange)="onFieldChanged()" placeholder="Group name" class="name-input" />
           <button class="danger-text" (click)="removeGroup(groupIndex)">Remove</button>
         </div>
 
-        <!-- Group settings row -->
         <div class="group-settings">
-          <label>
-            Position Mode
+          <label>Position
             <select [(ngModel)]="group.position.mode" (ngModelChange)="onPositionModeChanged(group)">
               <option value="absolute">Absolute</option>
               <option value="relativeToCursor">Relative to Cursor</option>
             </select>
           </label>
-
           <ng-container *ngIf="group.position.mode === 'absolute'">
             <label>X <input type="number" [(ngModel)]="group.position.x" (ngModelChange)="onFieldChanged()" /></label>
             <label>Y <input type="number" [(ngModel)]="group.position.y" (ngModelChange)="onFieldChanged()" /></label>
@@ -64,36 +58,25 @@ import { ElectronService } from '../../services/electron.service';
               {{ pickingGroupId === group.id ? 'Picking...' : 'Set Anchor' }}
             </button>
           </ng-container>
-
           <ng-container *ngIf="group.position.mode === 'relativeToCursor'">
             <label>Offset X <input type="number" [(ngModel)]="group.position.offsetX" (ngModelChange)="onFieldChanged()" /></label>
             <label>Offset Y <input type="number" [(ngModel)]="group.position.offsetY" (ngModelChange)="onFieldChanged()" /></label>
           </ng-container>
-
-          <label>
-            Grow
+          <label>Grow
             <select [(ngModel)]="group.growDirection" (ngModelChange)="onFieldChanged()">
-              <option value="right">Right</option>
-              <option value="left">Left</option>
-              <option value="down">Down</option>
-              <option value="up">Up</option>
+              <option value="right">Right</option><option value="left">Left</option>
+              <option value="down">Down</option><option value="up">Up</option>
             </select>
           </label>
-          <label>
-            Align
+          <label>Align
             <select [(ngModel)]="group.alignment" (ngModelChange)="onFieldChanged()">
-              <option value="start">Start</option>
-              <option value="center">Center</option>
-              <option value="end">End</option>
+              <option value="start">Start</option><option value="center">Center</option><option value="end">End</option>
             </select>
           </label>
-          <label>
-            Gap
-            <input type="number" [(ngModel)]="group.gap" (ngModelChange)="onFieldChanged()" style="width:50px" />
-          </label>
+          <label>Gap <input type="number" [(ngModel)]="group.gap" (ngModelChange)="onFieldChanged()" style="width:50px" /></label>
         </div>
 
-        <!-- Overlays -->
+        <!-- ======================== OVERLAYS ======================== -->
         <div class="section-header">
           <span class="section-label">Overlays</span>
           <button class="add-btn" (click)="addOverlay(group)">+ Add Overlay</button>
@@ -103,14 +86,27 @@ import { ElectronService } from '../../services/electron.service';
           <div class="overlay-header">
             <input [(ngModel)]="overlay.name" (ngModelChange)="onFieldChanged()" placeholder="Overlay name" class="overlay-name-input" />
             <select [(ngModel)]="overlay.contentType" (ngModelChange)="onContentTypeChanged(overlay)">
-              <option value="text">Text</option>
-              <option value="image">Image</option>
-              <option value="regionMirror">Region Mirror</option>
+              <option value="text">Text</option><option value="image">Image</option><option value="regionMirror">Region Mirror</option>
             </select>
             <button class="danger-text small" (click)="removeOverlay(group, overlayIndex)">Remove</button>
           </div>
 
-          <!-- Text config -->
+          <!-- Default visibility + opacity -->
+          <div class="defaults-row">
+            <label class="checkbox-label">
+              <input type="checkbox" [(ngModel)]="overlay.defaultVisible" (ngModelChange)="onFieldChanged()" />
+              Visible by default
+            </label>
+            <label class="opacity-label">
+              Default Opacity
+              <input type="range" min="0" max="100" step="1"
+                [ngModel]="overlay.defaultOpacity * 100"
+                (ngModelChange)="onDefaultOpacityChanged(overlay, $event)" />
+              <span class="opacity-value">{{ (overlay.defaultOpacity * 100) | number:'1.0-0' }}%</span>
+            </label>
+          </div>
+
+          <!-- ===== TEXT CONFIG ===== -->
           <div *ngIf="overlay.contentType === 'text' && overlay.textConfig" class="content-config">
             <div class="config-row">
               <label>Text <input [(ngModel)]="overlay.textConfig.text" (ngModelChange)="onFieldChanged()" class="wide-input" /></label>
@@ -118,18 +114,14 @@ import { ElectronService } from '../../services/electron.service';
             <div class="config-row">
               <label>Size <input type="number" [(ngModel)]="overlay.textConfig.fontSize" (ngModelChange)="onFieldChanged()" style="width:50px" /></label>
               <label>Font <input [(ngModel)]="overlay.textConfig.fontFamily" (ngModelChange)="onFieldChanged()" style="width:120px" /></label>
-              <label>
-                Weight
+              <label>Weight
                 <select [(ngModel)]="overlay.textConfig.fontWeight" (ngModelChange)="onFieldChanged()">
-                  <option value="normal">Normal</option>
-                  <option value="bold">Bold</option>
+                  <option value="normal">Normal</option><option value="bold">Bold</option>
                 </select>
               </label>
-              <label>
-                Style
+              <label>Style
                 <select [(ngModel)]="overlay.textConfig.fontStyle" (ngModelChange)="onFieldChanged()">
-                  <option value="normal">Normal</option>
-                  <option value="italic">Italic</option>
+                  <option value="normal">Normal</option><option value="italic">Italic</option>
                 </select>
               </label>
             </div>
@@ -140,10 +132,12 @@ import { ElectronService } from '../../services/electron.service';
             </div>
           </div>
 
-          <!-- Image config -->
+          <!-- ===== IMAGE CONFIG ===== -->
           <div *ngIf="overlay.contentType === 'image' && overlay.imageConfig" class="content-config">
             <div class="config-row">
-              <label>File <input [(ngModel)]="overlay.imageConfig.filePath" (ngModelChange)="onFieldChanged()" class="wide-input" placeholder="Path to image file" /></label>
+              <label>File</label>
+              <input [(ngModel)]="overlay.imageConfig.filePath" (ngModelChange)="onFieldChanged()" class="wide-input" placeholder="Path to image file" />
+              <button class="pick-btn" (click)="chooseImageFile(overlay)">Choose File</button>
             </div>
             <div class="config-row">
               <label>Scale <input type="number" step="0.1" [(ngModel)]="overlay.imageConfig.size.scale" (ngModelChange)="onFieldChanged()" style="width:60px" /></label>
@@ -154,11 +148,10 @@ import { ElectronService } from '../../services/electron.service';
             </div>
           </div>
 
-          <!-- Region mirror config -->
+          <!-- ===== REGION MIRROR CONFIG ===== -->
           <div *ngIf="overlay.contentType === 'regionMirror' && overlay.regionMirrorConfig" class="content-config">
             <div class="config-row">
-              <label>
-                Region
+              <label>Region
                 <select [(ngModel)]="overlay.regionMirrorConfig.monitoredRegionId" (ngModelChange)="onFieldChanged()">
                   <option *ngFor="let region of monitoredRegions" [ngValue]="region.id">{{ region.name }}</option>
                 </select>
@@ -167,20 +160,19 @@ import { ElectronService } from '../../services/electron.service';
             </div>
           </div>
 
-          <!-- Rules engine -->
+          <!-- ===== RULES ENGINE ===== -->
           <div class="rules-section">
             <div class="rules-header">
-              <span class="rules-label">Rules (evaluated top-down, first match wins)</span>
+              <span class="rules-label">Rules (top-down, first match wins)</span>
               <button class="add-btn" (click)="addRule(overlay)">+ Add Rule</button>
             </div>
             <div *ngIf="overlay.rules.length === 0" class="rules-empty">
-              No rules — overlay always visible at full opacity.
+              No rules — defaults apply.
             </div>
             <div *ngFor="let rule of overlay.rules; let ruleIndex = index" class="rule-row">
               <div class="rule-conditions">
-                <span class="rule-keyword">When</span>
                 <div *ngFor="let cond of rule.conditions; let condIndex = index" class="condition-row">
-                  <span *ngIf="condIndex > 0" class="rule-keyword">AND</span>
+                  <span class="rule-keyword">{{ condIndex === 0 ? 'When' : 'AND' }}</span>
                   <select [(ngModel)]="cond.monitoredRegionId" (ngModelChange)="onRegionSelectedForCondition(cond)">
                     <option value="">Select Region</option>
                     <option *ngFor="let region of monitoredRegions" [ngValue]="region.id">{{ region.name }}</option>
@@ -193,7 +185,10 @@ import { ElectronService } from '../../services/electron.service';
                     <option value="equals">=</option>
                     <option value="notEquals">≠</option>
                   </select>
-                  <input [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()" placeholder="State value" class="condition-value-input" />
+                  <select [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()">
+                    <option value="">Select Value</option>
+                    <option *ngFor="let sv of getStateValuesForCalc(cond.monitoredRegionId, cond.stateCalculationId)" [ngValue]="sv">{{ sv }}</option>
+                  </select>
                   <button class="danger-text small" (click)="removeCondition(rule, condIndex)">×</button>
                 </div>
                 <button class="add-condition-btn" (click)="addCondition(rule)">+ AND</button>
@@ -203,13 +198,15 @@ import { ElectronService } from '../../services/electron.service';
                 <select [(ngModel)]="rule.action" (ngModelChange)="onFieldChanged()">
                   <option value="show">Show</option>
                   <option value="hide">Hide</option>
-                  <option value="opacity">Opacity</option>
+                  <option value="opacity">Set Opacity</option>
                 </select>
-                <input *ngIf="rule.action === 'opacity'"
-                  type="number" step="0.1" min="0" max="1"
-                  [(ngModel)]="rule.opacityValue" (ngModelChange)="onFieldChanged()"
-                  style="width:55px" placeholder="0-1" />
-                <button class="danger-text small" (click)="removeRule(overlay, ruleIndex)">Remove Rule</button>
+                <ng-container *ngIf="rule.action === 'opacity'">
+                  <input type="range" min="0" max="100" step="1"
+                    [ngModel]="(rule.opacityValue ?? 1) * 100"
+                    (ngModelChange)="onRuleOpacityChanged(rule, $event)" />
+                  <span class="opacity-value">{{ ((rule.opacityValue ?? 1) * 100) | number:'1.0-0' }}%</span>
+                </ng-container>
+                <button class="danger-text small" (click)="removeRule(overlay, ruleIndex)">Remove</button>
               </div>
             </div>
           </div>
@@ -223,15 +220,11 @@ import { ElectronService } from '../../services/electron.service';
     .page { max-width: 1100px; }
     h2 { margin-bottom: var(--spacing-sm); }
     .description { color: var(--color-text-secondary); margin-bottom: var(--spacing-lg); }
-
     .toolbar { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-lg); }
 
     .import-dialog {
-      background-color: var(--color-bg-secondary);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
-      padding: var(--spacing-md);
-      margin-bottom: var(--spacing-lg);
+      background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); padding: var(--spacing-md); margin-bottom: var(--spacing-lg);
     }
     .import-dialog textarea { width: 100%; font-family: var(--font-mono); font-size: 0.85rem; margin-bottom: var(--spacing-sm); }
     .import-actions { display: flex; gap: var(--spacing-sm); }
@@ -245,10 +238,7 @@ import { ElectronService } from '../../services/electron.service';
       background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
       border-radius: var(--radius-md); padding: var(--spacing-md); margin-bottom: var(--spacing-md);
     }
-
-    .group-header {
-      display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm);
-    }
+    .group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm); }
 
     .name-input, .overlay-name-input {
       font-size: 1rem; font-weight: 500; background: transparent;
@@ -258,20 +248,17 @@ import { ElectronService } from '../../services/electron.service';
     .overlay-name-input { font-size: 0.9rem; flex: 1; }
 
     .group-settings {
-      display: flex; gap: var(--spacing-md); margin-bottom: var(--spacing-md);
-      flex-wrap: wrap; align-items: flex-end;
+      display: flex; gap: var(--spacing-md); margin-bottom: var(--spacing-md); flex-wrap: wrap; align-items: flex-end;
     }
     .group-settings label {
-      display: flex; flex-direction: column; gap: var(--spacing-xs);
-      color: var(--color-text-secondary); font-size: 0.85rem;
+      display: flex; flex-direction: column; gap: var(--spacing-xs); color: var(--color-text-secondary); font-size: 0.85rem;
     }
     .group-settings input[type="number"] { width: 70px; }
 
     .pick-btn {
-      font-size: 0.8rem; padding: 4px 12px;
-      background-color: var(--color-bg-panel); border: 1px solid var(--color-accent);
-      color: var(--color-accent); border-radius: var(--radius-sm); white-space: nowrap;
-      align-self: flex-end;
+      font-size: 0.8rem; padding: 4px 12px; background-color: var(--color-bg-panel);
+      border: 1px solid var(--color-accent); color: var(--color-accent);
+      border-radius: var(--radius-sm); white-space: nowrap; align-self: flex-end;
     }
     .pick-btn:hover { background-color: var(--color-accent); color: var(--color-text-primary); }
 
@@ -283,17 +270,22 @@ import { ElectronService } from '../../services/electron.service';
       background-color: var(--color-bg-primary); border: 1px solid var(--color-border);
       border-radius: var(--radius-sm); padding: var(--spacing-sm); margin-bottom: var(--spacing-sm);
     }
-
     .overlay-header { display: flex; align-items: center; gap: var(--spacing-sm); margin-bottom: var(--spacing-sm); }
 
+    /* Defaults row */
+    .defaults-row {
+      display: flex; align-items: center; gap: var(--spacing-lg); margin-bottom: var(--spacing-sm);
+      padding: var(--spacing-xs) 0; border-bottom: 1px solid var(--color-border);
+    }
+    .checkbox-label { display: flex; align-items: center; gap: var(--spacing-xs); font-size: 0.85rem; color: var(--color-text-secondary); cursor: pointer; }
+    .opacity-label { display: flex; align-items: center; gap: var(--spacing-sm); font-size: 0.85rem; color: var(--color-text-secondary); }
+    .opacity-label input[type="range"] { width: 120px; accent-color: var(--color-accent); }
+    .opacity-value { font-family: var(--font-mono); font-size: 0.8rem; min-width: 40px; color: var(--color-text-primary); }
+
+    /* Content configs */
     .content-config { padding: var(--spacing-xs) 0 var(--spacing-sm) 0; }
-    .config-row {
-      display: flex; gap: var(--spacing-md); align-items: center; flex-wrap: wrap; margin-bottom: 4px;
-    }
-    .config-row label {
-      display: flex; align-items: center; gap: var(--spacing-xs);
-      color: var(--color-text-secondary); font-size: 0.8rem;
-    }
+    .config-row { display: flex; gap: var(--spacing-md); align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+    .config-row label { display: flex; align-items: center; gap: var(--spacing-xs); color: var(--color-text-secondary); font-size: 0.8rem; }
     .wide-input { flex: 1; min-width: 200px; }
 
     /* Rules */
@@ -304,17 +296,16 @@ import { ElectronService } from '../../services/electron.service';
 
     .rule-row {
       background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
-      border-radius: var(--radius-sm); padding: var(--spacing-xs) var(--spacing-sm);
-      margin-bottom: 4px;
+      border-radius: var(--radius-sm); padding: var(--spacing-xs) var(--spacing-sm); margin-bottom: 4px;
     }
     .rule-conditions { margin-bottom: 4px; }
     .condition-row { display: flex; align-items: center; gap: var(--spacing-xs); margin-bottom: 2px; flex-wrap: wrap; }
     .condition-row select { font-size: 0.8rem; max-width: 150px; }
-    .condition-value-input { width: 100px; font-size: 0.8rem; }
-    .rule-keyword { font-size: 0.75rem; font-weight: 600; color: var(--color-accent); text-transform: uppercase; min-width: 35px; }
+    .rule-keyword { font-size: 0.75rem; font-weight: 600; color: var(--color-accent); text-transform: uppercase; min-width: 40px; }
     .add-condition-btn { font-size: 0.7rem; background: transparent; border: 1px dashed var(--color-border); padding: 1px 8px; }
-    .rule-action { display: flex; align-items: center; gap: var(--spacing-sm); }
+    .rule-action { display: flex; align-items: center; gap: var(--spacing-sm); flex-wrap: wrap; }
     .rule-action select { font-size: 0.8rem; }
+    .rule-action input[type="range"] { width: 100px; accent-color: var(--color-accent); }
 
     .add-overlay-btn {
       font-size: 0.85rem; background: transparent; border: 1px dashed var(--color-border);
@@ -343,9 +334,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     const isCtrlS = (event.ctrlKey || event.metaKey) && event.key === 's';
     if (isCtrlS) {
       event.preventDefault();
-      if (this.hasUnsavedChanges) {
-        this.saveAllGroups();
-      }
+      if (this.hasUnsavedChanges) { this.saveAllGroups(); }
     }
   }
 
@@ -359,29 +348,18 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     this.stateSubscription?.unsubscribe();
   }
 
-  // ---------------------------------------------------------------------------
-  // Dirty tracking
-  // ---------------------------------------------------------------------------
-
-  onFieldChanged(): void {
-    this.hasUnsavedChanges = true;
-  }
+  onFieldChanged(): void { this.hasUnsavedChanges = true; }
 
   // ---------------------------------------------------------------------------
   // Group CRUD
   // ---------------------------------------------------------------------------
 
   addGroup(): void {
-    const newGroup = {
-      id: crypto.randomUUID(),
-      name: 'New Group',
+    this.groups.push({
+      id: crypto.randomUUID(), name: 'New Group',
       position: { mode: 'absolute', x: 100, y: 100 },
-      growDirection: 'right',
-      alignment: 'start',
-      gap: 4,
-      overlays: [],
-    };
-    this.groups.push(newGroup);
+      growDirection: 'right', alignment: 'start', gap: 4, overlays: [],
+    });
     this.hasUnsavedChanges = true;
   }
 
@@ -415,25 +393,16 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   // ---------------------------------------------------------------------------
 
   addOverlay(group: any): void {
-    const newOverlay = {
-      id: crypto.randomUUID(),
-      name: 'New Overlay',
-      contentType: 'text',
+    group.overlays.push({
+      id: crypto.randomUUID(), name: 'New Overlay', contentType: 'text',
+      defaultVisible: true, defaultOpacity: 1.0,
       textConfig: {
-        text: 'Hello',
-        fontSize: 16,
-        fontFamily: 'Segoe UI',
-        fontWeight: 'normal',
-        fontStyle: 'normal',
-        color: '#ffffff',
-        backgroundColor: '#000000aa',
-        padding: 4,
+        text: 'Hello', fontSize: 16, fontFamily: 'Segoe UI',
+        fontWeight: 'normal', fontStyle: 'normal',
+        color: '#ffffff', backgroundColor: '#000000aa', padding: 4,
       },
-      imageConfig: null,
-      regionMirrorConfig: null,
-      rules: [],
-    };
-    group.overlays.push(newOverlay);
+      imageConfig: null, regionMirrorConfig: null, rules: [],
+    });
     this.hasUnsavedChanges = true;
   }
 
@@ -451,28 +420,35 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
       };
     }
     if (overlay.contentType === 'image' && !overlay.imageConfig) {
-      overlay.imageConfig = {
-        filePath: '',
-        size: { scale: 1.0 },
-      };
+      overlay.imageConfig = { filePath: '', size: { scale: 1.0 } };
     }
     if (overlay.contentType === 'regionMirror' && !overlay.regionMirrorConfig) {
-      overlay.regionMirrorConfig = {
-        monitoredRegionId: '',
-        size: { scale: 0.5 },
-      };
+      overlay.regionMirrorConfig = { monitoredRegionId: '', size: { scale: 0.5 } };
     }
     this.hasUnsavedChanges = true;
   }
 
+  onDefaultOpacityChanged(overlay: any, percentValue: number): void {
+    overlay.defaultOpacity = percentValue / 100;
+    this.hasUnsavedChanges = true;
+  }
+
+  async chooseImageFile(overlay: any): Promise<void> {
+    const filePath = await this.electronService.openFileDialog();
+    if (filePath && overlay.imageConfig) {
+      overlay.imageConfig.filePath = filePath;
+      this.hasUnsavedChanges = true;
+    }
+  }
+
   // ---------------------------------------------------------------------------
-  // Rules engine CRUD
+  // Rules engine
   // ---------------------------------------------------------------------------
 
   addRule(overlay: any): void {
     overlay.rules.push({
       id: crypto.randomUUID(),
-      conditions: [],
+      conditions: [{ monitoredRegionId: '', stateCalculationId: '', operator: 'equals', value: '' }],
       action: 'show',
     });
     this.hasUnsavedChanges = true;
@@ -484,12 +460,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   }
 
   addCondition(rule: any): void {
-    rule.conditions.push({
-      monitoredRegionId: '',
-      stateCalculationId: '',
-      operator: 'equals',
-      value: '',
-    });
+    rule.conditions.push({ monitoredRegionId: '', stateCalculationId: '', operator: 'equals', value: '' });
     this.hasUnsavedChanges = true;
   }
 
@@ -500,6 +471,12 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
 
   onRegionSelectedForCondition(condition: any): void {
     condition.stateCalculationId = '';
+    condition.value = '';
+    this.hasUnsavedChanges = true;
+  }
+
+  onRuleOpacityChanged(rule: any, percentValue: number): void {
+    rule.opacityValue = percentValue / 100;
     this.hasUnsavedChanges = true;
   }
 
@@ -508,8 +485,20 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     return region?.stateCalculations || [];
   }
 
+  /**
+   * Returns the list of possible state values for a given region + calculation.
+   * These come from the colorStateMappings on the state calculation.
+   */
+  getStateValuesForCalc(regionId: string, calcId: string): string[] {
+    const region = this.monitoredRegions.find((r: any) => r.id === regionId);
+    if (!region) return [];
+    const calc = region.stateCalculations.find((c: any) => c.id === calcId);
+    if (!calc) return [];
+    return calc.colorStateMappings.map((m: any) => m.stateValue).filter((v: string) => v);
+  }
+
   // ---------------------------------------------------------------------------
-  // Save
+  // Save / Import / Export
   // ---------------------------------------------------------------------------
 
   async saveAllGroups(): Promise<void> {
@@ -518,10 +507,6 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     await this.electronService.saveConfig(config);
     this.hasUnsavedChanges = false;
   }
-
-  // ---------------------------------------------------------------------------
-  // Import / Export
-  // ---------------------------------------------------------------------------
 
   async exportGroups(): Promise<void> {
     const json = await this.electronService.exportOverlayGroups();

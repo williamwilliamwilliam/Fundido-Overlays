@@ -34,6 +34,7 @@ const IPC = {
   DEBUG_LOG:                   'debug:log',
   PICKER_START:                'picker:start',
   PICKER_REGION_UPDATE:        'picker:region-update',
+  DIALOG_OPEN_FILE:            'dialog:open-file',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -83,6 +84,10 @@ const fundidoApi = {
 
   setWorkingGroups: (groups: any[]): Promise<{ success: boolean }> =>
     ipcRenderer.invoke(IPC.GROUPS_SET_WORKING, groups),
+
+  // -- File dialogs -----------------------------------------------------------
+  openFileDialog: (options?: any): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.DIALOG_OPEN_FILE, options),
 
   onPickerRegionUpdate: (callback: (region: { x: number; y: number; width: number; height: number }) => void): void => {
     ipcRenderer.on(IPC.PICKER_REGION_UPDATE, (_event, region) => {

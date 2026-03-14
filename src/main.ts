@@ -16,66 +16,66 @@ import * as IpcChannels from './shared/ipc-channels';
 // ---------------------------------------------------------------------------
 
 interface WindowBounds {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    isMaximized: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  isMaximized: boolean;
 }
 
 function getWindowBoundsFilePath(): string {
-    return path.join(app.getPath('userData'), 'window-bounds.json');
+  return path.join(app.getPath('userData'), 'window-bounds.json');
 }
 
 function loadWindowBounds(): WindowBounds | null {
-    try {
-        const filePath = getWindowBoundsFilePath();
-        const fileExists = fs.existsSync(filePath);
-        if (!fileExists) return null;
+  try {
+    const filePath = getWindowBoundsFilePath();
+    const fileExists = fs.existsSync(filePath);
+    if (!fileExists) return null;
 
-        const rawJson = fs.readFileSync(filePath, 'utf-8');
-        const parsed = JSON.parse(rawJson) as WindowBounds;
+    const rawJson = fs.readFileSync(filePath, 'utf-8');
+    const parsed = JSON.parse(rawJson) as WindowBounds;
 
-        // Validate that the saved position is still on a visible display
-        const savedCenterX = parsed.x + parsed.width / 2;
-        const savedCenterY = parsed.y + parsed.height / 2;
-        const isOnAnyDisplay = screen.getAllDisplays().some((display) => {
-            const bounds = display.bounds;
-            return (
-                savedCenterX >= bounds.x &&
-                savedCenterX <= bounds.x + bounds.width &&
-                savedCenterY >= bounds.y &&
-                savedCenterY <= bounds.y + bounds.height
-            );
-        });
+    // Validate that the saved position is still on a visible display
+    const savedCenterX = parsed.x + parsed.width / 2;
+    const savedCenterY = parsed.y + parsed.height / 2;
+    const isOnAnyDisplay = screen.getAllDisplays().some((display) => {
+      const bounds = display.bounds;
+      return (
+        savedCenterX >= bounds.x &&
+        savedCenterX <= bounds.x + bounds.width &&
+        savedCenterY >= bounds.y &&
+        savedCenterY <= bounds.y + bounds.height
+      );
+    });
 
-        if (!isOnAnyDisplay) {
-            logger.info(LogCategory.General, 'Saved window position is off-screen — using defaults.');
-            return null;
-        }
-
-        return parsed;
-    } catch {
-        return null;
+    if (!isOnAnyDisplay) {
+      logger.info(LogCategory.General, 'Saved window position is off-screen — using defaults.');
+      return null;
     }
+
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function saveWindowBounds(window: BrowserWindow): void {
-    try {
-        const isMaximized = window.isMaximized();
-        // Save the non-maximized bounds so restoring from maximized works correctly
-        const bounds = isMaximized ? (window as any).__lastNonMaximizedBounds || window.getBounds() : window.getBounds();
-        const windowBounds: WindowBounds = {
-            x: bounds.x,
-            y: bounds.y,
-            width: bounds.width,
-            height: bounds.height,
-            isMaximized,
-        };
-        fs.writeFileSync(getWindowBoundsFilePath(), JSON.stringify(windowBounds), 'utf-8');
-    } catch {
-        // ignore
-    }
+  try {
+    const isMaximized = window.isMaximized();
+    // Save the non-maximized bounds so restoring from maximized works correctly
+    const bounds = isMaximized ? (window as any).__lastNonMaximizedBounds || window.getBounds() : window.getBounds();
+    const windowBounds: WindowBounds = {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      isMaximized,
+    };
+    fs.writeFileSync(getWindowBoundsFilePath(), JSON.stringify(windowBounds), 'utf-8');
+  } catch {
+    // ignore
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ const overlayWindowManager = new OverlayWindowManager();
 
 /** Mutable reference so IPC handlers can read/write the active config. */
 const currentConfigRef: { config: FundidoConfig } = {
-    config: configService.load(),
+  config: configService.load(),
 };
 
 /**
@@ -99,7 +99,7 @@ const currentConfigRef: { config: FundidoConfig } = {
  * Set to null when no working copy has been pushed (falls back to saved config).
  */
 const workingRegionsRef: { regions: any[] | null } = {
-    regions: null,
+  regions: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -109,74 +109,74 @@ const workingRegionsRef: { regions: any[] | null } = {
 let mainWindow: BrowserWindow | null = null;
 
 function createMainWindow(): void {
-    const isDevelopmentMode = process.argv.includes('--dev');
-    const savedBounds = loadWindowBounds();
+  const isDevelopmentMode = process.argv.includes('--dev');
+  const savedBounds = loadWindowBounds();
 
-    const windowOptions: Electron.BrowserWindowConstructorOptions = {
-        width: savedBounds?.width ?? 1280,
-        height: savedBounds?.height ?? 800,
-        title: 'Fundido Overlays',
-        webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
-            contextIsolation: true,
-            nodeIntegration: false,
-        },
-    };
+  const windowOptions: Electron.BrowserWindowConstructorOptions = {
+    width: savedBounds?.width ?? 1280,
+    height: savedBounds?.height ?? 800,
+    title: 'Fundido Overlays',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  };
 
-    // Only set position if we have saved bounds (otherwise let the OS center it)
-    if (savedBounds) {
-        windowOptions.x = savedBounds.x;
-        windowOptions.y = savedBounds.y;
+  // Only set position if we have saved bounds (otherwise let the OS center it)
+  if (savedBounds) {
+    windowOptions.x = savedBounds.x;
+    windowOptions.y = savedBounds.y;
+  }
+
+  mainWindow = new BrowserWindow(windowOptions);
+
+  if (savedBounds?.isMaximized) {
+    mainWindow.maximize();
+  }
+
+  // Track non-maximized bounds so we can restore them correctly
+  (mainWindow as any).__lastNonMaximizedBounds = mainWindow.getBounds();
+
+  mainWindow.on('resize', () => {
+    if (mainWindow && !mainWindow.isMaximized()) {
+      (mainWindow as any).__lastNonMaximizedBounds = mainWindow.getBounds();
     }
+    if (mainWindow) saveWindowBounds(mainWindow);
+  });
 
-    mainWindow = new BrowserWindow(windowOptions);
-
-    if (savedBounds?.isMaximized) {
-        mainWindow.maximize();
+  mainWindow.on('move', () => {
+    if (mainWindow && !mainWindow.isMaximized()) {
+      (mainWindow as any).__lastNonMaximizedBounds = mainWindow.getBounds();
     }
+    if (mainWindow) saveWindowBounds(mainWindow);
+  });
 
-    // Track non-maximized bounds so we can restore them correctly
-    (mainWindow as any).__lastNonMaximizedBounds = mainWindow.getBounds();
+  mainWindow.on('maximize', () => {
+    if (mainWindow) saveWindowBounds(mainWindow);
+  });
 
-    mainWindow.on('resize', () => {
-        if (mainWindow && !mainWindow.isMaximized()) {
-            (mainWindow as any).__lastNonMaximizedBounds = mainWindow.getBounds();
-        }
-        if (mainWindow) saveWindowBounds(mainWindow);
-    });
+  mainWindow.on('unmaximize', () => {
+    if (mainWindow) saveWindowBounds(mainWindow);
+  });
 
-    mainWindow.on('move', () => {
-        if (mainWindow && !mainWindow.isMaximized()) {
-            (mainWindow as any).__lastNonMaximizedBounds = mainWindow.getBounds();
-        }
-        if (mainWindow) saveWindowBounds(mainWindow);
-    });
+  logger.setMainWindow(mainWindow);
+  previewService.setMainWindow(mainWindow);
 
-    mainWindow.on('maximize', () => {
-        if (mainWindow) saveWindowBounds(mainWindow);
-    });
+  if (isDevelopmentMode) {
+    const angularDevServerUrl = 'http://localhost:4241';
+    mainWindow.loadURL(angularDevServerUrl);
+    mainWindow.webContents.openDevTools();
+    logger.info(LogCategory.General, `Dev mode — loading Angular from ${angularDevServerUrl}`);
+  } else {
+    const angularDistPath = path.join(__dirname, '..', 'dist', 'ui', 'browser', 'index.html');
+    mainWindow.loadFile(angularDistPath);
+    logger.info(LogCategory.General, 'Production mode — loading bundled Angular app.');
+  }
 
-    mainWindow.on('unmaximize', () => {
-        if (mainWindow) saveWindowBounds(mainWindow);
-    });
-
-    logger.setMainWindow(mainWindow);
-    previewService.setMainWindow(mainWindow);
-
-    if (isDevelopmentMode) {
-        const angularDevServerUrl = 'http://localhost:4241';
-        mainWindow.loadURL(angularDevServerUrl);
-        mainWindow.webContents.openDevTools();
-        logger.info(LogCategory.General, `Dev mode — loading Angular from ${angularDevServerUrl}`);
-    } else {
-        const angularDistPath = path.join(__dirname, '..', 'dist', 'ui', 'browser', 'index.html');
-        mainWindow.loadFile(angularDistPath);
-        logger.info(LogCategory.General, 'Production mode — loading bundled Angular app.');
-    }
-
-    mainWindow.on('closed', () => {
-        mainWindow = null;
-    });
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -184,50 +184,50 @@ function createMainWindow(): void {
 // ---------------------------------------------------------------------------
 
 function setupCaptureToOverlayPipeline(): void {
-    captureService.setFrameCapturedCallback((frame) => {
-        // Feed frame to preview service (it picks up the latest at its own FPS)
-        previewService.onFrameCaptured(frame);
+  captureService.setFrameCapturedCallback((frame) => {
+    // Feed frame to preview service (it picks up the latest at its own FPS)
+    previewService.onFrameCaptured(frame);
 
-        // Use working regions from the UI if available, otherwise fall back to saved config.
-        // This lets the UI see median colors and state results for unsaved regions.
-        const monitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions;
+    // Use working regions from the UI if available, otherwise fall back to saved config.
+    // This lets the UI see median colors and state results for unsaved regions.
+    const monitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions;
 
-        const hasNoRegionsToEvaluate = monitoredRegions.length === 0;
-        if (hasNoRegionsToEvaluate) {
-            return;
-        }
+    const hasNoRegionsToEvaluate = monitoredRegions.length === 0;
+    if (hasNoRegionsToEvaluate) {
+      return;
+    }
 
-        // Region bounds are stored in screen-absolute logical coordinates.
-        // The frame buffer is in native physical pixels starting at (0,0) for
-        // the captured display. We need to convert before evaluating.
-        const captureSourceString = currentConfigRef.config.gameCapture.captureSource;
-        const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
-        const allDisplays = require('electron').screen.getAllDisplays();
-        const captureDisplay = allDisplays[displayIndex] || allDisplays[0];
-        const displayOriginX = captureDisplay.bounds.x;
-        const displayOriginY = captureDisplay.bounds.y;
-        const dpiScaleFactor = captureDisplay.scaleFactor || 1;
+    // Region bounds are stored in screen-absolute logical coordinates.
+    // The frame buffer is in native physical pixels starting at (0,0) for
+    // the captured display. We need to convert before evaluating.
+    const captureSourceString = currentConfigRef.config.gameCapture.captureSource;
+    const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
+    const allDisplays = require('electron').screen.getAllDisplays();
+    const captureDisplay = allDisplays[displayIndex] || allDisplays[0];
+    const displayOriginX = captureDisplay.bounds.x;
+    const displayOriginY = captureDisplay.bounds.y;
+    const dpiScaleFactor = captureDisplay.scaleFactor || 1;
 
-        const physicalRegions = monitoredRegions.map((region: any) => ({
-            ...region,
-            bounds: {
-                x: Math.round((region.bounds.x - displayOriginX) * dpiScaleFactor),
-                y: Math.round((region.bounds.y - displayOriginY) * dpiScaleFactor),
-                width: Math.round(region.bounds.width * dpiScaleFactor),
-                height: Math.round(region.bounds.height * dpiScaleFactor),
-            },
-        }));
+    const physicalRegions = monitoredRegions.map((region: any) => ({
+      ...region,
+      bounds: {
+        x: Math.round((region.bounds.x - displayOriginX) * dpiScaleFactor),
+        y: Math.round((region.bounds.y - displayOriginY) * dpiScaleFactor),
+        width: Math.round(region.bounds.width * dpiScaleFactor),
+        height: Math.round(region.bounds.height * dpiScaleFactor),
+      },
+    }));
 
-        const frameState = evaluateFrameState(frame, physicalRegions);
+    const frameState = evaluateFrameState(frame, physicalRegions);
 
-        // Push state to overlay windows
-        overlayWindowManager.broadcastFrameState(frameState);
+    // Push state to overlay windows
+    overlayWindowManager.broadcastFrameState(frameState);
 
-        // Push state to the Angular UI for the debug console / live preview
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send(IpcChannels.STATE_UPDATED, frameState);
-        }
-    });
+    // Push state to the Angular UI for the debug console / live preview
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IpcChannels.STATE_UPDATED, frameState);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -235,25 +235,30 @@ function setupCaptureToOverlayPipeline(): void {
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(() => {
-    logger.info(LogCategory.General, 'Fundido Overlays starting up.');
+  logger.info(LogCategory.General, 'Fundido Overlays starting up.');
 
-    registerIpcHandlers(configService, captureService, previewService, currentConfigRef, workingRegionsRef);
-    createMainWindow();
-    setupCaptureToOverlayPipeline();
+  registerIpcHandlers(configService, captureService, previewService, overlayWindowManager, currentConfigRef, workingRegionsRef);
+  createMainWindow();
+  setupCaptureToOverlayPipeline();
 
-    // Create overlay windows for any groups defined in the saved config
-    overlayWindowManager.syncOverlayWindows(currentConfigRef.config.overlayGroups);
+  // Pipe preview frames to overlay windows for region mirror rendering
+  previewService.setOnPreviewFrameSent((previewData) => {
+    overlayWindowManager.broadcastPreviewFrame(previewData);
+  });
+
+  // Create overlay windows for any groups defined in the saved config
+  overlayWindowManager.syncOverlayWindows(currentConfigRef.config.overlayGroups);
 });
 
 app.on('window-all-closed', () => {
-    logger.info(LogCategory.General, 'All windows closed — shutting down.');
-    captureService.stop();
-    previewService.stop();
-    overlayWindowManager.closeAll();
-    app.quit();
+  logger.info(LogCategory.General, 'All windows closed — shutting down.');
+  captureService.stop();
+  previewService.stop();
+  overlayWindowManager.closeAll();
+  app.quit();
 });
 
 app.on('before-quit', () => {
-    configService.save(currentConfigRef.config);
-    logger.info(LogCategory.General, 'Configuration saved on exit.');
+  configService.save(currentConfigRef.config);
+  logger.info(LogCategory.General, 'Configuration saved on exit.');
 });

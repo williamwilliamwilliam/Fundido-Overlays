@@ -1,5 +1,4 @@
 import { BrowserWindow, screen } from 'electron';
-import * as path from 'path';
 import {
   OverlayGroup,
   OverlayGroupId,
@@ -17,25 +16,28 @@ export class OverlayWindowManager {
   private overlayWindowsByGroupId = new Map<OverlayGroupId, BrowserWindow>();
 
   /**
-   * Creates (or recreates) overlay windows for the given groups.
-   * Call this when the user's overlay group configuration changes.
+   * Creates, updates, or removes overlay windows to match the given groups.
+   * Call this whenever the overlay group configuration changes.
    */
   public syncOverlayWindows(overlayGroups: OverlayGroup[]): void {
-    // Close windows for groups that no longer exist
     const activeGroupIds = new Set(overlayGroups.map((group) => group.id));
+
+    // Close windows for groups that no longer exist
     for (const [groupId, window] of this.overlayWindowsByGroupId) {
       const groupWasRemoved = !activeGroupIds.has(groupId);
       if (groupWasRemoved) {
         logger.info(LogCategory.Overlay, `Closing overlay window for removed group: ${groupId}`);
-        window.close();
+        if (!window.isDestroyed()) window.close();
         this.overlayWindowsByGroupId.delete(groupId);
       }
     }
 
-    // Create windows for new groups
+    // Create or update windows for each group
     for (const group of overlayGroups) {
-      const windowAlreadyExists = this.overlayWindowsByGroupId.has(group.id);
-      if (!windowAlreadyExists) {
+      const existingWindow = this.overlayWindowsByGroupId.get(group.id);
+      if (existingWindow && !existingWindow.isDestroyed()) {
+        existingWindow.webContents.send('overlay:init', group);
+      } else {
         this.createOverlayWindow(group);
       }
     }
@@ -43,12 +45,23 @@ export class OverlayWindowManager {
 
   /**
    * Pushes updated frame state to all overlay windows so they can
-   * re-evaluate visibility conditions and update their display.
+   * re-evaluate rules and update their display.
    */
   public broadcastFrameState(frameState: FrameState): void {
     for (const [_groupId, window] of this.overlayWindowsByGroupId) {
       if (!window.isDestroyed()) {
         window.webContents.send('overlay:frame-state', frameState);
+      }
+    }
+  }
+
+  /**
+   * Sends preview frame data to overlay windows for region mirror rendering.
+   */
+  public broadcastPreviewFrame(previewData: any): void {
+    for (const [_groupId, window] of this.overlayWindowsByGroupId) {
+      if (!window.isDestroyed()) {
+        window.webContents.send('overlay:preview-frame', previewData);
       }
     }
   }
@@ -82,28 +95,202 @@ export class OverlayWindowManager {
       skipTaskbar: true,
       resizable: false,
       focusable: false,
+      hasShadow: false,
       webPreferences: {
-        preload: path.join(__dirname, '..', 'preload-overlay.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
+        contextIsolation: false,
+        nodeIntegration: true,
+        webSecurity: false, // Allow loading local file:// images from data URL origin
       },
     });
 
-    // Make the window click-through so it doesn't intercept game input
     overlayWindow.setIgnoreMouseEvents(true);
+    overlayWindow.setAlwaysOnTop(true, 'screen-saver');
 
-    // Load the overlay renderer HTML
-    // In production this will be a bundled file; in dev it could be a local URL.
-    const overlayHtmlPath = path.join(__dirname, '..', 'overlay-renderer', 'index.html');
-    overlayWindow.loadFile(overlayHtmlPath).catch((error) => {
-      logger.error(LogCategory.Overlay, `Failed to load overlay HTML for group "${group.name}".`, error);
-    });
+    // Load inline HTML as a data URL to avoid file path issues between src/ and dist/
+    const html = buildOverlayRendererHtml();
+    overlayWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
-    // Once loaded, send the group configuration so it knows what to render
     overlayWindow.webContents.once('did-finish-load', () => {
       overlayWindow.webContents.send('overlay:init', group);
     });
 
     this.overlayWindowsByGroupId.set(group.id, overlayWindow);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Inline overlay renderer HTML
+// ---------------------------------------------------------------------------
+
+function buildOverlayRendererHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    user-select: none;
+  }
+  #overlay-container {
+    position: absolute;
+    display: flex;
+  }
+  .overlay-item {
+    transition: opacity 0.15s ease;
+  }
+</style>
+</head>
+<body>
+<div id="overlay-container"></div>
+<script>
+  const { ipcRenderer } = require('electron');
+
+  let overlayGroup = null;
+
+  ipcRenderer.on('overlay:init', (_event, group) => {
+    overlayGroup = group;
+    applyGroupLayout(group);
+    renderOverlayElements(group);
+    applyDefaults(group);
+  });
+
+  ipcRenderer.on('overlay:frame-state', (_event, frameState) => {
+    if (overlayGroup) evaluateRules(overlayGroup, frameState);
+  });
+
+  function applyGroupLayout(group) {
+    const c = document.getElementById('overlay-container');
+    const p = group.position;
+    if (p.mode === 'absolute') {
+      c.style.left = p.x + 'px';
+      c.style.top = p.y + 'px';
+    }
+    const dirMap = { right: 'row', left: 'row-reverse', down: 'column', up: 'column-reverse' };
+    c.style.flexDirection = dirMap[group.growDirection] || 'row';
+    const alMap = { start: 'flex-start', center: 'center', end: 'flex-end' };
+    c.style.alignItems = alMap[group.alignment] || 'flex-start';
+    c.style.gap = (group.gap || 4) + 'px';
+  }
+
+  function renderOverlayElements(group) {
+    const c = document.getElementById('overlay-container');
+    c.innerHTML = '';
+    for (const ov of group.overlays) {
+      const el = document.createElement('div');
+      el.classList.add('overlay-item');
+      el.dataset.overlayId = ov.id;
+      if (ov.contentType === 'text' && ov.textConfig) renderText(el, ov.textConfig);
+      else if (ov.contentType === 'image' && ov.imageConfig) renderImage(el, ov.imageConfig);
+      else if (ov.contentType === 'regionMirror') renderMirror(el, ov.regionMirrorConfig);
+      c.appendChild(el);
+    }
+  }
+
+  function renderText(el, cfg) {
+    el.style.fontFamily = cfg.fontFamily || 'Segoe UI';
+    el.style.fontSize = (cfg.fontSize || 16) + 'px';
+    el.style.fontWeight = cfg.fontWeight || 'normal';
+    el.style.fontStyle = cfg.fontStyle || 'normal';
+    el.style.color = cfg.color || '#ffffff';
+    el.style.backgroundColor = cfg.backgroundColor || 'rgba(0,0,0,0.6)';
+    el.style.padding = (cfg.padding || 4) + 'px';
+    el.style.borderRadius = '4px';
+    el.style.whiteSpace = 'nowrap';
+    el.textContent = cfg.text || '';
+  }
+
+  function renderImage(el, cfg) {
+    if (!cfg || !cfg.filePath) return;
+    const img = document.createElement('img');
+    // Convert Windows path to file:// URL
+    let fileSrc = cfg.filePath;
+    const isAbsoluteWindowsPath = /^[A-Za-z]:/.test(fileSrc);
+    if (isAbsoluteWindowsPath) {
+      fileSrc = 'file:///' + fileSrc.replace(/\\\\/g, '/');
+    }
+    img.src = fileSrc;
+    img.alt = '';
+    img.onerror = function() { el.textContent = '[Image not found]'; el.style.color = '#ff4444'; el.style.fontSize = '12px'; };
+    const s = cfg.size || {};
+    if (s.scale && s.scale !== 1.0) { img.style.transform = 'scale(' + s.scale + ')'; img.style.transformOrigin = 'top left'; }
+    if (s.width) img.style.width = s.width + 'px';
+    if (s.height) img.style.height = s.height + 'px';
+    if (s.maxWidth) img.style.maxWidth = s.maxWidth + 'px';
+    if (s.maxHeight) img.style.maxHeight = s.maxHeight + 'px';
+    el.appendChild(img);
+  }
+
+  function renderMirror(el, cfg) {
+    if (!cfg) return;
+    const s = cfg.size || {};
+    const mirrorImg = document.createElement('img');
+    mirrorImg.dataset.mirrorRegionId = cfg.monitoredRegionId || '';
+    mirrorImg.alt = 'Region mirror';
+    mirrorImg.style.imageRendering = 'auto';
+    if (s.scale && s.scale !== 1.0) { mirrorImg.style.transform = 'scale(' + s.scale + ')'; mirrorImg.style.transformOrigin = 'top left'; }
+    if (s.width) mirrorImg.style.width = s.width + 'px';
+    if (s.height) mirrorImg.style.height = s.height + 'px';
+    el.appendChild(mirrorImg);
+  }
+
+  // Update mirror overlays with preview frame data
+  ipcRenderer.on('overlay:preview-frame', (_event, previewData) => {
+    if (!previewData || !previewData.imageDataUrl) return;
+    const mirrorImgs = document.querySelectorAll('img[data-mirror-region-id]');
+    for (const img of mirrorImgs) {
+      // For now, show the full preview frame in all mirrors.
+      // TODO: Crop to the specific monitored region bounds.
+      img.src = previewData.imageDataUrl;
+    }
+  });
+
+  function applyDefaults(group) {
+    for (const ov of group.overlays) {
+      const el = document.querySelector('[data-overlay-id="' + ov.id + '"]');
+      if (!el) continue;
+      el.style.display = (ov.defaultVisible !== false) ? '' : 'none';
+      el.style.opacity = String(ov.defaultOpacity !== undefined ? ov.defaultOpacity : 1);
+    }
+  }
+
+  function evaluateRules(group, frameState) {
+    for (const ov of group.overlays) {
+      const el = document.querySelector('[data-overlay-id="' + ov.id + '"]');
+      if (!el) continue;
+      const defVis = ov.defaultVisible !== false;
+      const defOp = ov.defaultOpacity !== undefined ? ov.defaultOpacity : 1;
+      let vis = defVis, op = defOp;
+      const rules = ov.rules || [];
+      for (const rule of rules) {
+        if (evalConds(rule.conditions, frameState)) {
+          if (rule.action === 'show') { vis = true; op = 1; }
+          else if (rule.action === 'hide') { vis = false; }
+          else if (rule.action === 'opacity') { vis = true; op = rule.opacityValue !== undefined ? rule.opacityValue : 1; }
+          break;
+        }
+      }
+      el.style.display = vis ? '' : 'none';
+      el.style.opacity = String(op);
+    }
+  }
+
+  function evalConds(conds, fs) {
+    if (!conds || conds.length === 0) return true;
+    for (const c of conds) {
+      const rs = fs.regionStates.find(r => r.monitoredRegionId === c.monitoredRegionId);
+      if (!rs) return false;
+      const cr = rs.calculationResults.find(r => r.stateCalculationId === c.stateCalculationId);
+      if (!cr) return false;
+      if (c.operator === 'equals' && cr.currentValue !== c.value) return false;
+      if (c.operator === 'notEquals' && cr.currentValue === c.value) return false;
+    }
+    return true;
+  }
+</script>
+</body>
+</html>`;
 }

@@ -205,9 +205,13 @@ export interface Overlay {
   textConfig?: OverlayTextConfig;
   imageConfig?: OverlayImageConfig;
   regionMirrorConfig?: OverlayRegionMirrorConfig;
+  /** Whether the overlay is visible by default before any rules are evaluated. */
+  defaultVisible: boolean;
+  /** Default opacity (0–1) before any rules are evaluated. */
+  defaultOpacity: number;
   /**
    * Rules evaluated top-down. First matching rule's action is taken.
-   * If no rules match, the overlay is shown at full opacity (default visible).
+   * If no rules match, defaultVisible and defaultOpacity apply.
    */
   rules: OverlayRule[];
 }

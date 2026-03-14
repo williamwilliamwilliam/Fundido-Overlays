@@ -4,19 +4,17 @@ import { FundidoConfig, MonitoredRegion, OverlayGroup } from '../shared';
 import { ConfigPersistenceService } from '../persistence/config-persistence.service';
 import { GameCaptureService } from '../capture/game-capture.service';
 import { PreviewFrameService } from '../capture/preview-frame.service';
+import { OverlayWindowManager } from '../overlay/overlay-window-manager';
 import { logger, LogCategory } from '../shared/logger';
 
 /**
  * Registers all IPC handlers that the Angular UI (renderer process) can invoke.
- *
- * This is the glue layer between the UI and the main-process services.
- * Each handler is a thin adapter — it validates the incoming request,
- * delegates to the appropriate service, and returns a result.
  */
 export function registerIpcHandlers(
   configService: ConfigPersistenceService,
   captureService: GameCaptureService,
   previewService: PreviewFrameService,
+  overlayWindowManager: OverlayWindowManager,
   currentConfigRef: { config: FundidoConfig },
   workingRegionsRef: { regions: any[] | null }
 ): void {
@@ -34,6 +32,8 @@ export function registerIpcHandlers(
     logger.debug(LogCategory.Ipc, 'CONFIG_SAVE invoked');
     currentConfigRef.config = config;
     configService.save(config);
+    // Sync overlay windows whenever config is saved
+    overlayWindowManager.syncOverlayWindows(config.overlayGroups || []);
     return { success: true };
   });
 
@@ -146,7 +146,24 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle(IpcChannels.GROUPS_SET_WORKING, (_event: IpcMainInvokeEvent, groups: any[] | null) => {
-    // For now, just acknowledge. Overlay window manager sync will come later.
     return { success: true };
+  });
+
+  // -------------------------------------------------------------------------
+  // File Dialogs
+  // -------------------------------------------------------------------------
+
+  ipcMain.handle(IpcChannels.DIALOG_OPEN_FILE, async (_event: IpcMainInvokeEvent, options: any) => {
+    const { dialog } = require('electron');
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: options?.filters || [
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    const wasCancelled = result.canceled || result.filePaths.length === 0;
+    if (wasCancelled) return null;
+    return result.filePaths[0];
   });
 }

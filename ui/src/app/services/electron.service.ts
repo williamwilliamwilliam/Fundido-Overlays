@@ -121,6 +121,13 @@ export class ElectronService {
     await window.fundidoApi.setWorkingGroups(groups);
   }
 
+  // -- File dialogs -----------------------------------------------------------
+
+  public async openFileDialog(options?: any): Promise<string | null> {
+    if (!this.isRunningInElectron) return null;
+    return window.fundidoApi.openFileDialog(options);
+  }
+
   // -- IPC listeners --------------------------------------------------------
 
   private registerIpcListeners(): void {
