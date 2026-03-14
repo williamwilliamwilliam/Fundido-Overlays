@@ -141,6 +141,7 @@ export function evaluateFrameState(
 
     return {
       monitoredRegionId: region.id,
+      medianColor,
       calculationResults,
     };
   });

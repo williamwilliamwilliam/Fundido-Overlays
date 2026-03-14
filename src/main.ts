@@ -80,7 +80,28 @@ function setupCaptureToOverlayPipeline(): void {
       return;
     }
 
-    const frameState = evaluateFrameState(frame, monitoredRegions);
+    // Region bounds are stored in screen-absolute logical coordinates.
+    // The frame buffer is in native physical pixels starting at (0,0) for
+    // the captured display. We need to convert before evaluating.
+    const captureSourceString = currentConfigRef.config.gameCapture.captureSource;
+    const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
+    const allDisplays = require('electron').screen.getAllDisplays();
+    const captureDisplay = allDisplays[displayIndex] || allDisplays[0];
+    const displayOriginX = captureDisplay.bounds.x;
+    const displayOriginY = captureDisplay.bounds.y;
+    const dpiScaleFactor = captureDisplay.scaleFactor || 1;
+
+    const physicalRegions = monitoredRegions.map((region: any) => ({
+      ...region,
+      bounds: {
+        x: Math.round((region.bounds.x - displayOriginX) * dpiScaleFactor),
+        y: Math.round((region.bounds.y - displayOriginY) * dpiScaleFactor),
+        width: Math.round(region.bounds.width * dpiScaleFactor),
+        height: Math.round(region.bounds.height * dpiScaleFactor),
+      },
+    }));
+
+    const frameState = evaluateFrameState(frame, physicalRegions);
 
     // Push state to overlay windows
     overlayWindowManager.broadcastFrameState(frameState);

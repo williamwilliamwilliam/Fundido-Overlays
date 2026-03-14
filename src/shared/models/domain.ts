@@ -207,6 +207,8 @@ export interface StateCalculationResult {
 /** Runtime state for a single monitored region. */
 export interface MonitoredRegionState {
   monitoredRegionId: MonitoredRegionId;
+  /** The median color of the region for this frame, always computed. */
+  medianColor: RgbColor;
   calculationResults: StateCalculationResult[];
 }
 
