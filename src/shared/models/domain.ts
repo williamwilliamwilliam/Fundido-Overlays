@@ -110,6 +110,8 @@ export interface OllamaCalcConfig {
   numPredict: number;
   /** Whether to enable chain-of-thought reasoning. Default false. */
   think: boolean;
+  /** Skip inference if the region pixels haven't changed since the last call. Default true. */
+  skipIfUnchanged: boolean;
 }
 
 /**

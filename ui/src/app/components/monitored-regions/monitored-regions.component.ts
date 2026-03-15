@@ -174,6 +174,12 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                         (ngModelChange)="onFieldChanged()" />
                       Think
                     </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox"
+                        [(ngModel)]="calc.ollamaConfig.skipIfUnchanged"
+                        (ngModelChange)="onFieldChanged()" />
+                      Skip if unchanged
+                    </label>
                   </div>
                 </div>
               </div>
@@ -758,6 +764,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
         prompt: '',
         numPredict: 5,
         think: false,
+        skipIfUnchanged: true,
       };
     }
     this.pushWorkingRegions();
