@@ -192,9 +192,13 @@ export class OllamaService {
     }
 
     /**
-     * Computes a fast numeric hash of the pixel data in a rectangular region.
-     * Uses a simple FNV-1a inspired hash over sampled pixels for speed.
-     * Samples every Nth pixel to keep it fast for large regions.
+     * Computes a tolerance-aware fingerprint of the pixel data in a region.
+     *
+     * Instead of hashing exact pixel values (which drift due to DXGI capture
+     * artifacts, JPEG compression, and color subsampling), each sampled pixel's
+     * R/G/B channels are quantized into buckets before hashing. A bucket size
+     * of 8 means values 0-7 map to 0, 8-15 map to 1, etc. This absorbs the
+     * small per-frame noise while still detecting meaningful changes.
      */
     private computeRegionPixelHash(frame: CapturedFrame, bounds: Rectangle): number {
         const bytesPerPixel = 4;
@@ -205,9 +209,11 @@ export class OllamaService {
         if (regionWidth <= 0 || regionHeight <= 0) return 0;
 
         const totalPixels = regionWidth * regionHeight;
-        // Sample every Nth pixel. For small regions (<1000px) check every pixel.
-        // For larger regions, sample at most ~500 pixels for speed.
         const sampleStep = totalPixels <= 500 ? 1 : Math.max(1, Math.floor(totalPixels / 500));
+
+        // Quantize each channel to buckets of this size before hashing.
+        // A bucket size of 8 absorbs ±4 of noise per channel.
+        const quantizeBucketSize = 8;
 
         let hash = 2166136261; // FNV offset basis (32-bit)
         let pixelIndex = 0;
@@ -216,12 +222,15 @@ export class OllamaService {
             for (let col = 0; col < regionWidth; col++) {
                 if (pixelIndex % sampleStep === 0) {
                     const offset = (bounds.y + row) * frameRowBytes + (bounds.x + col) * bytesPerPixel;
-                    // Mix B, G, R channels (skip alpha)
-                    hash ^= frame.buffer[offset];
+                    // Quantize B, G, R channels then hash the bucket values
+                    const quantizedBlue = (frame.buffer[offset] / quantizeBucketSize) | 0;
+                    const quantizedGreen = (frame.buffer[offset + 1] / quantizeBucketSize) | 0;
+                    const quantizedRed = (frame.buffer[offset + 2] / quantizeBucketSize) | 0;
+                    hash ^= quantizedBlue;
                     hash = (hash * 16777619) | 0;
-                    hash ^= frame.buffer[offset + 1];
+                    hash ^= quantizedGreen;
                     hash = (hash * 16777619) | 0;
-                    hash ^= frame.buffer[offset + 2];
+                    hash ^= quantizedRed;
                     hash = (hash * 16777619) | 0;
                 }
                 pixelIndex++;
