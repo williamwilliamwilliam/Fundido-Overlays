@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import { FundidoConfig, GameCaptureConfig, PreviewConfig } from '../shared';
+import { FundidoConfig, GameCaptureConfig, PreviewConfig, OcrConfig } from '../shared';
 import { logger, LogCategory } from '../shared/logger';
 
 const CONFIG_FILE_NAME = 'fundido-config.json';
@@ -22,9 +22,15 @@ function buildDefaultConfig(): FundidoConfig {
     jpegQuality: 70,
   };
 
+  const defaultOcr: OcrConfig = {
+    ocrIntervalMs: 200,
+    maxCharacters: 10,
+  };
+
   return {
     gameCapture: defaultGameCapture,
     preview: defaultPreview,
+    ocr: defaultOcr,
     monitoredRegions: [],
     overlayGroups: [],
   };
@@ -65,6 +71,17 @@ export class ConfigPersistenceService {
       if (configIsMissingPreviewSettings) {
         parsed.preview = defaults.preview;
         logger.info(LogCategory.Persistence, 'Backfilled missing preview config with defaults.');
+      }
+
+      const configIsMissingOcrSettings = !parsed.ocr;
+      if (configIsMissingOcrSettings) {
+        parsed.ocr = defaults.ocr;
+        logger.info(LogCategory.Persistence, 'Backfilled missing OCR config with defaults.');
+      }
+
+      const configIsMissingCaptureEnabled = parsed.gameCapture && parsed.gameCapture.captureEnabled === undefined;
+      if (configIsMissingCaptureEnabled) {
+        parsed.gameCapture.captureEnabled = false;
       }
 
       logger.info(LogCategory.Persistence, 'Configuration loaded from disk.');

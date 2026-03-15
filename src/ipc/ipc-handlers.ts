@@ -5,6 +5,7 @@ import { ConfigPersistenceService } from '../persistence/config-persistence.serv
 import { GameCaptureService } from '../capture/game-capture.service';
 import { PreviewFrameService } from '../capture/preview-frame.service';
 import { OverlayWindowManager } from '../overlay/overlay-window-manager';
+import { OcrService } from '../state/ocr.service';
 import { logger, LogCategory } from '../shared/logger';
 
 /**
@@ -15,6 +16,7 @@ export function registerIpcHandlers(
   captureService: GameCaptureService,
   previewService: PreviewFrameService,
   overlayWindowManager: OverlayWindowManager,
+  ocrService: OcrService,
   currentConfigRef: { config: FundidoConfig },
   workingRegionsRef: { regions: any[] | null },
   globalEnabledRef: { enabled: boolean }
@@ -37,6 +39,7 @@ export function registerIpcHandlers(
       const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
       previewService.setCaptureDisplayIndex(displayIndex);
       previewService.start(currentConfigRef.config.preview, currentConfigRef.config.gameCapture.targetFps);
+      ocrService.start(currentConfigRef.config.ocr);
     }
 
     // Restore overlay windows
@@ -48,9 +51,9 @@ export function registerIpcHandlers(
     logger.info(LogCategory.General, 'Global disable — stopping capture and hiding overlays.');
     globalEnabledRef.enabled = false;
 
-    // Stop capture (but don't change captureEnabled in config — we want it to resume on re-enable)
     captureService.stop();
     previewService.stop();
+    ocrService.stop();
 
     // Close all overlay windows
     overlayWindowManager.closeAll();
@@ -136,6 +139,7 @@ export function registerIpcHandlers(
     const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
     previewService.setCaptureDisplayIndex(displayIndex);
     previewService.start(currentConfigRef.config.preview, currentConfigRef.config.gameCapture.targetFps);
+    ocrService.start(currentConfigRef.config.ocr);
 
     // Persist so capture auto-starts on next launch
     currentConfigRef.config.gameCapture.captureEnabled = true;
@@ -147,6 +151,7 @@ export function registerIpcHandlers(
     logger.debug(LogCategory.Ipc, 'CAPTURE_STOP invoked');
     captureService.stop();
     previewService.stop();
+    ocrService.stop();
 
     currentConfigRef.config.gameCapture.captureEnabled = false;
     configService.save(currentConfigRef.config);

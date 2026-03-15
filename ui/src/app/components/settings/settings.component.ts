@@ -108,6 +108,46 @@ import { ElectronService } from '../../services/electron.service';
         </div>
       </div>
 
+      <div class="settings-section">
+        <h3>OCR (Text Recognition)</h3>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label">OCR Interval</label>
+            <span class="setting-hint">
+              How often OCR runs on monitored regions with OCR calculations.
+              Lower values are more responsive but use significantly more CPU.
+            </span>
+          </div>
+          <div class="setting-control">
+            <input
+              type="range"
+              min="100" max="2000" step="50"
+              [(ngModel)]="ocrIntervalMs"
+              (ngModelChange)="onSettingChanged()" />
+            <span class="setting-value">{{ ocrIntervalMs }} ms</span>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label">Max Characters</label>
+            <span class="setting-hint">
+              Maximum characters expected in OCR regions.
+              Lower values help Tesseract optimize for short text.
+            </span>
+          </div>
+          <div class="setting-control">
+            <input
+              type="range"
+              min="1" max="50" step="1"
+              [(ngModel)]="ocrMaxCharacters"
+              (ngModelChange)="onSettingChanged()" />
+            <span class="setting-value">{{ ocrMaxCharacters }}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="save-bar" *ngIf="saveMessage">
         <span class="save-message">{{ saveMessage }}</span>
       </div>
@@ -217,6 +257,10 @@ export class SettingsComponent implements OnInit, OnDestroy {
   downsampleMethod = 'bilinear';
   jpegQuality = 70;
 
+  // OCR settings
+  ocrIntervalMs = 200;
+  ocrMaxCharacters = 10;
+
   saveMessage = '';
   private saveDebounceTimer: any = null;
   private static readonly SAVE_DEBOUNCE_MS = 500;
@@ -234,6 +278,12 @@ export class SettingsComponent implements OnInit, OnDestroy {
       this.previewScalePercent = Math.round((preview.previewScale ?? 0.5) * 100);
       this.downsampleMethod = preview.downsampleMethod ?? 'bilinear';
       this.jpegQuality = preview.jpegQuality ?? 70;
+    }
+
+    const ocr = config.ocr;
+    if (ocr) {
+      this.ocrIntervalMs = ocr.ocrIntervalMs ?? 200;
+      this.ocrMaxCharacters = ocr.maxCharacters ?? 10;
     }
 
     await this.refreshDisplays();
@@ -276,6 +326,11 @@ export class SettingsComponent implements OnInit, OnDestroy {
       previewScale: this.previewScalePercent / 100,
       downsampleMethod: this.downsampleMethod,
       jpegQuality: this.jpegQuality,
+    };
+
+    config.ocr = {
+      ocrIntervalMs: this.ocrIntervalMs,
+      maxCharacters: this.ocrMaxCharacters,
     };
 
     await this.electronService.saveConfig(config);

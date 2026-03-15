@@ -6,6 +6,7 @@ import { GameCaptureService } from './capture/game-capture.service';
 import { PreviewFrameService } from './capture/preview-frame.service';
 import { OverlayWindowManager } from './overlay/overlay-window-manager';
 import { evaluateFrameState } from './state/state-calculation.service';
+import { OcrService } from './state/ocr.service';
 import { registerIpcHandlers } from './ipc/ipc-handlers';
 import { logger, LogCategory } from './shared/logger';
 import { FundidoConfig } from './shared';
@@ -86,6 +87,7 @@ const configService = new ConfigPersistenceService();
 const captureService = new GameCaptureService();
 const previewService = new PreviewFrameService();
 const overlayWindowManager = new OverlayWindowManager();
+const ocrService = new OcrService();
 
 /** Mutable reference so IPC handlers can read/write the active config. */
 const currentConfigRef: { config: FundidoConfig } = {
@@ -223,7 +225,12 @@ function setupCaptureToOverlayPipeline(): void {
       },
     }));
 
-    const frameState = evaluateFrameState(frame, physicalRegions);
+    // Feed the frame and region config to the OCR service
+    ocrService.onFrameCaptured(frame);
+    ocrService.setRegions(physicalRegions);
+
+    // Merge any available OCR results into the frame state
+    const frameState = evaluateFrameState(frame, physicalRegions, ocrService.getAllResults());
 
     // Push state to overlay windows
     overlayWindowManager.broadcastFrameState(frameState);
@@ -242,7 +249,7 @@ function setupCaptureToOverlayPipeline(): void {
 app.whenReady().then(() => {
   logger.info(LogCategory.General, 'Fundido Overlays starting up.');
 
-  registerIpcHandlers(configService, captureService, previewService, overlayWindowManager, currentConfigRef, workingRegionsRef, globalEnabledRef);
+  registerIpcHandlers(configService, captureService, previewService, overlayWindowManager, ocrService, currentConfigRef, workingRegionsRef, globalEnabledRef);
   createMainWindow();
   setupCaptureToOverlayPipeline();
 
@@ -266,6 +273,7 @@ app.whenReady().then(() => {
     const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
     previewService.setCaptureDisplayIndex(displayIndex);
     previewService.start(currentConfigRef.config.preview, currentConfigRef.config.gameCapture.targetFps);
+    ocrService.start(currentConfigRef.config.ocr);
   }
 });
 
@@ -273,6 +281,7 @@ app.on('window-all-closed', () => {
   logger.info(LogCategory.General, 'All windows closed — shutting down.');
   captureService.stop();
   previewService.stop();
+  ocrService.shutdown();
   overlayWindowManager.closeAll();
   app.quit();
 });

@@ -127,17 +127,41 @@ function evaluateSingleCalculation(
 /**
  * Evaluates all monitored regions against a captured frame and produces
  * a complete FrameState.
+ *
+ * OCR-type calculations are skipped here — they run on their own throttled
+ * interval via OcrService. Their results are merged in via the optional
+ * ocrResults parameter.
  */
 export function evaluateFrameState(
   frame: CapturedFrame,
-  monitoredRegions: MonitoredRegion[]
+  monitoredRegions: MonitoredRegion[],
+  ocrResults?: Map<string, StateCalculationResult>
 ): FrameState {
   const regionStates: MonitoredRegionState[] = monitoredRegions.map((region) => {
     const medianColor = computeMedianColorForRegion(frame, region.bounds);
 
-    const calculationResults = region.stateCalculations.map((calculation) =>
-      evaluateSingleCalculation(medianColor, calculation)
-    );
+    const calculationResults: StateCalculationResult[] = [];
+    for (const calculation of region.stateCalculations) {
+      if (calculation.type === 'OCR') {
+        // Use cached OCR result if available
+        const ocrKey = `${region.id}:${calculation.id}`;
+        const ocrResult = ocrResults?.get(ocrKey);
+        if (ocrResult) {
+          calculationResults.push(ocrResult);
+        } else {
+          // No OCR result yet — push a placeholder
+          calculationResults.push({
+            stateCalculationId: calculation.id,
+            medianColor: { red: 0, green: 0, blue: 0 },
+            currentValue: '',
+            confidenceByMapping: {},
+            ocrText: '',
+          });
+        }
+      } else {
+        calculationResults.push(evaluateSingleCalculation(medianColor, calculation));
+      }
+    }
 
     return {
       monitoredRegionId: region.id,

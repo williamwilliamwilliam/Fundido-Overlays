@@ -87,16 +87,31 @@ export interface ColorStateMapping {
 }
 
 /**
+ * A substring-to-state mapping used by an OCR calculation.
+ * If the OCR text contains `substring` (case-insensitive), the state is `stateValue`.
+ * Evaluated top-down; first match wins.
+ */
+export interface SubstringMapping {
+  /** The substring to search for in the OCR result (case-insensitive). */
+  substring: string;
+  /** The state value to emit when this substring is found. */
+  stateValue: string;
+}
+
+export type StateCalculationType = 'MedianPixelColor' | 'OCR';
+
+/**
  * Defines how to compute a state value from a monitored region.
- * Initially the only supported type is 'MedianPixelColor'.
  */
 export interface StateCalculation {
   id: StateCalculationId;
-  /** Human-readable label, e.g. "isRegionBlack?" */
+  /** Human-readable label, e.g. "isRegionBlack?" or "readCooldownText" */
   name: string;
-  type: 'MedianPixelColor';
-  /** The set of reference colors and their associated state values. */
+  type: StateCalculationType;
+  /** Color mappings for MedianPixelColor type. */
   colorStateMappings: ColorStateMapping[];
+  /** Substring mappings for OCR type. Evaluated top-down, first match wins. */
+  substringMappings: SubstringMapping[];
 }
 
 /**
@@ -229,12 +244,24 @@ export interface OverlayGroup {
 }
 
 // ---------------------------------------------------------------------------
+// OCR Settings
+// ---------------------------------------------------------------------------
+
+export interface OcrConfig {
+  /** How often OCR runs, in milliseconds. Lower = more responsive but higher CPU. */
+  ocrIntervalMs: number;
+  /** Maximum characters to expect in OCR regions. Helps Tesseract optimize. */
+  maxCharacters: number;
+}
+
+// ---------------------------------------------------------------------------
 // Top-level Configuration (persisted)
 // ---------------------------------------------------------------------------
 
 export interface FundidoConfig {
   gameCapture: GameCaptureConfig;
   preview: PreviewConfig;
+  ocr: OcrConfig;
   monitoredRegions: MonitoredRegion[];
   overlayGroups: OverlayGroup[];
 }
@@ -248,10 +275,12 @@ export interface StateCalculationResult {
   stateCalculationId: StateCalculationId;
   /** The median color computed from the region's current pixels. */
   medianColor: RgbColor;
-  /** The state value of the closest matching color-state mapping. */
+  /** The state value of the closest matching color-state mapping or substring mapping. */
   currentValue: string;
   /** Confidence per mapping: how close the median is to each reference color (0–100%). */
   confidenceByMapping: Record<string, number>;
+  /** Raw OCR text for OCR-type calculations. Undefined for non-OCR types. */
+  ocrText?: string;
 }
 
 /** Runtime state for a single monitored region. */

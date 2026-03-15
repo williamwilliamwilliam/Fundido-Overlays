@@ -93,14 +93,15 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                             <div *ngFor="let calc of region.stateCalculations; let calcIndex = index" class="calc-card">
                                 <div class="calc-header">
                                     <input [(ngModel)]="calc.name" (ngModelChange)="onFieldChanged()" placeholder="Calculation name" class="calc-name-input" />
-                                    <select [(ngModel)]="calc.type" (ngModelChange)="onFieldChanged()" class="calc-type-select">
+                                    <select [(ngModel)]="calc.type" (ngModelChange)="onCalcTypeChanged(calc)" class="calc-type-select">
                                         <option value="MedianPixelColor">Closest to Median Color</option>
+                                        <option value="OCR">OCR (Text Recognition)</option>
                                     </select>
                                     <button class="danger-text small" (click)="removeStateCalculation(region, calcIndex)">Remove</button>
                                 </div>
 
-                                <!-- Color-state mappings -->
-                                <div class="mappings-list">
+                                <!-- Color-state mappings (MedianPixelColor) -->
+                                <div class="mappings-list" *ngIf="calc.type === 'MedianPixelColor'">
                                     <div *ngFor="let mapping of calc.colorStateMappings; let mappingIndex = index" class="mapping-row">
                                         <div
                                                 class="color-swatch"
@@ -124,11 +125,35 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                                     </div>
                                     <button class="add-mapping-btn" (click)="addMapping(calc)">+ Add Color Mapping</button>
                                 </div>
+
+                                <!-- Substring mappings (OCR) -->
+                                <div class="mappings-list" *ngIf="calc.type === 'OCR'">
+                                    <div class="ocr-text-readout" *ngIf="getOcrText(region.id, calc.id) !== null">
+                                        <span class="info-label">OCR Text</span>
+                                        <span class="ocr-text-value">{{ getOcrText(region.id, calc.id) || '(empty)' }}</span>
+                                    </div>
+                                    <div *ngFor="let mapping of calc.substringMappings; let mappingIndex = index" class="mapping-row">
+                                        <span class="mapping-label">Contains</span>
+                                        <input
+                                                class="substring-input"
+                                                [(ngModel)]="mapping.substring"
+                                                (ngModelChange)="onFieldChanged()"
+                                                placeholder="Substring to match" />
+                                        <span class="mapping-arrow">&rarr;</span>
+                                        <input
+                                                class="state-value-input"
+                                                [(ngModel)]="mapping.stateValue"
+                                                (ngModelChange)="onFieldChanged()"
+                                                placeholder="State value" />
+                                        <button class="danger-text small" (click)="removeSubstringMapping(calc, mappingIndex)">×</button>
+                                    </div>
+                                    <button class="add-mapping-btn" (click)="addSubstringMapping(calc)">+ Add Substring Match</button>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Right: live preview + median color + current state -->
+                    <!-- Right: live preview + per-calc readouts -->
                     <div class="region-right">
                         <div class="region-preview" *ngIf="hasValidBounds(region) && latestPreviewFrame">
                             <canvas
@@ -142,27 +167,38 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                             <span class="preview-label">{{ !latestPreviewFrame ? 'Start capture' : 'Set bounds' }}</span>
                         </div>
 
-                        <!-- Median color readout -->
-                        <div class="median-color-row" *ngIf="getMedianHex(region.id)">
-                            <span class="info-label">Median Color</span>
-                            <div class="median-display">
-                                <div
-                                        class="color-swatch"
-                                        [style.background-color]="getMedianHex(region.id)">
+                        <!-- Per-calculation readouts -->
+                        <div *ngFor="let calc of region.stateCalculations" class="calc-readout">
+
+                            <!-- Median color (MedianPixelColor calcs only) -->
+                            <div class="median-color-row" *ngIf="calc.type === 'MedianPixelColor' && getMedianHex(region.id)">
+                                <span class="info-label">Median Color</span>
+                                <div class="median-display">
+                                    <div
+                                            class="color-swatch"
+                                            [style.background-color]="getMedianHex(region.id)">
+                                    </div>
+                                    <span class="median-hex">{{ getMedianHex(region.id) }}</span>
+                                    <button class="copy-icon-btn" (click)="copyToClipboard(getMedianHex(region.id)!)" title="Copy hex">
+                                        &#x1F4CB;
+                                    </button>
                                 </div>
-                                <span class="median-hex">{{ getMedianHex(region.id) }}</span>
-                                <button class="copy-icon-btn" (click)="copyToClipboard(getMedianHex(region.id)!)" title="Copy hex">
+                            </div>
+
+                            <!-- OCR text readout (OCR calcs only) -->
+                            <div class="ocr-readout-row" *ngIf="calc.type === 'OCR'">
+                                <span class="info-label">OCR Text</span>
+                                <span class="ocr-readout-value">{{ getOcrText(region.id, calc.id) ?? 'Waiting...' }}</span>
+                                <button *ngIf="getOcrText(region.id, calc.id)" class="copy-icon-btn" (click)="copyToClipboard(getOcrText(region.id, calc.id)!)" title="Copy text">
                                     &#x1F4CB;
                                 </button>
                             </div>
-                        </div>
 
-                        <!-- Current state display -->
-                        <div
-                                class="current-state-row"
-                                *ngFor="let calc of region.stateCalculations">
-                            <span class="info-label">Current State</span>
-                            <span class="current-state-value">{{ getCurrentStateValue(region.id, calc.id) || '—' }}</span>
+                            <!-- Current state (all calc types) -->
+                            <div class="current-state-row" *ngIf="getCurrentStateValue(region.id, calc.id)">
+                                <span class="info-label">{{ calc.name }} State</span>
+                                <span class="current-state-value">{{ getCurrentStateValue(region.id, calc.id) }}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -372,6 +408,31 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
             min-width: 100px;
         }
 
+        .substring-input {
+            width: 140px;
+            font-size: 0.85rem;
+        }
+
+        .mapping-label {
+            font-size: 0.8rem;
+            color: var(--color-text-secondary);
+            white-space: nowrap;
+        }
+
+        .ocr-text-readout {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            margin-bottom: var(--spacing-xs);
+            padding: 2px 0;
+        }
+
+        .ocr-text-value {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--color-accent);
+        }
+
         .confidence-badge {
             font-size: 0.75rem;
             font-family: var(--font-mono);
@@ -419,12 +480,38 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
         }
 
         /* Median color display */
-        .median-color-row, .current-state-row {
+        .calc-readout {
+            width: 100%;
+            margin-top: var(--spacing-xs);
+        }
+
+        .calc-readout + .calc-readout {
+            border-top: 1px solid var(--color-border);
+            padding-top: var(--spacing-xs);
+        }
+
+        .median-color-row, .current-state-row, .ocr-readout-row {
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: 2px;
             width: 100%;
+        }
+
+        .ocr-readout-row {
+            flex-direction: row;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .ocr-readout-value {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--color-accent);
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .info-label {
@@ -589,6 +676,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
             name: 'New Calculation',
             type: 'MedianPixelColor',
             colorStateMappings: [],
+            substringMappings: [],
         };
         region.stateCalculations.push(newCalc);
         this.pushWorkingRegions();
@@ -596,6 +684,13 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
 
     removeStateCalculation(region: any, index: number): void {
         region.stateCalculations.splice(index, 1);
+        this.pushWorkingRegions();
+    }
+
+    onCalcTypeChanged(calc: any): void {
+        // Ensure both mapping arrays exist when switching types
+        if (!calc.colorStateMappings) calc.colorStateMappings = [];
+        if (!calc.substringMappings) calc.substringMappings = [];
         this.pushWorkingRegions();
     }
 
@@ -612,12 +707,31 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
         this.pushWorkingRegions();
     }
 
+    addSubstringMapping(calc: any): void {
+        if (!calc.substringMappings) calc.substringMappings = [];
+        calc.substringMappings.push({ substring: '', stateValue: '' });
+        this.pushWorkingRegions();
+    }
+
+    removeSubstringMapping(calc: any, index: number): void {
+        calc.substringMappings.splice(index, 1);
+        this.pushWorkingRegions();
+    }
+
     onMappingColorChanged(mapping: any, hexValue: string): void {
         const rgb = hexToRgb(hexValue);
         if (rgb) {
             mapping.color = rgb;
             this.pushWorkingRegions();
         }
+    }
+
+    getOcrText(regionId: string, calcId: string): string | null {
+        const regionState = this.regionStateMap.get(regionId);
+        if (!regionState) return null;
+        const calcResult = regionState.calcResults.get(calcId);
+        if (!calcResult) return null;
+        return (calcResult as any).ocrText ?? null;
     }
 
     // ---------------------------------------------------------------------------
@@ -680,12 +794,13 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
         if (!frameState || !frameState.regionStates) return;
 
         for (const regionState of frameState.regionStates) {
-            const calcResults = new Map<string, { currentValue: string; confidenceByMapping: Record<string, number> }>();
+            const calcResults = new Map<string, { currentValue: string; confidenceByMapping: Record<string, number>; ocrText?: string }>();
 
             for (const calcResult of regionState.calculationResults) {
                 calcResults.set(calcResult.stateCalculationId, {
                     currentValue: calcResult.currentValue,
                     confidenceByMapping: calcResult.confidenceByMapping,
+                    ocrText: calcResult.ocrText,
                 });
             }
 
