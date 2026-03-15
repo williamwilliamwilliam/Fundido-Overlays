@@ -1,14 +1,14 @@
 import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, ActivatedRoute } from '@angular/router';
+import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ElectronService } from '../../services/electron.service';
 
 @Component({
   selector: 'app-overlay-groups',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, RouterLink],
   template: `
     <div class="page">
       <h2>Overlay Groups</h2>
@@ -108,11 +108,14 @@ import { ElectronService } from '../../services/electron.service';
             </select>
             <button class="danger-text small" (click)="removeOverlay(group, overlayIndex)">Remove</button>
           </div>
-          <div class="cross-ref-row" *ngIf="getMonitoredRegionsForOverlay(overlay).length > 0">
+          <div class="cross-ref-row" *ngIf="overlayCrossRefs.get(overlay.id)?.length">
             <span class="cross-ref-label">Monitored Regions in this Overlay:</span>
-            <span *ngFor="let ref of getMonitoredRegionsForOverlay(overlay)" class="cross-ref-link" (click)="navigateToRegion(ref.id)">
+            <a *ngFor="let ref of overlayCrossRefs.get(overlay.id)"
+              class="cross-ref-link"
+              [routerLink]="['/regions']"
+              [queryParams]="{ highlight: ref.id }">
               {{ ref.name }}
-            </span>
+            </a>
           </div>
 
           <!-- Default visibility + opacity -->
@@ -409,6 +412,9 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   pickingGroupId: string | null = null;
   highlightId: string | null = null;
 
+  /** Cached cross-references: overlayId → monitored regions referenced by that overlay. Built once on load. */
+  overlayCrossRefs = new Map<string, Array<{ id: string; name: string }>>();
+
   // Drag-and-drop reorder state
   dragOverIndex: number | null = null;
   dragOverGroupId: string | null = null;
@@ -446,6 +452,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     const config = await this.electronService.loadConfig();
     this.groups = config.overlayGroups || [];
     this.monitoredRegions = config.monitoredRegions || [];
+    this.buildOverlayCrossRefs();
 
     // Scroll to and highlight an element if navigated here with ?highlight=id
     this.route.queryParams.subscribe((params) => {
@@ -683,27 +690,32 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   // Cross-references
   // ---------------------------------------------------------------------------
 
-  getMonitoredRegionsForOverlay(overlay: any): Array<{ id: string; name: string }> {
-    const regionIds = new Set<string>();
+  private buildOverlayCrossRefs(): void {
+    this.overlayCrossRefs.clear();
+    for (const group of this.groups) {
+      for (const overlay of (group.overlays || [])) {
+        const regionIds = new Set<string>();
 
-    for (const rule of (overlay.rules || [])) {
-      for (const cond of (rule.conditions || [])) {
-        if (cond.monitoredRegionId) {
-          regionIds.add(cond.monitoredRegionId);
+        for (const rule of (overlay.rules || [])) {
+          for (const cond of (rule.conditions || [])) {
+            if (cond.monitoredRegionId) regionIds.add(cond.monitoredRegionId);
+          }
+        }
+
+        if (overlay.contentType === 'regionMirror' && overlay.regionMirrorConfig?.monitoredRegionId) {
+          regionIds.add(overlay.regionMirrorConfig.monitoredRegionId);
+        }
+
+        const refs: Array<{ id: string; name: string }> = [];
+        for (const regionId of regionIds) {
+          const region = this.monitoredRegions.find((r: any) => r.id === regionId);
+          refs.push({ id: regionId, name: region ? region.name : regionId });
+        }
+        if (refs.length > 0) {
+          this.overlayCrossRefs.set(overlay.id, refs);
         }
       }
     }
-
-    if (overlay.contentType === 'regionMirror' && overlay.regionMirrorConfig?.monitoredRegionId) {
-      regionIds.add(overlay.regionMirrorConfig.monitoredRegionId);
-    }
-
-    const results: Array<{ id: string; name: string }> = [];
-    for (const regionId of regionIds) {
-      const region = this.monitoredRegions.find((r: any) => r.id === regionId);
-      results.push({ id: regionId, name: region ? region.name : regionId });
-    }
-    return results;
   }
 
   navigateToRegion(regionId: string): void {

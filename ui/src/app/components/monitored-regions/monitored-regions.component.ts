@@ -1,7 +1,7 @@
 import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, ActivatedRoute } from '@angular/router';
+import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ElectronService } from '../../services/electron.service';
 import type { PreviewFrameData } from '../../models/electron-api';
@@ -28,7 +28,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
 @Component({
   selector: 'app-monitored-regions',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, RouterLink],
   template: `
     <div class="page">
       <h2>Monitored Regions</h2>
@@ -75,11 +75,14 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
           <input [(ngModel)]="region.name" (ngModelChange)="onFieldChanged()" placeholder="Region name" class="name-input" />
           <button class="danger-text" (click)="removeRegion(regionIndex)">Remove</button>
         </div>
-        <div class="cross-ref-row" *ngIf="getOverlayGroupsReferencingRegion(region.id).length > 0">
+        <div class="cross-ref-row" *ngIf="regionCrossRefs.get(region.id)?.length">
           <span class="cross-ref-label">Overlays using this region:</span>
-          <span *ngFor="let ref of getOverlayGroupsReferencingRegion(region.id)" class="cross-ref-link" (click)="navigateToOverlay(ref.overlayId)">
+          <a *ngFor="let ref of regionCrossRefs.get(region.id)"
+            class="cross-ref-link"
+            [routerLink]="['/overlays']"
+            [queryParams]="{ highlight: ref.overlayId }">
             {{ ref.groupName }} → {{ ref.overlayName }}
-          </span>
+          </a>
         </div>
 
         <div class="region-content-row">
@@ -935,6 +938,9 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   hasUnsavedChanges = false;
   highlightId: string | null = null;
 
+  /** Cached cross-references: regionId → overlay groups that reference it. Built once on load. */
+  regionCrossRefs = new Map<string, Array<{ groupId: string; groupName: string; overlayId: string; overlayName: string }>>();
+
   /** Maps regionId → { medianHex, calcResults: Map<calcId, { currentValue, confidences }> } */
   private regionStateMap = new Map<string, {
     medianHex: string;
@@ -982,6 +988,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     const config = await this.electronService.loadConfig();
     this.regions = config.monitoredRegions || [];
     this.overlayGroups = config.overlayGroups || [];
+    this.buildRegionCrossRefs();
     // Push to backend for live evaluation, but don't mark as dirty since nothing changed
     this.electronService.setWorkingRegions(this.regions);
 
@@ -1319,21 +1326,29 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   // Cross-references
   // ---------------------------------------------------------------------------
 
-  getOverlayGroupsReferencingRegion(regionId: string): Array<{ groupId: string; groupName: string; overlayId: string; overlayName: string }> {
-    const results: Array<{ groupId: string; groupName: string; overlayId: string; overlayName: string }> = [];
+  private buildRegionCrossRefs(): void {
+    this.regionCrossRefs.clear();
     for (const group of this.overlayGroups) {
       for (const overlay of (group.overlays || [])) {
-        const rulesReferenceThisRegion = (overlay.rules || []).some((rule: any) =>
-          (rule.conditions || []).some((cond: any) => cond.monitoredRegionId === regionId)
-        );
-        const regionMirrorReferencesThisRegion = overlay.contentType === 'regionMirror'
-          && overlay.regionMirrorConfig?.monitoredRegionId === regionId;
-        if (rulesReferenceThisRegion || regionMirrorReferencesThisRegion) {
-          results.push({ groupId: group.id, groupName: group.name, overlayId: overlay.id, overlayName: overlay.name });
+        const rulesRegionIds = new Set<string>();
+        for (const rule of (overlay.rules || [])) {
+          for (const cond of (rule.conditions || [])) {
+            if (cond.monitoredRegionId) rulesRegionIds.add(cond.monitoredRegionId);
+          }
+        }
+        const mirrorRegionId = overlay.contentType === 'regionMirror'
+          ? overlay.regionMirrorConfig?.monitoredRegionId : null;
+
+        const allRegionIds = new Set(rulesRegionIds);
+        if (mirrorRegionId) allRegionIds.add(mirrorRegionId);
+
+        for (const regionId of allRegionIds) {
+          const existing = this.regionCrossRefs.get(regionId) || [];
+          existing.push({ groupId: group.id, groupName: group.name, overlayId: overlay.id, overlayName: overlay.name });
+          this.regionCrossRefs.set(regionId, existing);
         }
       }
     }
-    return results;
   }
 
   navigateToOverlay(overlayId: string): void {
