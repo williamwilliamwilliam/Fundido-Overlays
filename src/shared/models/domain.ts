@@ -98,7 +98,19 @@ export interface SubstringMapping {
   stateValue: string;
 }
 
-export type StateCalculationType = 'MedianPixelColor' | 'OCR';
+export type StateCalculationType = 'MedianPixelColor' | 'OCR' | 'OllamaLLM';
+
+/**
+ * Configuration for an Ollama LLM calculation on a monitored region.
+ */
+export interface OllamaCalcConfig {
+  /** The prompt to send to the LLM along with the region image. */
+  prompt: string;
+  /** Maximum tokens to generate. Lower = faster. Default 5. */
+  numPredict: number;
+  /** Whether to enable chain-of-thought reasoning. Default false. */
+  think: boolean;
+}
 
 /**
  * Defines how to compute a state value from a monitored region.
@@ -112,6 +124,8 @@ export interface StateCalculation {
   colorStateMappings: ColorStateMapping[];
   /** Substring mappings for OCR type. Evaluated top-down, first match wins. */
   substringMappings: SubstringMapping[];
+  /** Ollama LLM config for OllamaLLM type. */
+  ollamaConfig?: OllamaCalcConfig;
 }
 
 /**
@@ -255,6 +269,21 @@ export interface OcrConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Ollama Settings
+// ---------------------------------------------------------------------------
+
+export interface OllamaConfig {
+  /** Ollama API base URL. Default http://localhost:11434 */
+  baseUrl: string;
+  /** Model name to use. Default qwen3.5:0.8b */
+  modelName: string;
+  /** How often Ollama inference runs, in milliseconds. Default 500. */
+  intervalMs: number;
+  /** How long Ollama keeps the model loaded. Default "5m". Use "-1" for forever. */
+  keepAlive: string;
+}
+
+// ---------------------------------------------------------------------------
 // Top-level Configuration (persisted)
 // ---------------------------------------------------------------------------
 
@@ -262,6 +291,7 @@ export interface FundidoConfig {
   gameCapture: GameCaptureConfig;
   preview: PreviewConfig;
   ocr: OcrConfig;
+  ollama: OllamaConfig;
   monitoredRegions: MonitoredRegion[];
   overlayGroups: OverlayGroup[];
 }
@@ -279,8 +309,12 @@ export interface StateCalculationResult {
   currentValue: string;
   /** Confidence per mapping: how close the median is to each reference color (0–100%). */
   confidenceByMapping: Record<string, number>;
-  /** Raw OCR text for OCR-type calculations. Undefined for non-OCR types. */
+  /** Raw OCR text for OCR-type calculations. */
   ocrText?: string;
+  /** Raw Ollama LLM response text for OllamaLLM-type calculations. */
+  ollamaResponse?: string;
+  /** Ollama inference duration in milliseconds. */
+  ollamaResponseTimeMs?: number;
 }
 
 /** Runtime state for a single monitored region. */

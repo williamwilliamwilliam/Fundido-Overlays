@@ -159,6 +159,13 @@ export class ElectronService {
     return window.fundidoApi.openFileDialog(options);
   }
 
+  // -- Ollama -----------------------------------------------------------------
+
+  public async listOllamaModels(): Promise<Array<{ name: string; size: number }>> {
+    if (!this.isRunningInElectron) return [];
+    return window.fundidoApi.ollamaListModels();
+  }
+
   // -- IPC listeners --------------------------------------------------------
 
   private registerIpcListeners(): void {

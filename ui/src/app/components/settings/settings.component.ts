@@ -148,6 +148,86 @@ import { ElectronService } from '../../services/electron.service';
         </div>
       </div>
 
+      <div class="settings-section">
+        <h3>Ollama LLM</h3>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label">Ollama URL</label>
+            <span class="setting-hint">
+              Base URL of the Ollama API. Default is http://localhost:11434
+            </span>
+          </div>
+          <div class="setting-control">
+            <input
+              type="text"
+              [(ngModel)]="ollamaBaseUrl"
+              (ngModelChange)="onSettingChanged()"
+              style="width: 220px" />
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label">Model</label>
+            <span class="setting-hint">
+              Vision-capable model to use. Recommended: <strong>qwen3.5:0.8b</strong>
+            </span>
+            <span class="setting-hint" *ngIf="ollamaModels.length === 0" style="margin-top: 4px">
+              No models found. Install with:
+              <code class="copyable-command" (click)="copyToClipboard('ollama run qwen3.5:0.8b')" title="Click to copy">
+                ollama run qwen3.5:0.8b
+              </code>
+            </span>
+          </div>
+          <div class="setting-control">
+            <select [(ngModel)]="ollamaModelName" (ngModelChange)="onSettingChanged()" *ngIf="ollamaModels.length > 0">
+              <option *ngFor="let m of ollamaModels" [ngValue]="m.name">{{ m.name }}</option>
+            </select>
+            <input *ngIf="ollamaModels.length === 0"
+              type="text"
+              [(ngModel)]="ollamaModelName"
+              (ngModelChange)="onSettingChanged()"
+              placeholder="qwen3.5:0.8b"
+              style="width: 180px" />
+            <button class="refresh-btn" (click)="refreshOllamaModels()">Refresh</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label">Inference Interval</label>
+            <span class="setting-hint">
+              How often Ollama runs on monitored regions. Lower = more responsive but higher load.
+            </span>
+          </div>
+          <div class="setting-control">
+            <input
+              type="range"
+              min="100" max="5000" step="50"
+              [(ngModel)]="ollamaIntervalMs"
+              (ngModelChange)="onSettingChanged()" />
+            <span class="setting-value">{{ ollamaIntervalMs }} ms</span>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label">Keep Alive</label>
+            <span class="setting-hint">
+              How long Ollama keeps the model loaded in memory. Use "-1" for forever.
+            </span>
+          </div>
+          <div class="setting-control">
+            <input
+              type="text"
+              [(ngModel)]="ollamaKeepAlive"
+              (ngModelChange)="onSettingChanged()"
+              style="width: 80px" />
+          </div>
+        </div>
+      </div>
+
       <div class="save-bar" *ngIf="saveMessage">
         <span class="save-message">{{ saveMessage }}</span>
       </div>
@@ -244,6 +324,18 @@ import { ElectronService } from '../../services/electron.service';
       font-size: 0.85rem;
       color: var(--color-success);
     }
+
+    .copyable-command {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      background-color: var(--color-bg-primary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+    .copyable-command:hover { background-color: var(--color-bg-panel); }
   `],
 })
 export class SettingsComponent implements OnInit, OnDestroy {
@@ -260,6 +352,13 @@ export class SettingsComponent implements OnInit, OnDestroy {
   // OCR settings
   ocrIntervalMs = 200;
   ocrMaxCharacters = 10;
+
+  // Ollama settings
+  ollamaBaseUrl = 'http://localhost:11434';
+  ollamaModelName = 'qwen3.5:0.8b';
+  ollamaIntervalMs = 500;
+  ollamaKeepAlive = '5m';
+  ollamaModels: Array<{ name: string; size: number }> = [];
 
   saveMessage = '';
   private saveDebounceTimer: any = null;
@@ -286,7 +385,16 @@ export class SettingsComponent implements OnInit, OnDestroy {
       this.ocrMaxCharacters = ocr.maxCharacters ?? 10;
     }
 
+    const ollama = config.ollama;
+    if (ollama) {
+      this.ollamaBaseUrl = ollama.baseUrl ?? 'http://localhost:11434';
+      this.ollamaModelName = ollama.modelName ?? 'qwen3.5:0.8b';
+      this.ollamaIntervalMs = ollama.intervalMs ?? 500;
+      this.ollamaKeepAlive = ollama.keepAlive ?? '5m';
+    }
+
     await this.refreshDisplays();
+    await this.refreshOllamaModels();
   }
 
   ngOnDestroy(): void {
@@ -298,6 +406,19 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
   async refreshDisplays(): Promise<void> {
     this.availableDisplays = await this.electronService.listDisplays();
+  }
+
+  async refreshOllamaModels(): Promise<void> {
+    this.ollamaModels = await this.electronService.listOllamaModels();
+    // Ensure the recommended model appears even if not installed
+    const hasRecommended = this.ollamaModels.some(m => m.name === 'qwen3.5:0.8b');
+    if (!hasRecommended && this.ollamaModelName === 'qwen3.5:0.8b') {
+      // Model not installed — dropdown will be hidden, text input shown instead
+    }
+  }
+
+  async copyToClipboard(text: string): Promise<void> {
+    await navigator.clipboard.writeText(text);
   }
 
   onSettingChanged(): void {
@@ -331,6 +452,13 @@ export class SettingsComponent implements OnInit, OnDestroy {
     config.ocr = {
       ocrIntervalMs: this.ocrIntervalMs,
       maxCharacters: this.ocrMaxCharacters,
+    };
+
+    config.ollama = {
+      baseUrl: this.ollamaBaseUrl,
+      modelName: this.ollamaModelName,
+      intervalMs: this.ollamaIntervalMs,
+      keepAlive: this.ollamaKeepAlive,
     };
 
     await this.electronService.saveConfig(config);

@@ -128,14 +128,14 @@ function evaluateSingleCalculation(
  * Evaluates all monitored regions against a captured frame and produces
  * a complete FrameState.
  *
- * OCR-type calculations are skipped here — they run on their own throttled
- * interval via OcrService. Their results are merged in via the optional
- * ocrResults parameter.
+ * OCR and Ollama calculations run on their own throttled intervals.
+ * Their results are merged in via the optional parameters.
  */
 export function evaluateFrameState(
   frame: CapturedFrame,
   monitoredRegions: MonitoredRegion[],
-  ocrResults?: Map<string, StateCalculationResult>
+  ocrResults?: Map<string, StateCalculationResult>,
+  ollamaResults?: Map<string, StateCalculationResult>
 ): FrameState {
   const regionStates: MonitoredRegionState[] = monitoredRegions.map((region) => {
     const medianColor = computeMedianColorForRegion(frame, region.bounds);
@@ -143,19 +143,32 @@ export function evaluateFrameState(
     const calculationResults: StateCalculationResult[] = [];
     for (const calculation of region.stateCalculations) {
       if (calculation.type === 'OCR') {
-        // Use cached OCR result if available
         const ocrKey = `${region.id}:${calculation.id}`;
         const ocrResult = ocrResults?.get(ocrKey);
         if (ocrResult) {
           calculationResults.push(ocrResult);
         } else {
-          // No OCR result yet — push a placeholder
           calculationResults.push({
             stateCalculationId: calculation.id,
             medianColor: { red: 0, green: 0, blue: 0 },
             currentValue: '',
             confidenceByMapping: {},
             ocrText: '',
+          });
+        }
+      } else if (calculation.type === 'OllamaLLM') {
+        const ollamaKey = `${region.id}:${calculation.id}`;
+        const ollamaResult = ollamaResults?.get(ollamaKey);
+        if (ollamaResult) {
+          calculationResults.push(ollamaResult);
+        } else {
+          calculationResults.push({
+            stateCalculationId: calculation.id,
+            medianColor: { red: 0, green: 0, blue: 0 },
+            currentValue: '',
+            confidenceByMapping: {},
+            ollamaResponse: '',
+            ollamaResponseTimeMs: 0,
           });
         }
       } else {

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import { FundidoConfig, GameCaptureConfig, PreviewConfig, OcrConfig } from '../shared';
+import { FundidoConfig, GameCaptureConfig, PreviewConfig, OcrConfig, OllamaConfig } from '../shared';
 import { logger, LogCategory } from '../shared/logger';
 
 const CONFIG_FILE_NAME = 'fundido-config.json';
@@ -27,10 +27,18 @@ function buildDefaultConfig(): FundidoConfig {
     maxCharacters: 10,
   };
 
+  const defaultOllama: OllamaConfig = {
+    baseUrl: 'http://localhost:11434',
+    modelName: 'qwen3.5:0.8b',
+    intervalMs: 500,
+    keepAlive: '5m',
+  };
+
   return {
     gameCapture: defaultGameCapture,
     preview: defaultPreview,
     ocr: defaultOcr,
+    ollama: defaultOllama,
     monitoredRegions: [],
     overlayGroups: [],
   };
@@ -77,6 +85,12 @@ export class ConfigPersistenceService {
       if (configIsMissingOcrSettings) {
         parsed.ocr = defaults.ocr;
         logger.info(LogCategory.Persistence, 'Backfilled missing OCR config with defaults.');
+      }
+
+      const configIsMissingOllamaSettings = !parsed.ollama;
+      if (configIsMissingOllamaSettings) {
+        parsed.ollama = defaults.ollama;
+        logger.info(LogCategory.Persistence, 'Backfilled missing Ollama config with defaults.');
       }
 
       const configIsMissingCaptureEnabled = parsed.gameCapture && parsed.gameCapture.captureEnabled === undefined;

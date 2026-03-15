@@ -48,6 +48,7 @@ export interface FundidoApi {
   setWorkingRegions(regions: any[]): Promise<{ success: boolean }>;
   setWorkingGroups(groups: any[]): Promise<{ success: boolean }>;
   openFileDialog(options?: any): Promise<string | null>;
+  ollamaListModels(): Promise<Array<{ name: string; size: number }>>;
   onPickerRegionUpdate(callback: (region: { x: number; y: number; width: number; height: number }) => void): void;
   onDebugLog(callback: (entry: LogEntry) => void): void;
   onStateUpdated(callback: (frameState: any) => void): void;

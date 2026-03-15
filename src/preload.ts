@@ -38,6 +38,7 @@ const IPC = {
   PICKER_START:                'picker:start',
   PICKER_REGION_UPDATE:        'picker:region-update',
   DIALOG_OPEN_FILE:            'dialog:open-file',
+  OLLAMA_LIST_MODELS:          'ollama:list-models',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -101,6 +102,10 @@ const fundidoApi = {
   // -- File dialogs -----------------------------------------------------------
   openFileDialog: (options?: any): Promise<string | null> =>
     ipcRenderer.invoke(IPC.DIALOG_OPEN_FILE, options),
+
+  // -- Ollama -----------------------------------------------------------------
+  ollamaListModels: (): Promise<Array<{ name: string; size: number }>> =>
+    ipcRenderer.invoke(IPC.OLLAMA_LIST_MODELS),
 
   onPickerRegionUpdate: (callback: (region: { x: number; y: number; width: number; height: number }) => void): void => {
     ipcRenderer.on(IPC.PICKER_REGION_UPDATE, (_event, region) => {

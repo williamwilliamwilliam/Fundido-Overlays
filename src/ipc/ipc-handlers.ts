@@ -6,6 +6,7 @@ import { GameCaptureService } from '../capture/game-capture.service';
 import { PreviewFrameService } from '../capture/preview-frame.service';
 import { OverlayWindowManager } from '../overlay/overlay-window-manager';
 import { OcrService } from '../state/ocr.service';
+import { OllamaService } from '../state/ollama.service';
 import { logger, LogCategory } from '../shared/logger';
 
 /**
@@ -17,6 +18,7 @@ export function registerIpcHandlers(
   previewService: PreviewFrameService,
   overlayWindowManager: OverlayWindowManager,
   ocrService: OcrService,
+  ollamaService: OllamaService,
   currentConfigRef: { config: FundidoConfig },
   workingRegionsRef: { regions: any[] | null },
   globalEnabledRef: { enabled: boolean }
@@ -40,6 +42,7 @@ export function registerIpcHandlers(
       previewService.setCaptureDisplayIndex(displayIndex);
       previewService.start(currentConfigRef.config.preview, currentConfigRef.config.gameCapture.targetFps);
       ocrService.start(currentConfigRef.config.ocr);
+      ollamaService.start(currentConfigRef.config.ollama);
     }
 
     // Restore overlay windows
@@ -54,6 +57,7 @@ export function registerIpcHandlers(
     captureService.stop();
     previewService.stop();
     ocrService.stop();
+    ollamaService.stop();
 
     // Close all overlay windows
     overlayWindowManager.closeAll();
@@ -140,6 +144,7 @@ export function registerIpcHandlers(
     previewService.setCaptureDisplayIndex(displayIndex);
     previewService.start(currentConfigRef.config.preview, currentConfigRef.config.gameCapture.targetFps);
     ocrService.start(currentConfigRef.config.ocr);
+    ollamaService.start(currentConfigRef.config.ollama);
 
     // Persist so capture auto-starts on next launch
     currentConfigRef.config.gameCapture.captureEnabled = true;
@@ -152,6 +157,7 @@ export function registerIpcHandlers(
     captureService.stop();
     previewService.stop();
     ocrService.stop();
+    ollamaService.stop();
 
     currentConfigRef.config.gameCapture.captureEnabled = false;
     configService.save(currentConfigRef.config);
@@ -219,5 +225,13 @@ export function registerIpcHandlers(
     const wasCancelled = result.canceled || result.filePaths.length === 0;
     if (wasCancelled) return null;
     return result.filePaths[0];
+  });
+
+  // -------------------------------------------------------------------------
+  // Ollama
+  // -------------------------------------------------------------------------
+
+  ipcMain.handle(IpcChannels.OLLAMA_LIST_MODELS, async (_event: IpcMainInvokeEvent) => {
+    return ollamaService.listModels();
   });
 }

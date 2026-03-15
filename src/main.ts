@@ -7,6 +7,7 @@ import { PreviewFrameService } from './capture/preview-frame.service';
 import { OverlayWindowManager } from './overlay/overlay-window-manager';
 import { evaluateFrameState } from './state/state-calculation.service';
 import { OcrService } from './state/ocr.service';
+import { OllamaService } from './state/ollama.service';
 import { registerIpcHandlers } from './ipc/ipc-handlers';
 import { logger, LogCategory } from './shared/logger';
 import { FundidoConfig } from './shared';
@@ -88,6 +89,7 @@ const captureService = new GameCaptureService();
 const previewService = new PreviewFrameService();
 const overlayWindowManager = new OverlayWindowManager();
 const ocrService = new OcrService();
+const ollamaService = new OllamaService();
 
 /** Mutable reference so IPC handlers can read/write the active config. */
 const currentConfigRef: { config: FundidoConfig } = {
@@ -225,12 +227,14 @@ function setupCaptureToOverlayPipeline(): void {
       },
     }));
 
-    // Feed the frame and region config to the OCR service
+    // Feed the frame and region config to the OCR and Ollama services
     ocrService.onFrameCaptured(frame);
     ocrService.setRegions(physicalRegions);
+    ollamaService.onFrameCaptured(frame);
+    ollamaService.setRegions(physicalRegions);
 
-    // Merge any available OCR results into the frame state
-    const frameState = evaluateFrameState(frame, physicalRegions, ocrService.getAllResults());
+    // Merge any available OCR and Ollama results into the frame state
+    const frameState = evaluateFrameState(frame, physicalRegions, ocrService.getAllResults(), ollamaService.getAllResults());
 
     // Push state to overlay windows
     overlayWindowManager.broadcastFrameState(frameState);
@@ -249,7 +253,7 @@ function setupCaptureToOverlayPipeline(): void {
 app.whenReady().then(() => {
   logger.info(LogCategory.General, 'Fundido Overlays starting up.');
 
-  registerIpcHandlers(configService, captureService, previewService, overlayWindowManager, ocrService, currentConfigRef, workingRegionsRef, globalEnabledRef);
+  registerIpcHandlers(configService, captureService, previewService, overlayWindowManager, ocrService, ollamaService, currentConfigRef, workingRegionsRef, globalEnabledRef);
   createMainWindow();
   setupCaptureToOverlayPipeline();
 
@@ -274,6 +278,7 @@ app.whenReady().then(() => {
     previewService.setCaptureDisplayIndex(displayIndex);
     previewService.start(currentConfigRef.config.preview, currentConfigRef.config.gameCapture.targetFps);
     ocrService.start(currentConfigRef.config.ocr);
+    ollamaService.start(currentConfigRef.config.ollama);
   }
 });
 
@@ -282,6 +287,7 @@ app.on('window-all-closed', () => {
   captureService.stop();
   previewService.stop();
   ocrService.shutdown();
+  ollamaService.stop();
   overlayWindowManager.closeAll();
   app.quit();
 });

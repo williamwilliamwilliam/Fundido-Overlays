@@ -39,6 +39,11 @@ export const REGIONS_SET_WORKING = 'regions:set-working';
 export const GROUPS_SET_WORKING = 'groups:set-working';
 
 // ---------------------------------------------------------------------------
+// Ollama
+// ---------------------------------------------------------------------------
+export const OLLAMA_LIST_MODELS = 'ollama:list-models';
+
+// ---------------------------------------------------------------------------
 // Overlay management
 // ---------------------------------------------------------------------------
 export const OVERLAY_SHOW = 'overlay:show';

@@ -196,10 +196,14 @@ import { ElectronService } from '../../services/electron.service';
                     <option value="equals">=</option>
                     <option value="notEquals">≠</option>
                   </select>
-                  <select [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()">
+                  <select *ngIf="getCalcType(cond.monitoredRegionId, cond.stateCalculationId) !== 'OllamaLLM'"
+                    [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()">
                     <option value="">Select Value</option>
                     <option *ngFor="let sv of getStateValuesForCalc(cond.monitoredRegionId, cond.stateCalculationId)" [ngValue]="sv">{{ sv }}</option>
                   </select>
+                  <input *ngIf="getCalcType(cond.monitoredRegionId, cond.stateCalculationId) === 'OllamaLLM'"
+                    [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()"
+                    placeholder="Expected response" class="condition-value-input" />
                   <button class="danger-text small" (click)="removeCondition(rule, condIndex)">×</button>
                 </div>
                 <button class="add-condition-btn" (click)="addCondition(rule)">+ AND</button>
@@ -591,6 +595,13 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     const colorValues = (calc.colorStateMappings || []).map((m: any) => m.stateValue).filter((v: string) => v);
     const substringValues = (calc.substringMappings || []).map((m: any) => m.stateValue).filter((v: string) => v);
     return [...colorValues, ...substringValues];
+  }
+
+  getCalcType(regionId: string, calcId: string): string {
+    const region = this.monitoredRegions.find((r: any) => r.id === regionId);
+    if (!region) return '';
+    const calc = region.stateCalculations.find((c: any) => c.id === calcId);
+    return calc?.type || '';
   }
 
   // ---------------------------------------------------------------------------
