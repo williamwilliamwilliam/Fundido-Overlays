@@ -920,11 +920,19 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     .danger-text:hover { text-decoration: underline; }
 
     @keyframes highlight-flash {
-      0% { box-shadow: 0 0 0 3px var(--color-accent), inset 0 0 20px rgba(var(--color-accent-rgb, 100, 149, 237), 0.15); }
-      100% { box-shadow: none; }
+      0%, 15% {
+        outline: 3px solid #5b9cf5;
+        outline-offset: 2px;
+        background-color: rgba(91, 156, 245, 0.12);
+      }
+      100% {
+        outline: 3px solid transparent;
+        outline-offset: 2px;
+        background-color: transparent;
+      }
     }
     .highlight-flash {
-      animation: highlight-flash 2s ease-out;
+      animation: highlight-flash 2.5s ease-out forwards;
     }
   `],
 })
@@ -1017,14 +1025,31 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     this.route.queryParams.subscribe((params) => {
       const targetId = params['highlight'];
       if (!targetId) return;
-      this.highlightId = targetId;
+
       setTimeout(() => {
-        const element = document.querySelector(`[data-highlight-id="${targetId}"]`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-        setTimeout(() => { this.highlightId = null; }, 2000);
-      }, 100);
+        const element = document.querySelector(`[data-highlight-id="${targetId}"]`) as HTMLElement;
+        if (!element) return;
+
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        const scrollContainer = element.closest('.page') || document.documentElement;
+        let scrollTimer: any = null;
+        const onScrollEnd = () => {
+          clearTimeout(scrollTimer);
+          scrollTimer = setTimeout(() => {
+            scrollContainer.removeEventListener('scroll', onScrollEnd);
+            this.highlightId = targetId;
+            setTimeout(() => { this.highlightId = null; }, 2500);
+          }, 150);
+        };
+
+        scrollContainer.addEventListener('scroll', onScrollEnd);
+        scrollTimer = setTimeout(() => {
+          scrollContainer.removeEventListener('scroll', onScrollEnd);
+          this.highlightId = targetId;
+          setTimeout(() => { this.highlightId = null; }, 2500);
+        }, 600);
+      }, 150);
     });
   }
 
