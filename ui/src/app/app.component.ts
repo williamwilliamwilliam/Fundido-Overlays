@@ -98,14 +98,14 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
       margin-right: var(--spacing-md);
     }
     .global-toggle.enabled {
-      background-color: #22c55e;
-      border-color: #22c55e;
-      color: #000;
+      background-color: var(--color-toggle-on);
+      border-color: var(--color-toggle-on);
+      color: var(--color-toggle-on-text);
     }
     .global-toggle:not(.enabled) {
-      background-color: #ef4444;
-      border-color: #ef4444;
-      color: #fff;
+      background-color: var(--color-toggle-off);
+      border-color: var(--color-toggle-off);
+      color: var(--color-toggle-off-text);
     }
     .global-toggle:hover {
       opacity: 0.85;
@@ -225,7 +225,7 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
 })
 export class AppComponent implements OnInit {
   globalEnabled = true;
-  isDebugMinimized = false;
+  isDebugMinimized = true;
 
   private expandedPanelHeightPx = DEFAULT_PANEL_HEIGHT_PX;
 
