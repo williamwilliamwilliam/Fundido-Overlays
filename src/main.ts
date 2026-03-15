@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen } from 'electron';
+import { app, BrowserWindow, screen, Menu, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ConfigPersistenceService } from './persistence/config-persistence.service';
@@ -184,17 +184,117 @@ function createMainWindow(): void {
         mainWindow.webContents.openDevTools();
         logger.info(LogCategory.General, `Dev mode — loading Angular from ${angularDevServerUrl}`);
     } else {
-        const angularDistPath = path.join(__dirname, '..', 'dist', 'ui', 'browser', 'index.html');
-        mainWindow.loadFile(angularDistPath);
-        logger.info(LogCategory.General, 'Production mode — loading bundled Angular app.');
+        // In packaged mode, app.getAppPath() points to the asar root (or the unpacked app dir).
+        // The Angular production build lives at dist/ui/browser/ relative to that root.
+        const appRoot = app.getAppPath();
+        const angularDistPath = path.join(appRoot, 'dist', 'ui', 'browser', 'index.html');
+        logger.info(LogCategory.General, `Production mode — loading Angular from ${angularDistPath}`);
+
+        const fileExists = fs.existsSync(angularDistPath);
+        if (!fileExists) {
+            logger.error(LogCategory.General, `Angular dist not found at: ${angularDistPath}`);
+            logger.error(LogCategory.General, `App root: ${appRoot}`);
+            // Show an error dialog so the user knows what's wrong
+            const { dialog } = require('electron');
+            dialog.showErrorBox('Fundido Overlays', `Could not find UI files at:\n${angularDistPath}\n\nApp root: ${appRoot}`);
+        }
+
+        mainWindow.loadFile(angularDistPath).catch((err: any) => {
+            logger.error(LogCategory.General, 'Failed to load Angular dist.', err);
+        });
     }
 
     mainWindow.on('closed', () => {
         mainWindow = null;
+        // Close all overlay windows so the app can fully exit
+        captureService.stop();
+        previewService.stop();
+        ocrService.shutdown();
+        ollamaService.stop();
+        overlayWindowManager.closeAll();
     });
 
     mainWindow.on('minimize', () => { uiMinimizedRef.minimized = true; });
     mainWindow.on('restore', () => { uiMinimizedRef.minimized = false; });
+
+    // Application menu
+    const menuTemplate: Electron.MenuItemConstructorOptions[] = [
+        {
+            label: 'File',
+            submenu: [
+                { role: 'quit' },
+            ],
+        },
+        {
+            label: 'Edit',
+            submenu: [
+                { role: 'undo' },
+                { role: 'redo' },
+                { type: 'separator' },
+                { role: 'cut' },
+                { role: 'copy' },
+                { role: 'paste' },
+                { role: 'selectAll' },
+            ],
+        },
+        {
+            label: 'View',
+            submenu: [
+                { role: 'reload' },
+                { role: 'forceReload' },
+                { role: 'toggleDevTools' },
+                { type: 'separator' },
+                { role: 'resetZoom' },
+                { role: 'zoomIn' },
+                { role: 'zoomOut' },
+            ],
+        },
+        {
+            label: 'Help',
+            submenu: [
+                {
+                    label: 'Open Log File',
+                    click: () => {
+                        const logPath = logger.getLogFilePath();
+                        if (logPath && fs.existsSync(logPath)) {
+                            shell.openPath(logPath);
+                        } else {
+                            const { dialog } = require('electron');
+                            dialog.showMessageBox({ message: 'Log file not found.', type: 'warning' });
+                        }
+                    },
+                },
+                {
+                    label: 'Open Log Folder',
+                    click: () => {
+                        const logPath = logger.getLogFilePath();
+                        if (logPath) {
+                            shell.showItemInFolder(logPath);
+                        }
+                    },
+                },
+                { type: 'separator' },
+                {
+                    label: 'Open Install Location',
+                    click: () => {
+                        const appPath = app.isPackaged
+                            ? path.dirname(app.getPath('exe'))
+                            : app.getAppPath();
+                        shell.openPath(appPath);
+                    },
+                },
+                {
+                    label: 'Open User Data Folder',
+                    click: () => {
+                        shell.openPath(app.getPath('userData'));
+                    },
+                },
+            ],
+        },
+    ];
+
+    const appMenu = Menu.buildFromTemplate(menuTemplate);
+    Menu.setApplicationMenu(appMenu);
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +404,7 @@ function setupCaptureToOverlayPipeline(): void {
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(() => {
+    logger.initFileLogging();
     logger.info(LogCategory.General, 'Fundido Overlays starting up.');
 
     registerIpcHandlers(configService, captureService, previewService, overlayWindowManager, ocrService, ollamaService, currentConfigRef, workingRegionsRef, globalEnabledRef);
@@ -348,4 +449,5 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
     configService.save(currentConfigRef.config);
     logger.info(LogCategory.General, 'Configuration saved on exit.');
+    logger.shutdown();
 });
