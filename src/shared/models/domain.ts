@@ -101,6 +101,35 @@ export interface SubstringMapping {
 export type StateCalculationType = 'MedianPixelColor' | 'OCR' | 'OllamaLLM';
 
 /**
+ * Preprocessing pipeline options for OCR calculations.
+ * Applied to the region image before feeding to Tesseract.
+ */
+export interface OcrPreprocessConfig {
+  /** Upscale factor applied before other processing. 1 = no upscale. Default 2. */
+  upscaleFactor: number;
+  /** Invert the image (swap light/dark). Useful for light text on dark backgrounds. Default false. */
+  invert: boolean;
+  /**
+   * Brightness threshold for binarization (0–255). Pixels above this become white,
+   * below become black. Set to 0 to disable thresholding. Default 0 (disabled).
+   */
+  threshold: number;
+  /**
+   * If enabled, only keep pixels whose color falls within the target range,
+   * zeroing everything else. Useful for isolating colored game UI text.
+   */
+  colorFilterEnabled: boolean;
+  /** Target color for color filtering (center of the range). */
+  colorFilterTarget: RgbColor;
+  /** Tolerance per channel around the target color (0–255). Default 40. */
+  colorFilterTolerance: number;
+  /** Character whitelist. Only these characters will be recognized. Empty = default set. */
+  charWhitelist: string;
+  /** Tesseract page segmentation mode. 7=single line, 8=single word, 10=single char. Default 7. */
+  pageSegMode: number;
+}
+
+/**
  * Configuration for an Ollama LLM calculation on a monitored region.
  */
 export interface OllamaCalcConfig {
@@ -126,6 +155,8 @@ export interface StateCalculation {
   colorStateMappings: ColorStateMapping[];
   /** Substring mappings for OCR type. Evaluated top-down, first match wins. */
   substringMappings: SubstringMapping[];
+  /** OCR preprocessing pipeline config. */
+  ocrPreprocess?: OcrPreprocessConfig;
   /** Ollama LLM config for OllamaLLM type. */
   ollamaConfig?: OllamaCalcConfig;
 }

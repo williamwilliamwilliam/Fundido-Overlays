@@ -149,6 +149,80 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                     <button class="danger-text small" (click)="removeSubstringMapping(calc, mappingIndex)">×</button>
                   </div>
                   <button class="add-mapping-btn" (click)="addSubstringMapping(calc)">+ Add Substring Match</button>
+
+                  <!-- OCR Preprocessing Pipeline -->
+                  <div class="ocr-preprocess" *ngIf="calc.ocrPreprocess">
+                    <div class="preprocess-header">Preprocessing</div>
+
+                    <div class="config-row">
+                      <label>Upscale
+                        <input type="range" min="1" max="4" step="1"
+                          [(ngModel)]="calc.ocrPreprocess.upscaleFactor"
+                          (ngModelChange)="onFieldChanged()" />
+                        <span class="slider-value">{{ calc.ocrPreprocess.upscaleFactor }}x</span>
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox"
+                          [(ngModel)]="calc.ocrPreprocess.invert"
+                          (ngModelChange)="onFieldChanged()" />
+                        Invert
+                      </label>
+                    </div>
+
+                    <div class="config-row">
+                      <label>Threshold
+                        <input type="range" min="0" max="255" step="1"
+                          [(ngModel)]="calc.ocrPreprocess.threshold"
+                          (ngModelChange)="onFieldChanged()" />
+                        <span class="slider-value">{{ calc.ocrPreprocess.threshold === 0 ? 'Off' : calc.ocrPreprocess.threshold }}</span>
+                      </label>
+                    </div>
+
+                    <div class="config-row color-filter-row">
+                      <label class="checkbox-label">
+                        <input type="checkbox"
+                          [(ngModel)]="calc.ocrPreprocess.colorFilterEnabled"
+                          (ngModelChange)="onFieldChanged()" />
+                        Color Filter
+                      </label>
+                      <ng-container *ngIf="calc.ocrPreprocess.colorFilterEnabled">
+                        <div
+                          class="color-swatch small-swatch"
+                          [style.background-color]="rgbToHex(calc.ocrPreprocess.colorFilterTarget.red, calc.ocrPreprocess.colorFilterTarget.green, calc.ocrPreprocess.colorFilterTarget.blue)">
+                        </div>
+                        <input
+                          class="hex-input"
+                          [ngModel]="rgbToHex(calc.ocrPreprocess.colorFilterTarget.red, calc.ocrPreprocess.colorFilterTarget.green, calc.ocrPreprocess.colorFilterTarget.blue)"
+                          (ngModelChange)="onPreprocessColorChanged(calc.ocrPreprocess, $event)"
+                          placeholder="#FFFFFF" />
+                        <label>±
+                          <input type="range" min="5" max="128" step="1"
+                            [(ngModel)]="calc.ocrPreprocess.colorFilterTolerance"
+                            (ngModelChange)="onFieldChanged()" />
+                          <span class="slider-value">{{ calc.ocrPreprocess.colorFilterTolerance }}</span>
+                        </label>
+                      </ng-container>
+                    </div>
+
+                    <div class="config-row">
+                      <label>Char Whitelist
+                        <input type="text"
+                          [(ngModel)]="calc.ocrPreprocess.charWhitelist"
+                          (ngModelChange)="onFieldChanged()"
+                          placeholder="e.g. 0123456789"
+                          style="width: 200px; font-size: 0.8rem" />
+                      </label>
+                      <label>PSM
+                        <select [(ngModel)]="calc.ocrPreprocess.pageSegMode" (ngModelChange)="onFieldChanged()">
+                          <option [ngValue]="7">7 – Single Line</option>
+                          <option [ngValue]="8">8 – Single Word</option>
+                          <option [ngValue]="10">10 – Single Char</option>
+                          <option [ngValue]="6">6 – Block of Text</option>
+                          <option [ngValue]="13">13 – Raw Line</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Ollama LLM config -->
@@ -573,6 +647,51 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     .ollama-config .slider-value { font-family: var(--font-mono); font-size: 0.8rem; min-width: 30px; }
     .ollama-config .checkbox-label { display: flex; align-items: center; gap: var(--spacing-xs); font-size: 0.8rem; cursor: pointer; }
 
+    /* OCR Preprocessing */
+    .ocr-preprocess {
+      padding: var(--spacing-sm) 0 var(--spacing-xs) var(--spacing-sm);
+      margin-top: var(--spacing-xs);
+      border-top: 1px solid var(--color-border);
+    }
+    .preprocess-header {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      margin-bottom: var(--spacing-xs);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .ocr-preprocess .config-row {
+      display: flex;
+      gap: var(--spacing-md);
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+    }
+    .ocr-preprocess .config-row label {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      color: var(--color-text-secondary);
+      font-size: 0.8rem;
+    }
+    .ocr-preprocess .slider-value {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      min-width: 30px;
+    }
+    .ocr-preprocess .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .ocr-preprocess .color-filter-row { gap: var(--spacing-sm); }
+    .ocr-preprocess .small-swatch { width: 18px; height: 18px; }
+    .ocr-preprocess .hex-input { width: 80px; font-size: 0.8rem; }
+    .ocr-preprocess select { font-size: 0.8rem; }
+
     .ocr-readout-value {
       font-family: var(--font-mono);
       font-size: 0.85rem;
@@ -759,6 +878,18 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   onCalcTypeChanged(calc: any): void {
     if (!calc.colorStateMappings) calc.colorStateMappings = [];
     if (!calc.substringMappings) calc.substringMappings = [];
+    if (calc.type === 'OCR' && !calc.ocrPreprocess) {
+      calc.ocrPreprocess = {
+        upscaleFactor: 2,
+        invert: false,
+        threshold: 0,
+        colorFilterEnabled: false,
+        colorFilterTarget: { red: 255, green: 255, blue: 255 },
+        colorFilterTolerance: 40,
+        charWhitelist: '',
+        pageSegMode: 7,
+      };
+    }
     if (calc.type === 'OllamaLLM' && !calc.ollamaConfig) {
       calc.ollamaConfig = {
         prompt: '',
@@ -798,6 +929,14 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     const rgb = hexToRgb(hexValue);
     if (rgb) {
       mapping.color = rgb;
+      this.pushWorkingRegions();
+    }
+  }
+
+  onPreprocessColorChanged(ocrPreprocess: any, hexValue: string): void {
+    const rgb = hexToRgb(hexValue);
+    if (rgb) {
+      ocrPreprocess.colorFilterTarget = rgb;
       this.pushWorkingRegions();
     }
   }

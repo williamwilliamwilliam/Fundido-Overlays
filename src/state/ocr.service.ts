@@ -5,6 +5,7 @@ import {
   StateCalculationResult,
   Rectangle,
   OcrConfig,
+  OcrPreprocessConfig,
 } from '../shared';
 import { logger, LogCategory } from '../shared/logger';
 
@@ -21,6 +22,9 @@ function getTesseract(): any {
   }
   return tesseractModule;
 }
+
+const DEFAULT_CHAR_WHITELIST = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;!?/-+';
+const DEFAULT_PAGE_SEG_MODE = 7; // PSM.SINGLE_LINE
 
 /**
  * Manages OCR evaluation for monitored regions that have OCR-type state calculations.
@@ -124,12 +128,10 @@ export class OcrService {
         logger: () => {},
       });
 
-      // PSM.SINGLE_LINE = 7 — best for small game UI regions with a single line of text
-      const psmSingleLine = tesseract.PSM?.SINGLE_LINE ?? 7;
-
+      // Set sensible defaults — these get overridden per-calc in runOcrCycle
       await this.worker.setParameters({
-        tessedit_pageseg_mode: psmSingleLine,
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;!?/-+',
+        tessedit_pageseg_mode: DEFAULT_PAGE_SEG_MODE,
+        tessedit_char_whitelist: DEFAULT_CHAR_WHITELIST,
       });
 
       logger.info(LogCategory.StateCalculation, 'Tesseract OCR worker initialized.');
@@ -149,10 +151,28 @@ export class OcrService {
     this.isProcessing = true;
     try {
       for (const { region, calculation } of ocrCalculations) {
-        const imageBuffer = this.extractRegionAsPng(this.latestFrame!, region.bounds);
-        if (!imageBuffer) continue;
+        // Extract raw RGBA pixels from the frame buffer
+        const rawPixels = this.extractRegionRgba(this.latestFrame!, region.bounds);
+        if (!rawPixels) continue;
 
-        const { data } = await this.worker.recognize(imageBuffer);
+        // Apply the preprocessing pipeline, then convert to PNG for Tesseract
+        const preprocessConfig = calculation.ocrPreprocess;
+        const processedPng = this.applyPreprocessingPipeline(
+          rawPixels.buffer,
+          rawPixels.width,
+          rawPixels.height,
+          preprocessConfig,
+        );
+
+        // Apply per-calc Tesseract parameters
+        const charWhitelist = preprocessConfig?.charWhitelist || DEFAULT_CHAR_WHITELIST;
+        const pageSegMode = preprocessConfig?.pageSegMode ?? DEFAULT_PAGE_SEG_MODE;
+        await this.worker.setParameters({
+          tessedit_pageseg_mode: pageSegMode,
+          tessedit_char_whitelist: charWhitelist,
+        });
+
+        const { data } = await this.worker.recognize(processedPng);
         const rawText = data.text.trim().substring(0, this.ocrConfig.maxCharacters);
 
         const result = this.evaluateSubstringMappings(rawText, calculation);
@@ -176,20 +196,25 @@ export class OcrService {
     return results;
   }
 
-  /**
-   * Extracts a rectangular region from the BGRA frame buffer and converts to
-   * a PNG-format Buffer that Tesseract can consume.
-   */
-  private extractRegionAsPng(frame: CapturedFrame, bounds: Rectangle): Buffer | null {
-    const { nativeImage } = require('electron');
+  // ---------------------------------------------------------------------------
+  // Region extraction
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Extracts a rectangular region from the BGRA frame buffer and returns
+   * an RGBA pixel buffer with dimensions. This is the raw input to the
+   * preprocessing pipeline.
+   */
+  private extractRegionRgba(
+    frame: CapturedFrame,
+    bounds: Rectangle,
+  ): { buffer: Buffer; width: number; height: number } | null {
     const bytesPerPixel = 4;
     const regionWidth = Math.min(bounds.width, frame.width - bounds.x);
     const regionHeight = Math.min(bounds.height, frame.height - bounds.y);
 
     if (regionWidth <= 0 || regionHeight <= 0) return null;
 
-    // Extract the region pixels into a new BGRA buffer
     const regionBuffer = Buffer.alloc(regionWidth * regionHeight * bytesPerPixel);
     const frameRowBytes = frame.width * bytesPerPixel;
 
@@ -199,21 +224,160 @@ export class OcrService {
       frame.buffer.copy(regionBuffer, destOffset, sourceOffset, sourceOffset + regionWidth * bytesPerPixel);
     }
 
-    // Convert BGRA to RGBA (swap B and R channels) for nativeImage
+    // Convert BGRA to RGBA (swap B and R channels)
     for (let i = 0; i < regionBuffer.length; i += 4) {
       const blue = regionBuffer[i];
       regionBuffer[i] = regionBuffer[i + 2]; // R
       regionBuffer[i + 2] = blue;             // B
     }
 
-    // Create a nativeImage and export as PNG
-    const image = nativeImage.createFromBuffer(regionBuffer, {
-      width: regionWidth,
-      height: regionHeight,
-    });
+    return { buffer: regionBuffer, width: regionWidth, height: regionHeight };
+  }
 
+  // ---------------------------------------------------------------------------
+  // Preprocessing pipeline
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Applies the preprocessing pipeline to RGBA pixel data and returns a PNG buffer.
+   *
+   * Pipeline order:
+   *   1. Upscale (nearest-neighbor, fast)
+   *   2. Color filter (zero out pixels outside the target color range)
+   *   3. Threshold / binarize (convert to black & white at a brightness cutoff)
+   *   4. Invert (swap black/white)
+   *   5. Convert to PNG via nativeImage
+   */
+  private applyPreprocessingPipeline(
+    rgbaBuffer: Buffer,
+    width: number,
+    height: number,
+    config?: OcrPreprocessConfig,
+  ): Buffer {
+    const { nativeImage } = require('electron');
+
+    let pixels = rgbaBuffer;
+    let w = width;
+    let h = height;
+
+    // Step 1: Upscale
+    const upscaleFactor = config?.upscaleFactor ?? 1;
+    if (upscaleFactor > 1) {
+      const upscaled = this.upscaleNearestNeighbor(pixels, w, h, upscaleFactor);
+      pixels = upscaled.buffer;
+      w = upscaled.width;
+      h = upscaled.height;
+    }
+
+    // Step 2: Color filter — zero out pixels not near the target color
+    const colorFilterIsEnabled = config?.colorFilterEnabled === true;
+    if (colorFilterIsEnabled) {
+      const target = config!.colorFilterTarget;
+      const tolerance = config!.colorFilterTolerance ?? 40;
+      this.applyColorFilter(pixels, target.red, target.green, target.blue, tolerance);
+    }
+
+    // Step 3: Threshold / binarize
+    const thresholdValue = config?.threshold ?? 0;
+    const thresholdIsEnabled = thresholdValue > 0;
+    if (thresholdIsEnabled) {
+      this.applyThreshold(pixels, thresholdValue);
+    }
+
+    // Step 4: Invert
+    const shouldInvert = config?.invert === true;
+    if (shouldInvert) {
+      this.applyInvert(pixels);
+    }
+
+    // Convert to PNG
+    const image = nativeImage.createFromBuffer(pixels, { width: w, height: h });
     return image.toPNG();
   }
+
+  /**
+   * Nearest-neighbor upscale of RGBA buffer.
+   */
+  private upscaleNearestNeighbor(
+    pixels: Buffer,
+    width: number,
+    height: number,
+    factor: number,
+  ): { buffer: Buffer; width: number; height: number } {
+    const newWidth = width * factor;
+    const newHeight = height * factor;
+    const bytesPerPixel = 4;
+    const result = Buffer.alloc(newWidth * newHeight * bytesPerPixel);
+
+    for (let destRow = 0; destRow < newHeight; destRow++) {
+      const sourceRow = (destRow / factor) | 0;
+      for (let destCol = 0; destCol < newWidth; destCol++) {
+        const sourceCol = (destCol / factor) | 0;
+        const sourceOffset = (sourceRow * width + sourceCol) * bytesPerPixel;
+        const destOffset = (destRow * newWidth + destCol) * bytesPerPixel;
+        pixels.copy(result, destOffset, sourceOffset, sourceOffset + bytesPerPixel);
+      }
+    }
+
+    return { buffer: result, width: newWidth, height: newHeight };
+  }
+
+  /**
+   * Zeros out pixels whose R/G/B channels are not within `tolerance` of the
+   * target color. Keeps matching pixels as-is. Operates in-place on RGBA buffer.
+   */
+  private applyColorFilter(
+    pixels: Buffer,
+    targetR: number,
+    targetG: number,
+    targetB: number,
+    tolerance: number,
+  ): void {
+    for (let i = 0; i < pixels.length; i += 4) {
+      const redDifference = Math.abs(pixels[i] - targetR);
+      const greenDifference = Math.abs(pixels[i + 1] - targetG);
+      const blueDifference = Math.abs(pixels[i + 2] - targetB);
+      const isWithinTolerance = redDifference <= tolerance
+                             && greenDifference <= tolerance
+                             && blueDifference <= tolerance;
+      if (!isWithinTolerance) {
+        pixels[i] = 0;
+        pixels[i + 1] = 0;
+        pixels[i + 2] = 0;
+      }
+    }
+  }
+
+  /**
+   * Converts RGBA pixels to black or white based on brightness threshold.
+   * Pixels brighter than the threshold become white (255), others become black (0).
+   * Operates in-place.
+   */
+  private applyThreshold(pixels: Buffer, threshold: number): void {
+    for (let i = 0; i < pixels.length; i += 4) {
+      // Luminance approximation: (R*299 + G*587 + B*114) / 1000
+      const brightness = (pixels[i] * 299 + pixels[i + 1] * 587 + pixels[i + 2] * 114) / 1000;
+      const outputValue = brightness >= threshold ? 255 : 0;
+      pixels[i] = outputValue;
+      pixels[i + 1] = outputValue;
+      pixels[i + 2] = outputValue;
+    }
+  }
+
+  /**
+   * Inverts R/G/B channels of every pixel. Operates in-place on RGBA buffer.
+   */
+  private applyInvert(pixels: Buffer): void {
+    for (let i = 0; i < pixels.length; i += 4) {
+      pixels[i] = 255 - pixels[i];
+      pixels[i + 1] = 255 - pixels[i + 1];
+      pixels[i + 2] = 255 - pixels[i + 2];
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Substring mapping evaluation
+  // ---------------------------------------------------------------------------
 
   private evaluateSubstringMappings(
     ocrText: string,
