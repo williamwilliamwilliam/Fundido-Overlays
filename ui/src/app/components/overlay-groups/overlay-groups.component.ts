@@ -79,7 +79,6 @@ import { ElectronService } from '../../services/electron.service';
         <!-- ======================== OVERLAYS ======================== -->
         <div class="section-header">
           <span class="section-label">Overlays</span>
-          <button class="add-btn" (click)="addOverlay(group)">+ Add Overlay</button>
         </div>
 
         <div *ngFor="let overlay of group.overlays; let overlayIndex = index"
@@ -227,7 +226,7 @@ import { ElectronService } from '../../services/electron.service';
           </div>
         </div>
 
-        <button *ngIf="group.overlays.length === 0" class="add-overlay-btn" (click)="addOverlay(group)">+ Add Overlay</button>
+        <button class="add-overlay-btn" (click)="addOverlay(group)">+ Add Overlay</button>
       </div>
     </div>
   `,

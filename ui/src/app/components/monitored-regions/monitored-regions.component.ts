@@ -37,7 +37,6 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       </p>
 
       <div class="toolbar">
-        <button class="primary" (click)="addRegion()">+ Add Region</button>
         <button (click)="saveAllRegions()" [disabled]="!hasUnsavedChanges">
           {{ hasUnsavedChanges ? 'Save (Ctrl+S)' : 'Saved' }}
         </button>
@@ -368,6 +367,8 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
           </div>
         </div>
       </div>
+
+      <button class="primary add-bottom-btn" (click)="addRegion()">+ Add Region</button>
     </div>
   `,
   styles: [`
@@ -405,6 +406,11 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       text-align: center;
       border: 1px dashed var(--color-border);
       border-radius: var(--radius-md);
+    }
+
+    .add-bottom-btn {
+      margin-top: var(--spacing-md);
+      width: 100%;
     }
 
     .region-card {
