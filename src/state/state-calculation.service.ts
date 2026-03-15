@@ -120,6 +120,59 @@ function evaluateSingleCalculation(
   };
 }
 
+/**
+ * Tracks consecutive pass counts for ColorThreshold mappings.
+ * Keyed by `calcId:mappingIndex` → number of consecutive frames that met the threshold.
+ */
+const consecutivePassCounts = new Map<string, number>();
+
+/**
+ * Evaluates a ColorThreshold calculation. Iterates top-down through
+ * colorThresholdMappings; the first row whose match percentage meets
+ * its threshold for the required number of consecutive evaluations wins.
+ */
+function evaluateColorThresholdCalculation(
+  medianColor: RgbColor,
+  calculation: StateCalculation
+): StateCalculationResult {
+  const confidenceByMapping: Record<string, number> = {};
+  let matchedValue = '';
+
+  const mappings = calculation.colorThresholdMappings || [];
+  for (let i = 0; i < mappings.length; i++) {
+    const mapping = mappings[i];
+    const distance = computeColorDistance(medianColor, mapping.color);
+    const confidence = computeConfidenceFromDistance(distance);
+    confidenceByMapping[mapping.stateValue] = confidence;
+
+    const counterKey = `${calculation.id}:${i}`;
+    const meetsThreshold = confidence >= mapping.matchThreshold;
+
+    if (meetsThreshold) {
+      const previousCount = consecutivePassCounts.get(counterKey) || 0;
+      const newCount = previousCount + 1;
+      consecutivePassCounts.set(counterKey, newCount);
+
+      const requiredConsecutive = mapping.consecutiveRequired || 1;
+      const meetsConsecutiveRequirement = newCount >= requiredConsecutive;
+      if (meetsConsecutiveRequirement && matchedValue === '') {
+        matchedValue = mapping.stateValue;
+        // Don't break — continue computing confidence for all rows for display
+      }
+    } else {
+      // Reset consecutive counter on miss
+      consecutivePassCounts.set(counterKey, 0);
+    }
+  }
+
+  return {
+    stateCalculationId: calculation.id,
+    medianColor,
+    currentValue: matchedValue,
+    confidenceByMapping,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -171,6 +224,8 @@ export function evaluateFrameState(
             ollamaResponseTimeMs: 0,
           });
         }
+      } else if (calculation.type === 'ColorThreshold') {
+        calculationResults.push(evaluateColorThresholdCalculation(medianColor, calculation));
       } else {
         calculationResults.push(evaluateSingleCalculation(medianColor, calculation));
       }

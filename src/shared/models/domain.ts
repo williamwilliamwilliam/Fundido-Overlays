@@ -87,6 +87,21 @@ export interface ColorStateMapping {
 }
 
 /**
+ * A color-threshold-to-state mapping used by a ColorThreshold calculation.
+ * Evaluated top-down; first row whose match % meets its threshold wins.
+ */
+export interface ColorThresholdMapping {
+  /** The reference color to compare against the median. */
+  color: RgbColor;
+  /** Minimum match percentage (0–100) required for this row to trigger. */
+  matchThreshold: number;
+  /** Number of consecutive evaluations that must pass before this row triggers. Default 1. */
+  consecutiveRequired: number;
+  /** The state value emitted when this row matches. */
+  stateValue: string;
+}
+
+/**
  * A substring-to-state mapping used by an OCR calculation.
  * If the OCR text contains `substring` (case-insensitive), the state is `stateValue`.
  * Evaluated top-down; first match wins.
@@ -98,7 +113,7 @@ export interface SubstringMapping {
   stateValue: string;
 }
 
-export type StateCalculationType = 'MedianPixelColor' | 'OCR' | 'OllamaLLM';
+export type StateCalculationType = 'MedianPixelColor' | 'ColorThreshold' | 'OCR' | 'OllamaLLM';
 
 /**
  * Preprocessing pipeline options for OCR calculations.
@@ -153,6 +168,8 @@ export interface StateCalculation {
   type: StateCalculationType;
   /** Color mappings for MedianPixelColor type. */
   colorStateMappings: ColorStateMapping[];
+  /** Color-threshold mappings for ColorThreshold type. Evaluated top-down, first match wins. */
+  colorThresholdMappings: ColorThresholdMapping[];
   /** Substring mappings for OCR type. Evaluated top-down, first match wins. */
   substringMappings: SubstringMapping[];
   /** OCR preprocessing pipeline config. */

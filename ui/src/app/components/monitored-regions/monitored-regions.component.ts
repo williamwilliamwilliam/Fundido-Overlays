@@ -95,6 +95,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                   <input [(ngModel)]="calc.name" (ngModelChange)="onFieldChanged()" placeholder="Calculation name" class="calc-name-input" />
                   <select [(ngModel)]="calc.type" (ngModelChange)="onCalcTypeChanged(calc)" class="calc-type-select">
                     <option value="MedianPixelColor">Closest to Median Color</option>
+                    <option value="ColorThreshold">Color Threshold Match</option>
                     <option value="OCR">OCR (Text Recognition)</option>
                     <option value="OllamaLLM">Ollama LLM Prompt</option>
                   </select>
@@ -125,6 +126,54 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                     <button class="danger-text small" (click)="removeMapping(calc, mappingIndex)">×</button>
                   </div>
                   <button class="add-mapping-btn" (click)="addMapping(calc)">+ Add Color Mapping</button>
+                </div>
+
+                <!-- Color-threshold mappings (ColorThreshold) -->
+                <div class="mappings-list" *ngIf="calc.type === 'ColorThreshold'">
+                  <div *ngFor="let mapping of calc.colorThresholdMappings; let mappingIndex = index"
+                    class="mapping-row threshold-row"
+                    draggable="true"
+                    (dragstart)="onThresholdDragStart($event, calc, mappingIndex)"
+                    (dragover)="onThresholdDragOver($event, mappingIndex)"
+                    (drop)="onThresholdDrop($event, calc)"
+                    (dragend)="onThresholdDragEnd()">
+                    <span class="drag-handle" title="Drag to reorder">&#9776;</span>
+                    <div
+                      class="color-swatch"
+                      [style.background-color]="rgbToHex(mapping.color.red, mapping.color.green, mapping.color.blue)">
+                    </div>
+                    <input
+                      class="hex-input"
+                      [ngModel]="rgbToHex(mapping.color.red, mapping.color.green, mapping.color.blue)"
+                      (ngModelChange)="onMappingColorChanged(mapping, $event)"
+                      placeholder="#000000" />
+                    <span class="mapping-label threshold-label">≥</span>
+                    <input
+                      type="number"
+                      class="threshold-input"
+                      [(ngModel)]="mapping.matchThreshold"
+                      (ngModelChange)="onFieldChanged()"
+                      min="0" max="100" step="1" />
+                    <span class="threshold-pct">%</span>
+                    <input
+                      type="number"
+                      class="consecutive-input"
+                      [(ngModel)]="mapping.consecutiveRequired"
+                      (ngModelChange)="onFieldChanged()"
+                      min="1" max="999" step="1" />
+                    <span class="consecutive-label">×</span>
+                    <span class="mapping-arrow">&rarr;</span>
+                    <input
+                      class="state-value-input"
+                      [(ngModel)]="mapping.stateValue"
+                      (ngModelChange)="onFieldChanged()"
+                      placeholder="State value" />
+                    <span class="confidence-badge" *ngIf="getConfidenceForMapping(region.id, calc.id, mapping.stateValue) !== null">
+                      {{ getConfidenceForMapping(region.id, calc.id, mapping.stateValue) | number:'1.1-1' }}%
+                    </span>
+                    <button class="danger-text small" (click)="removeThresholdMapping(calc, mappingIndex)">×</button>
+                  </div>
+                  <button class="add-mapping-btn" (click)="addThresholdMapping(calc)">+ Add Color Threshold</button>
                 </div>
 
                 <!-- Substring mappings (OCR) -->
@@ -277,8 +326,8 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
             <!-- Per-calculation readouts -->
             <div *ngFor="let calc of region.stateCalculations" class="calc-readout">
 
-              <!-- Median color (MedianPixelColor calcs only) -->
-              <div class="median-color-row" *ngIf="calc.type === 'MedianPixelColor' && getMedianHex(region.id)">
+              <!-- Median color (MedianPixelColor and ColorThreshold calcs) -->
+              <div class="median-color-row" *ngIf="(calc.type === 'MedianPixelColor' || calc.type === 'ColorThreshold') && getMedianHex(region.id)">
                 <span class="info-label">Median Color</span>
                 <div class="median-display">
                   <div
@@ -496,6 +545,51 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       align-items: center;
       gap: var(--spacing-sm);
       margin-bottom: 4px;
+    }
+
+    .threshold-row {
+      cursor: grab;
+    }
+    .threshold-row.drag-over {
+      border-top: 2px solid var(--color-accent);
+    }
+
+    .drag-handle {
+      cursor: grab;
+      color: var(--color-text-secondary);
+      font-size: 0.85rem;
+      user-select: none;
+      padding: 0 2px;
+    }
+    .drag-handle:active { cursor: grabbing; }
+
+    .threshold-input {
+      width: 50px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      text-align: center;
+    }
+
+    .threshold-pct {
+      color: var(--color-text-secondary);
+      font-size: 0.8rem;
+    }
+
+    .threshold-label {
+      font-size: 0.9rem;
+      color: var(--color-text-secondary);
+    }
+
+    .consecutive-input {
+      width: 42px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      text-align: center;
+    }
+
+    .consecutive-label {
+      color: var(--color-text-secondary);
+      font-size: 0.8rem;
     }
 
     .color-swatch {
@@ -877,6 +971,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
 
   onCalcTypeChanged(calc: any): void {
     if (!calc.colorStateMappings) calc.colorStateMappings = [];
+    if (!calc.colorThresholdMappings) calc.colorThresholdMappings = [];
     if (!calc.substringMappings) calc.substringMappings = [];
     if (calc.type === 'OCR' && !calc.ocrPreprocess) {
       calc.ocrPreprocess = {
@@ -899,6 +994,66 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       };
     }
     this.pushWorkingRegions();
+  }
+
+  // -- ColorThreshold mapping CRUD --------------------------------------------
+
+  addThresholdMapping(calc: any): void {
+    if (!calc.colorThresholdMappings) calc.colorThresholdMappings = [];
+    calc.colorThresholdMappings.push({
+      color: { red: 0, green: 0, blue: 0 },
+      matchThreshold: 80,
+      consecutiveRequired: 1,
+      stateValue: '',
+    });
+    this.pushWorkingRegions();
+  }
+
+  removeThresholdMapping(calc: any, index: number): void {
+    calc.colorThresholdMappings.splice(index, 1);
+    this.pushWorkingRegions();
+  }
+
+  // -- ColorThreshold drag-and-drop reorder -----------------------------------
+
+  private thresholdDragSourceIndex: number = -1;
+  private thresholdDragOverIndex: number = -1;
+
+  onThresholdDragStart(event: DragEvent, calc: any, index: number): void {
+    this.thresholdDragSourceIndex = index;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(index));
+    }
+  }
+
+  onThresholdDragOver(event: DragEvent, index: number): void {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    this.thresholdDragOverIndex = index;
+  }
+
+  onThresholdDrop(event: DragEvent, calc: any): void {
+    event.preventDefault();
+    const sourceIndex = this.thresholdDragSourceIndex;
+    const targetIndex = this.thresholdDragOverIndex;
+
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
+
+    const mappings = calc.colorThresholdMappings;
+    const [movedItem] = mappings.splice(sourceIndex, 1);
+    mappings.splice(targetIndex, 0, movedItem);
+
+    this.thresholdDragSourceIndex = -1;
+    this.thresholdDragOverIndex = -1;
+    this.pushWorkingRegions();
+  }
+
+  onThresholdDragEnd(): void {
+    this.thresholdDragSourceIndex = -1;
+    this.thresholdDragOverIndex = -1;
   }
 
   addMapping(calc: any): void {

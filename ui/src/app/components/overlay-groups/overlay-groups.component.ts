@@ -593,8 +593,9 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     const calc = region.stateCalculations.find((c: any) => c.id === calcId);
     if (!calc) return [];
     const colorValues = (calc.colorStateMappings || []).map((m: any) => m.stateValue).filter((v: string) => v);
+    const thresholdValues = (calc.colorThresholdMappings || []).map((m: any) => m.stateValue).filter((v: string) => v);
     const substringValues = (calc.substringMappings || []).map((m: any) => m.stateValue).filter((v: string) => v);
-    return [...colorValues, ...substringValues];
+    return [...colorValues, ...thresholdValues, ...substringValues];
   }
 
   getCalcType(regionId: string, calcId: string): string {
