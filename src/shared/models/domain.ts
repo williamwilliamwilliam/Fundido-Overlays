@@ -263,19 +263,23 @@ export interface OverlayRegionMirrorConfig {
 // -- Rules engine --
 
 export type RuleOperator = 'equals' | 'notEquals';
+export type RuleLogicMode = 'AND' | 'OR';
 
 export interface RuleCondition {
   monitoredRegionId: MonitoredRegionId;
   stateCalculationId: StateCalculationId;
   operator: RuleOperator;
   value: string;
+  /** If true, the result of this condition is inverted (NOT). Default false. */
+  negate: boolean;
 }
 
 export type RuleAction = 'show' | 'hide' | 'opacity';
 
 export interface OverlayRule {
   id: string;
-  /** All conditions must be true for this rule to match (AND logic). */
+  /** How conditions are combined. 'AND' = all must match, 'OR' = any must match. Default 'AND'. */
+  logicMode: RuleLogicMode;
   conditions: RuleCondition[];
   action: RuleAction;
   /** For 'opacity' action, the opacity value (0–1). */

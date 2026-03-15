@@ -181,8 +181,19 @@ import { ElectronService } from '../../services/electron.service';
             </div>
             <div *ngFor="let rule of overlay.rules; let ruleIndex = index" class="rule-row">
               <div class="rule-conditions">
+                <div class="logic-mode-row">
+                  <span class="rule-keyword">When</span>
+                  <select class="logic-mode-select" [(ngModel)]="rule.logicMode" (ngModelChange)="onFieldChanged()" *ngIf="rule.conditions.length > 1">
+                    <option value="AND">ALL (AND)</option>
+                    <option value="OR">ANY (OR)</option>
+                  </select>
+                </div>
                 <div *ngFor="let cond of rule.conditions; let condIndex = index" class="condition-row">
-                  <span class="rule-keyword">{{ condIndex === 0 ? 'When' : 'AND' }}</span>
+                  <span class="rule-keyword condition-joiner" *ngIf="condIndex > 0">{{ rule.logicMode || 'AND' }}</span>
+                  <label class="not-checkbox" title="Invert this condition">
+                    <input type="checkbox" [(ngModel)]="cond.negate" (ngModelChange)="onFieldChanged()" />
+                    NOT
+                  </label>
                   <select [(ngModel)]="cond.monitoredRegionId" (ngModelChange)="onRegionSelectedForCondition(cond)">
                     <option value="">Select Region</option>
                     <option *ngFor="let region of monitoredRegions" [ngValue]="region.id">{{ region.name }}</option>
@@ -205,7 +216,7 @@ import { ElectronService } from '../../services/electron.service';
                     placeholder="Expected response" class="condition-value-input" />
                   <button class="danger-text small" (click)="removeCondition(rule, condIndex)">×</button>
                 </div>
-                <button class="add-condition-btn" (click)="addCondition(rule)">+ AND</button>
+                <button class="add-condition-btn" (click)="addCondition(rule)">+ Add Condition</button>
               </div>
               <div class="rule-action">
                 <span class="rule-keyword">Then</span>
@@ -332,6 +343,11 @@ import { ElectronService } from '../../services/electron.service';
     .condition-row { display: flex; align-items: center; gap: var(--spacing-xs); margin-bottom: 2px; flex-wrap: wrap; }
     .condition-row select { font-size: 0.8rem; max-width: 150px; }
     .rule-keyword { font-size: 0.75rem; font-weight: 600; color: var(--color-accent); text-transform: uppercase; min-width: 40px; }
+    .condition-joiner { min-width: 30px; text-align: center; }
+    .logic-mode-row { display: flex; align-items: center; gap: var(--spacing-sm); margin-bottom: 4px; }
+    .logic-mode-select { font-size: 0.75rem; }
+    .not-checkbox { display: flex; align-items: center; gap: 2px; font-size: 0.7rem; font-weight: 600; color: var(--color-text-secondary); cursor: pointer; white-space: nowrap; }
+    .not-checkbox input[type="checkbox"] { margin: 0; }
     .add-condition-btn { font-size: 0.7rem; background: transparent; border: 1px dashed var(--color-border); padding: 1px 8px; }
     .rule-action { display: flex; align-items: center; gap: var(--spacing-sm); flex-wrap: wrap; }
     .rule-action select { font-size: 0.8rem; }
@@ -545,7 +561,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   addRule(overlay: any): void {
     overlay.rules.push({
       id: crypto.randomUUID(),
-      conditions: [{ monitoredRegionId: '', stateCalculationId: '', operator: 'equals', value: '' }],
+      logicMode: 'AND',
+      conditions: [{ monitoredRegionId: '', stateCalculationId: '', operator: 'equals', value: '', negate: false }],
       action: 'show',
     });
     this.hasUnsavedChanges = true;
@@ -557,7 +574,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   }
 
   addCondition(rule: any): void {
-    rule.conditions.push({ monitoredRegionId: '', stateCalculationId: '', operator: 'equals', value: '' });
+    rule.conditions.push({ monitoredRegionId: '', stateCalculationId: '', operator: 'equals', value: '', negate: false });
     this.hasUnsavedChanges = true;
   }
 
