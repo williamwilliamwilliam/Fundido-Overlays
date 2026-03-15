@@ -388,8 +388,25 @@ export class OcrService {
 
     const mappings = calculation.substringMappings || [];
     for (const mapping of mappings) {
+      const matchMode = mapping.matchMode || 'contains';
       const substringLower = mapping.substring.toLowerCase();
-      const isMatch = substringLower.length > 0 && lowerText.includes(substringLower);
+
+      let isMatch = false;
+
+      if (matchMode === 'isEmpty') {
+        isMatch = lowerText.length === 0;
+      } else if (matchMode === 'contains') {
+        isMatch = substringLower.length > 0 && lowerText.includes(substringLower);
+      } else if (matchMode === 'equals') {
+        isMatch = lowerText === substringLower;
+      } else if (matchMode === 'notEquals') {
+        isMatch = lowerText !== substringLower;
+      } else if (matchMode === 'startsWith') {
+        isMatch = substringLower.length > 0 && lowerText.startsWith(substringLower);
+      } else if (matchMode === 'endsWith') {
+        isMatch = substringLower.length > 0 && lowerText.endsWith(substringLower);
+      }
+
       if (isMatch) {
         matchedValue = mapping.stateValue;
         break; // First match wins

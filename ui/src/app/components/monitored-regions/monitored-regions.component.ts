@@ -182,12 +182,19 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                     <span class="ocr-text-value">{{ getOcrText(region.id, calc.id) || '(empty)' }}</span>
                   </div>
                   <div *ngFor="let mapping of calc.substringMappings; let mappingIndex = index" class="mapping-row">
-                    <span class="mapping-label">Contains</span>
-                    <input
+                    <select class="match-mode-select" [(ngModel)]="mapping.matchMode" (ngModelChange)="onFieldChanged()">
+                      <option value="contains">Contains</option>
+                      <option value="equals">Equals</option>
+                      <option value="notEquals">Does Not Equal</option>
+                      <option value="startsWith">Starts With</option>
+                      <option value="endsWith">Ends With</option>
+                      <option value="isEmpty">Is Empty</option>
+                    </select>
+                    <input *ngIf="mapping.matchMode !== 'isEmpty'"
                       class="substring-input"
                       [(ngModel)]="mapping.substring"
                       (ngModelChange)="onFieldChanged()"
-                      placeholder="Substring to match" />
+                      placeholder="Text to match" />
                     <span class="mapping-arrow">&rarr;</span>
                     <input
                       class="state-value-input"
@@ -196,7 +203,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                       placeholder="State value" />
                     <button class="danger-text small" (click)="removeSubstringMapping(calc, mappingIndex)">×</button>
                   </div>
-                  <button class="add-mapping-btn" (click)="addSubstringMapping(calc)">+ Add Substring Match</button>
+                  <button class="add-mapping-btn" (click)="addSubstringMapping(calc)">+ Add Text Match</button>
 
                   <!-- OCR Preprocessing Pipeline -->
                   <div class="ocr-preprocess" *ngIf="calc.ocrPreprocess">
@@ -622,6 +629,11 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       flex: 1;
       font-size: 0.85rem;
       min-width: 100px;
+    }
+
+    .match-mode-select {
+      font-size: 0.8rem;
+      min-width: 110px;
     }
 
     .substring-input {
@@ -1077,7 +1089,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
 
   addSubstringMapping(calc: any): void {
     if (!calc.substringMappings) calc.substringMappings = [];
-    calc.substringMappings.push({ substring: '', stateValue: '' });
+    calc.substringMappings.push({ substring: '', matchMode: 'contains', stateValue: '' });
     this.pushWorkingRegions();
   }
 

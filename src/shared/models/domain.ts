@@ -102,14 +102,20 @@ export interface ColorThresholdMapping {
 }
 
 /**
- * A substring-to-state mapping used by an OCR calculation.
- * If the OCR text contains `substring` (case-insensitive), the state is `stateValue`.
+ * How to compare OCR text against the mapping value.
+ */
+export type OcrMatchMode = 'contains' | 'equals' | 'notEquals' | 'startsWith' | 'endsWith' | 'isEmpty';
+
+/**
+ * A text-to-state mapping used by an OCR calculation.
  * Evaluated top-down; first match wins.
  */
 export interface SubstringMapping {
-  /** The substring to search for in the OCR result (case-insensitive). */
+  /** The text to match against the OCR result (case-insensitive). Ignored for 'isEmpty' mode. */
   substring: string;
-  /** The state value to emit when this substring is found. */
+  /** How to compare the OCR text against the substring. Default 'contains'. */
+  matchMode: OcrMatchMode;
+  /** The state value to emit when this mapping matches. */
   stateValue: string;
 }
 
