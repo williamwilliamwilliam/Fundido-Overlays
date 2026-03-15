@@ -22,21 +22,22 @@ export class OverlayWindowManager {
    * Call this whenever the overlay group configuration changes.
    */
   public syncOverlayWindows(overlayGroups: OverlayGroup[]): void {
-    const activeGroupIds = new Set(overlayGroups.map((group) => group.id));
+    const enabledGroups = overlayGroups.filter((group) => group.enabled !== false);
+    const enabledGroupIds = new Set(enabledGroups.map((group) => group.id));
 
-    // Close windows for groups that no longer exist
+    // Close windows for groups that no longer exist or are disabled
     for (const [groupId, window] of this.overlayWindowsByGroupId) {
-      const groupWasRemoved = !activeGroupIds.has(groupId);
-      if (groupWasRemoved) {
-        logger.info(LogCategory.Overlay, `Closing overlay window for removed group: ${groupId}`);
+      const groupShouldClose = !enabledGroupIds.has(groupId);
+      if (groupShouldClose) {
+        logger.info(LogCategory.Overlay, `Closing overlay window for removed/disabled group: ${groupId}`);
         if (!window.isDestroyed()) window.close();
         this.overlayWindowsByGroupId.delete(groupId);
         this.overlayGroupConfigs.delete(groupId);
       }
     }
 
-    // Create or update windows for each group
-    for (const group of overlayGroups) {
+    // Create or update windows for each enabled group
+    for (const group of enabledGroups) {
       this.overlayGroupConfigs.set(group.id, group);
       const existingWindow = this.overlayWindowsByGroupId.get(group.id);
       if (existingWindow && !existingWindow.isDestroyed()) {
@@ -46,8 +47,8 @@ export class OverlayWindowManager {
       }
     }
 
-    // Start or stop cursor tracking based on whether any group uses relativeToCursor
-    this.hasCursorFollowingGroups = overlayGroups.some(
+    // Start or stop cursor tracking based on whether any enabled group uses relativeToCursor
+    this.hasCursorFollowingGroups = enabledGroups.some(
       (group) => group.position.mode === 'relativeToCursor'
     );
     this.updateCursorTracking();

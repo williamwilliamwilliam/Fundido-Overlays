@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router, ActivatedRoute } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ElectronService } from '../../services/electron.service';
 import type { PreviewFrameData } from '../../models/electron-api';
@@ -60,10 +61,25 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
         No monitored regions defined yet. Click "+ Add Region" to get started.
       </div>
 
-      <div *ngFor="let region of regions; let regionIndex = index" class="region-card">
+      <div *ngFor="let region of regions; let regionIndex = index"
+        class="region-card"
+        [attr.data-highlight-id]="region.id"
+        [class.highlight-flash]="highlightId === region.id"
+        [class.region-disabled]="region.enabled === false">
         <div class="region-header">
+          <label class="enabled-toggle" title="Enable/disable this region">
+            <input type="checkbox"
+              [ngModel]="region.enabled !== false"
+              (ngModelChange)="region.enabled = $event; onFieldChanged()" />
+          </label>
           <input [(ngModel)]="region.name" (ngModelChange)="onFieldChanged()" placeholder="Region name" class="name-input" />
           <button class="danger-text" (click)="removeRegion(regionIndex)">Remove</button>
+        </div>
+        <div class="cross-ref-row" *ngIf="getOverlayGroupsReferencingRegion(region.id).length > 0">
+          <span class="cross-ref-label">Overlays using this region:</span>
+          <span *ngFor="let ref of getOverlayGroupsReferencingRegion(region.id)" class="cross-ref-link" (click)="navigateToOverlay(ref.overlayId)">
+            {{ ref.groupName }} → {{ ref.overlayName }}
+          </span>
         </div>
 
         <div class="region-content-row">
@@ -433,7 +449,49 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       justify-content: space-between;
       align-items: center;
       margin-bottom: var(--spacing-sm);
+      gap: var(--spacing-sm);
     }
+
+    .enabled-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .enabled-toggle input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: var(--color-accent);
+    }
+
+    .region-disabled {
+      opacity: 0.45;
+    }
+
+    .cross-ref-row {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      flex-wrap: wrap;
+      margin-bottom: var(--spacing-sm);
+      padding: 4px var(--spacing-sm);
+      background-color: var(--color-bg-primary);
+      border-radius: var(--radius-sm);
+    }
+    .cross-ref-label {
+      font-size: 0.75rem;
+      color: var(--color-text-secondary);
+      white-space: nowrap;
+    }
+    .cross-ref-link {
+      font-size: 0.75rem;
+      color: var(--color-accent);
+      cursor: pointer;
+      text-decoration: underline;
+      white-space: nowrap;
+    }
+    .cross-ref-link:hover { opacity: 0.8; }
 
     .name-input {
       font-size: 1rem;
@@ -857,15 +915,25 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     }
     .danger-text.small { font-size: 0.8rem; }
     .danger-text:hover { text-decoration: underline; }
+
+    @keyframes highlight-flash {
+      0% { box-shadow: 0 0 0 3px var(--color-accent), inset 0 0 20px rgba(var(--color-accent-rgb, 100, 149, 237), 0.15); }
+      100% { box-shadow: none; }
+    }
+    .highlight-flash {
+      animation: highlight-flash 2s ease-out;
+    }
   `],
 })
 export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   regions: any[] = [];
+  overlayGroups: any[] = [];
   showImportDialog = false;
   importJsonText = '';
   pickingRegionId: string | null = null;
   latestPreviewFrame: PreviewFrameData | null = null;
   hasUnsavedChanges = false;
+  highlightId: string | null = null;
 
   /** Maps regionId → { medianHex, calcResults: Map<calcId, { currentValue, confidences }> } */
   private regionStateMap = new Map<string, {
@@ -878,7 +946,11 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   private stateSubscription: Subscription | null = null;
   private previewImage: HTMLImageElement | null = null;
 
-  constructor(private readonly electronService: ElectronService) {}
+  constructor(
+    private readonly electronService: ElectronService,
+    private readonly router: Router,
+    private readonly route: ActivatedRoute,
+  ) {}
 
   // Expose helper to template
   rgbToHex = rgbToHex;
@@ -909,6 +981,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   async ngOnInit(): Promise<void> {
     const config = await this.electronService.loadConfig();
     this.regions = config.monitoredRegions || [];
+    this.overlayGroups = config.overlayGroups || [];
     // Push to backend for live evaluation, but don't mark as dirty since nothing changed
     this.electronService.setWorkingRegions(this.regions);
 
@@ -932,6 +1005,20 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
       this.processFrameState(frameState);
     });
+
+    // Scroll to and highlight an element if navigated here with ?highlight=id
+    this.route.queryParams.subscribe((params) => {
+      const targetId = params['highlight'];
+      if (!targetId) return;
+      this.highlightId = targetId;
+      setTimeout(() => {
+        const element = document.querySelector(`[data-highlight-id="${targetId}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        setTimeout(() => { this.highlightId = null; }, 2000);
+      }, 100);
+    });
   }
 
   ngOnDestroy(): void {
@@ -950,6 +1037,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     const newRegion = {
       id: crypto.randomUUID(),
       name: 'New Region',
+      enabled: true,
       bounds: { x: 0, y: 0, width: 100, height: 100 },
       stateCalculations: [],
     };
@@ -1225,6 +1313,31 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     if (!calcResult) return null;
     const ms = (calcResult as any).ollamaResponseTimeMs;
     return ms !== undefined && ms > 0 ? ms : null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cross-references
+  // ---------------------------------------------------------------------------
+
+  getOverlayGroupsReferencingRegion(regionId: string): Array<{ groupId: string; groupName: string; overlayId: string; overlayName: string }> {
+    const results: Array<{ groupId: string; groupName: string; overlayId: string; overlayName: string }> = [];
+    for (const group of this.overlayGroups) {
+      for (const overlay of (group.overlays || [])) {
+        const rulesReferenceThisRegion = (overlay.rules || []).some((rule: any) =>
+          (rule.conditions || []).some((cond: any) => cond.monitoredRegionId === regionId)
+        );
+        const regionMirrorReferencesThisRegion = overlay.contentType === 'regionMirror'
+          && overlay.regionMirrorConfig?.monitoredRegionId === regionId;
+        if (rulesReferenceThisRegion || regionMirrorReferencesThisRegion) {
+          results.push({ groupId: group.id, groupName: group.name, overlayId: overlay.id, overlayName: overlay.name });
+        }
+      }
+    }
+    return results;
+  }
+
+  navigateToOverlay(overlayId: string): void {
+    this.router.navigate(['/overlays'], { queryParams: { highlight: overlayId } });
   }
 
   // ---------------------------------------------------------------------------

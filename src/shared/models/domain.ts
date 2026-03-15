@@ -192,6 +192,8 @@ export interface MonitoredRegion {
   id: MonitoredRegionId;
   /** Human-readable label shown in the UI. */
   name: string;
+  /** Whether this region is actively evaluated. Default true. */
+  enabled: boolean;
   /** The area of the capture this region covers. */
   bounds: Rectangle;
   /** One or more calculations that derive state from this region. */
@@ -309,6 +311,8 @@ export interface Overlay {
 export interface OverlayGroup {
   id: OverlayGroupId;
   name: string;
+  /** Whether this group is active and rendered. Default true. */
+  enabled: boolean;
   position: OverlayPosition;
   growDirection: GrowDirection;
   alignment: Alignment;

@@ -190,7 +190,8 @@ export function evaluateFrameState(
   ocrResults?: Map<string, StateCalculationResult>,
   ollamaResults?: Map<string, StateCalculationResult>
 ): FrameState {
-  const regionStates: MonitoredRegionState[] = monitoredRegions.map((region) => {
+  const enabledRegions = monitoredRegions.filter((region) => region.enabled !== false);
+  const regionStates: MonitoredRegionState[] = enabledRegions.map((region) => {
     const medianColor = computeMedianColorForRegion(frame, region.bounds);
 
     const calculationResults: StateCalculationResult[] = [];

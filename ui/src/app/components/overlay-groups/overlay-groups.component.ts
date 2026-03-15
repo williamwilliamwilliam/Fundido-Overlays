@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router, ActivatedRoute } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ElectronService } from '../../services/electron.service';
 
@@ -38,8 +39,15 @@ import { ElectronService } from '../../services/electron.service';
       </div>
 
       <!-- ======================== GROUP CARD ======================== -->
-      <div *ngFor="let group of groups; let groupIndex = index" class="group-card">
+      <div *ngFor="let group of groups; let groupIndex = index"
+        class="group-card"
+        [class.group-disabled]="group.enabled === false">
         <div class="group-header">
+          <label class="enabled-toggle" title="Enable/disable this group">
+            <input type="checkbox"
+              [ngModel]="group.enabled !== false"
+              (ngModelChange)="group.enabled = $event; onFieldChanged()" />
+          </label>
           <input [(ngModel)]="group.name" (ngModelChange)="onFieldChanged()" placeholder="Group name" class="name-input" />
           <button class="danger-text" (click)="removeGroup(groupIndex)">Remove</button>
         </div>
@@ -83,6 +91,8 @@ import { ElectronService } from '../../services/electron.service';
 
         <div *ngFor="let overlay of group.overlays; let overlayIndex = index"
           class="overlay-card"
+          [attr.data-highlight-id]="overlay.id"
+          [class.highlight-flash]="highlightId === overlay.id"
           [class.drag-over]="dragOverIndex === overlayIndex && dragOverGroupId === group.id"
           draggable="true"
           (dragstart)="onDragStart($event, group, overlayIndex)"
@@ -97,6 +107,12 @@ import { ElectronService } from '../../services/electron.service';
               <option value="text">Text</option><option value="image">Image</option><option value="regionMirror">Region Mirror</option>
             </select>
             <button class="danger-text small" (click)="removeOverlay(group, overlayIndex)">Remove</button>
+          </div>
+          <div class="cross-ref-row" *ngIf="getMonitoredRegionsForOverlay(overlay).length > 0">
+            <span class="cross-ref-label">Monitored Regions in this Overlay:</span>
+            <span *ngFor="let ref of getMonitoredRegionsForOverlay(overlay)" class="cross-ref-link" (click)="navigateToRegion(ref.id)">
+              {{ ref.name }}
+            </span>
           </div>
 
           <!-- Default visibility + opacity -->
@@ -263,7 +279,20 @@ import { ElectronService } from '../../services/electron.service';
       background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
       border-radius: var(--radius-md); padding: var(--spacing-md); margin-bottom: var(--spacing-md);
     }
-    .group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm); }
+    .group-card.group-disabled { opacity: 0.45; }
+    .group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm); gap: var(--spacing-sm); }
+
+    .enabled-toggle { display: flex; align-items: center; cursor: pointer; flex-shrink: 0; }
+    .enabled-toggle input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var(--color-accent); }
+
+    .cross-ref-row {
+      display: flex; align-items: center; gap: var(--spacing-sm); flex-wrap: wrap;
+      margin-bottom: var(--spacing-sm); padding: 4px var(--spacing-sm);
+      background-color: var(--color-bg-primary); border-radius: var(--radius-sm);
+    }
+    .cross-ref-label { font-size: 0.75rem; color: var(--color-text-secondary); white-space: nowrap; }
+    .cross-ref-link { font-size: 0.75rem; color: var(--color-accent); cursor: pointer; text-decoration: underline; white-space: nowrap; }
+    .cross-ref-link:hover { opacity: 0.8; }
 
     .name-input, .overlay-name-input {
       font-size: 1rem; font-weight: 500; background: transparent;
@@ -361,6 +390,14 @@ import { ElectronService } from '../../services/electron.service';
     .danger-text { background: transparent; border: none; color: var(--color-error); font-size: 0.85rem; }
     .danger-text.small { font-size: 0.8rem; }
     .danger-text:hover { text-decoration: underline; }
+
+    @keyframes highlight-flash {
+      0% { box-shadow: 0 0 0 3px var(--color-accent), inset 0 0 20px rgba(var(--color-accent-rgb, 100, 149, 237), 0.15); }
+      100% { box-shadow: none; }
+    }
+    .highlight-flash {
+      animation: highlight-flash 2s ease-out;
+    }
   `],
 })
 export class OverlayGroupsComponent implements OnInit, OnDestroy {
@@ -370,6 +407,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   importJsonText = '';
   hasUnsavedChanges = false;
   pickingGroupId: string | null = null;
+  highlightId: string | null = null;
 
   // Drag-and-drop reorder state
   dragOverIndex: number | null = null;
@@ -379,7 +417,11 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
 
   private stateSubscription: Subscription | null = null;
 
-  constructor(private readonly electronService: ElectronService) {}
+  constructor(
+    private readonly electronService: ElectronService,
+    private readonly router: Router,
+    private readonly route: ActivatedRoute,
+  ) {}
 
   @HostListener('window:keydown', ['$event'])
   onKeyDown(event: KeyboardEvent): void {
@@ -404,6 +446,22 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     const config = await this.electronService.loadConfig();
     this.groups = config.overlayGroups || [];
     this.monitoredRegions = config.monitoredRegions || [];
+
+    // Scroll to and highlight an element if navigated here with ?highlight=id
+    this.route.queryParams.subscribe((params) => {
+      const targetId = params['highlight'];
+      if (!targetId) return;
+      this.highlightId = targetId;
+      // Wait for Angular to render, then scroll
+      setTimeout(() => {
+        const element = document.querySelector(`[data-highlight-id="${targetId}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        // Clear highlight class after animation completes
+        setTimeout(() => { this.highlightId = null; }, 2000);
+      }, 100);
+    });
   }
 
   ngOnDestroy(): void {
@@ -418,7 +476,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
 
   addGroup(): void {
     this.groups.push({
-      id: crypto.randomUUID(), name: 'New Group',
+      id: crypto.randomUUID(), name: 'New Group', enabled: true,
       position: { mode: 'absolute', x: 100, y: 100 },
       growDirection: 'right', alignment: 'start', gap: 0, overlays: [],
     });
@@ -619,6 +677,37 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     if (!region) return '';
     const calc = region.stateCalculations.find((c: any) => c.id === calcId);
     return calc?.type || '';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cross-references
+  // ---------------------------------------------------------------------------
+
+  getMonitoredRegionsForOverlay(overlay: any): Array<{ id: string; name: string }> {
+    const regionIds = new Set<string>();
+
+    for (const rule of (overlay.rules || [])) {
+      for (const cond of (rule.conditions || [])) {
+        if (cond.monitoredRegionId) {
+          regionIds.add(cond.monitoredRegionId);
+        }
+      }
+    }
+
+    if (overlay.contentType === 'regionMirror' && overlay.regionMirrorConfig?.monitoredRegionId) {
+      regionIds.add(overlay.regionMirrorConfig.monitoredRegionId);
+    }
+
+    const results: Array<{ id: string; name: string }> = [];
+    for (const regionId of regionIds) {
+      const region = this.monitoredRegions.find((r: any) => r.id === regionId);
+      results.push({ id: regionId, name: region ? region.name : regionId });
+    }
+    return results;
+  }
+
+  navigateToRegion(regionId: string): void {
+    this.router.navigate(['/regions'], { queryParams: { highlight: regionId } });
   }
 
   // ---------------------------------------------------------------------------
