@@ -1,28 +1,6 @@
 /* Fundido Overlays — Global Styles */
 
-:root {
-  --color-bg-primary: #1a1a2e;
-  --color-bg-secondary: #16213e;
-  --color-bg-panel: #0f3460;
-  --color-accent: #e94560;
-  --color-accent-hover: #ff6b81;
-  --color-text-primary: #eaeaea;
-  --color-text-secondary: #a0a0b0;
-  --color-border: #2a2a4a;
-  --color-success: #4caf50;
-  --color-warning: #ff9800;
-  --color-error: #f44336;
-
-  --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  --font-mono: 'Cascadia Code', 'Consolas', monospace;
-
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 16px;
-  --spacing-lg: 24px;
-}
+@import './theme.css';
 
 * {
   box-sizing: border-box;
@@ -45,7 +23,7 @@ button {
   color: var(--color-text-primary);
   padding: var(--spacing-xs) var(--spacing-md);
   border-radius: var(--radius-sm);
-  transition: background-color 0.15s ease;
+  transition: background-color var(--transition-fast);
 }
 
 button:hover {
@@ -72,5 +50,5 @@ input, textarea, select {
 
 input:focus, textarea:focus, select:focus {
   outline: none;
-  border-color: var(--color-accent);
+  border-color: var(--color-border-focus);
 }

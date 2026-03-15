@@ -101,7 +101,7 @@ import type { PreviewFrameData } from '../../models/electron-api';
     .preview-area {
       border: 1px solid var(--color-border);
       border-radius: var(--radius-md);
-      background-color: #000;
+      background-color: var(--color-bg-canvas);
       min-height: 300px;
       display: flex;
       align-items: center;

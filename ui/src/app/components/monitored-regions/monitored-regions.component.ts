@@ -469,7 +469,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     }
 
     .region-disabled {
-      opacity: 0.45;
+      opacity: var(--opacity-disabled);
     }
 
     .cross-ref-row {
@@ -747,7 +747,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     .preview-canvas {
       border: 1px solid var(--color-border);
       border-radius: var(--radius-sm);
-      background-color: #000;
+      background-color: var(--color-bg-canvas);
       max-width: 160px;
       max-height: 120px;
     }
@@ -921,9 +921,9 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
 
     @keyframes highlight-flash {
       0%, 15% {
-        outline: 3px solid #5b9cf5;
+        outline: 3px solid var(--color-highlight);
         outline-offset: 2px;
-        background-color: rgba(91, 156, 245, 0.12);
+        background-color: var(--color-highlight-bg);
       }
       100% {
         outline: 3px solid transparent;

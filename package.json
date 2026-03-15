@@ -12,7 +12,8 @@
     "start": "npm run build:electron && electron .",
     "start:dev": "concurrently \"npm run build:electron -- --watch\" \"cd ui && ng serve\" \"wait-on http://localhost:4241 && electron . --dev\"",
     "watch": "npm run build:native && npm run start:dev",
-    "package": "npm run build:all && electron-builder",
+    "package": "npm run build:all && electron-builder --win",
+    "package:dir": "npm run build:all && electron-builder --win --dir",
     "test:electron": "jest --config jest.config.js",
     "test:ui": "cd ui && ng test",
     "lint": "eslint src/ --ext .ts"
@@ -43,21 +44,40 @@
     },
     "files": [
       "dist/**/*",
-      "native/build/Release/**/*"
+      "native/build/Release/**/*",
+      "!dist/**/*.map",
+      "!dist/**/*.d.ts"
     ],
-    "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
-    },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false
-    },
-    "extraResources": [
+    "extraFiles": [
       {
         "from": "docs/user",
-        "to": "docs"
+        "to": "docs",
+        "filter": ["**/*"]
       }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "dir",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "asar": true,
+    "asarUnpack": [
+      "native/build/Release/**/*",
+      "node_modules/tesseract.js-core/**/*"
     ]
   }
 }

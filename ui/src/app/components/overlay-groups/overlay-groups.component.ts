@@ -282,7 +282,7 @@ import { ElectronService } from '../../services/electron.service';
       background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
       border-radius: var(--radius-md); padding: var(--spacing-md); margin-bottom: var(--spacing-md);
     }
-    .group-card.group-disabled { opacity: 0.45; }
+    .group-card.group-disabled { opacity: var(--opacity-disabled); }
     .group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm); gap: var(--spacing-sm); }
 
     .enabled-toggle { display: flex; align-items: center; cursor: pointer; flex-shrink: 0; }
@@ -396,9 +396,9 @@ import { ElectronService } from '../../services/electron.service';
 
     @keyframes highlight-flash {
       0%, 15% {
-        outline: 3px solid #5b9cf5;
+        outline: 3px solid var(--color-highlight);
         outline-offset: 2px;
-        background-color: rgba(91, 156, 245, 0.12);
+        background-color: var(--color-highlight-bg);
       }
       100% {
         outline: 3px solid transparent;
