@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 import { ElectronService } from '../../services/electron.service';
-import type { PreviewFrameData } from '../../models/electron-api';
+import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
 
 @Component({
   selector: 'app-capture-preview',
@@ -52,6 +52,52 @@ import type { PreviewFrameData } from '../../models/electron-api';
         <div *ngIf="!latestPreview && isCapturing" class="placeholder">
           Waiting for first frame...
         </div>
+
+        <!-- FPS / metrics overlay -->
+        <div class="metrics-overlay" *ngIf="isCapturing && metrics">
+          <div class="metrics-row">
+            <span class="metric-label">Capture</span>
+            <span class="metric-value" [class.metric-warn]="metrics.captureFps < 20" [class.metric-good]="metrics.captureFps >= 50">{{ metrics.captureFps }} fps</span>
+          </div>
+          <div class="metrics-row">
+            <span class="metric-label">Preview</span>
+            <span class="metric-value">{{ metrics.previewFps }} fps</span>
+          </div>
+          <div class="metrics-row">
+            <span class="metric-label">Pipeline</span>
+            <span class="metric-value" [class.metric-warn]="metrics.pipelineAvgMs > 16">{{ metrics.pipelineAvgMs }} ms</span>
+          </div>
+          <div class="metrics-row">
+            <span class="metric-label">State Evals</span>
+            <span class="metric-value">{{ metrics.stateEvalPerSec }}/s</span>
+          </div>
+          <div class="metrics-divider"></div>
+          <div class="metrics-row" *ngIf="metrics.medianColorCalcsPerSec > 0">
+            <span class="metric-label">Median Color</span>
+            <span class="metric-value">{{ metrics.medianColorCalcsPerSec }}/s</span>
+          </div>
+          <div class="metrics-row" *ngIf="metrics.colorThresholdCalcsPerSec > 0">
+            <span class="metric-label">Color Threshold</span>
+            <span class="metric-value">{{ metrics.colorThresholdCalcsPerSec }}/s</span>
+          </div>
+          <div class="metrics-row" *ngIf="metrics.ocrCalcsPerSec > 0">
+            <span class="metric-label">OCR</span>
+            <span class="metric-value">{{ metrics.ocrCalcsPerSec }}/s</span>
+          </div>
+          <div class="metrics-row" *ngIf="metrics.ollamaCalcsPerSec > 0">
+            <span class="metric-label">Ollama</span>
+            <span class="metric-value">{{ metrics.ollamaCalcsPerSec }}/s</span>
+          </div>
+          <div class="metrics-divider"></div>
+          <div class="metrics-row">
+            <span class="metric-label">Regions</span>
+            <span class="metric-value">{{ metrics.activeRegionCount }}</span>
+          </div>
+          <div class="metrics-row">
+            <span class="metric-label">Overlay Groups</span>
+            <span class="metric-value">{{ metrics.activeOverlayGroupCount }}</span>
+          </div>
+        </div>
       </div>
     </div>
   `,
@@ -99,6 +145,7 @@ import type { PreviewFrameData } from '../../models/electron-api';
     }
 
     .preview-area {
+      position: relative;
       border: 1px solid var(--color-border);
       border-radius: var(--radius-md);
       background-color: var(--color-bg-canvas);
@@ -120,6 +167,45 @@ import type { PreviewFrameData } from '../../models/electron-api';
       color: var(--color-text-secondary);
       font-style: italic;
     }
+
+    /* Metrics overlay */
+    .metrics-overlay {
+      position: absolute;
+      top: var(--spacing-sm);
+      right: var(--spacing-sm);
+      background-color: rgba(0, 0, 0, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--radius-sm);
+      padding: var(--spacing-sm);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      line-height: 1.5;
+      min-width: 160px;
+      pointer-events: none;
+    }
+
+    .metrics-row {
+      display: flex;
+      justify-content: space-between;
+      gap: var(--spacing-md);
+    }
+
+    .metric-label {
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .metric-value {
+      color: rgba(255, 255, 255, 0.9);
+      text-align: right;
+    }
+
+    .metric-good { color: #4caf50; }
+    .metric-warn { color: #ff9800; }
+
+    .metrics-divider {
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      margin: 3px 0;
+    }
   `],
 })
 export class CapturePreviewComponent implements OnInit, OnDestroy {
@@ -127,12 +213,16 @@ export class CapturePreviewComponent implements OnInit, OnDestroy {
   selectedDisplayIndex = 0;
   availableDisplays: Array<{ name: string; width: number; height: number }> = [];
   latestPreview: PreviewFrameData | null = null;
+  metrics: PerfMetrics | null = null;
 
   private previewSubscription: Subscription | null = null;
+  private metricsSubscription: Subscription | null = null;
 
   constructor(private readonly electronService: ElectronService) {}
 
   async ngOnInit(): Promise<void> {
+    this.electronService.setActivePage('capture');
+
     const status = await this.electronService.getCaptureStatus();
     this.isCapturing = status.isCapturing;
 
@@ -141,18 +231,24 @@ export class CapturePreviewComponent implements OnInit, OnDestroy {
     this.previewSubscription = this.electronService.previewFrameStream.subscribe((previewData) => {
       this.latestPreview = previewData;
     });
+
+    this.metricsSubscription = this.electronService.perfMetricsStream.subscribe((metrics) => {
+      this.metrics = metrics;
+    });
   }
 
   ngOnDestroy(): void {
     this.previewSubscription?.unsubscribe();
+    this.metricsSubscription?.unsubscribe();
+    this.electronService.setActivePage('');
   }
 
   async toggleCapture(): Promise<void> {
     if (this.isCapturing) {
       await this.electronService.stopCapture();
       this.latestPreview = null;
+      this.metrics = null;
     } else {
-      // Save selected display to config before starting
       const config = await this.electronService.loadConfig();
       config.gameCapture.captureSource = String(this.selectedDisplayIndex);
       await this.electronService.saveConfig(config);

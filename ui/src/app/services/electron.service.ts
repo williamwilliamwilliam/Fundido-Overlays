@@ -26,10 +26,12 @@ export class ElectronService {
   private readonly debugLog$ = new Subject<LogEntry>();
   private readonly stateUpdated$ = new Subject<any>();
   private readonly previewFrame$ = new Subject<PreviewFrameData>();
+  private readonly perfMetrics$ = new Subject<any>();
 
   public readonly debugLogStream = this.debugLog$.asObservable();
   public readonly stateUpdateStream = this.stateUpdated$.asObservable();
   public readonly previewFrameStream = this.previewFrame$.asObservable();
+  public readonly perfMetricsStream = this.perfMetrics$.asObservable();
 
   public readonly isRunningInElectron: boolean;
 
@@ -171,6 +173,13 @@ export class ElectronService {
     return window.fundidoApi.ollamaListModels();
   }
 
+  // -- UI state ----------------------------------------------------------------
+
+  public setActivePage(page: string): void {
+    if (!this.isRunningInElectron) return;
+    window.fundidoApi.setActivePage(page);
+  }
+
   // -- IPC listeners --------------------------------------------------------
 
   private registerIpcListeners(): void {
@@ -188,6 +197,10 @@ export class ElectronService {
 
     window.fundidoApi.onPreviewFrame((previewData: PreviewFrameData) => {
       this.ngZone.run(() => this.previewFrame$.next(previewData));
+    });
+
+    window.fundidoApi.onPerfMetrics((metrics: any) => {
+      this.ngZone.run(() => this.perfMetrics$.next(metrics));
     });
   }
 }

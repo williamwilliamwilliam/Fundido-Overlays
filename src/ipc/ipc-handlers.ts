@@ -40,7 +40,7 @@ export function registerIpcHandlers(
       const captureSourceString = captureConfig.captureSource;
       const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
       previewService.setCaptureDisplayIndex(displayIndex);
-      previewService.start(currentConfigRef.config.preview, currentConfigRef.config.gameCapture.targetFps);
+      previewService.start(currentConfigRef.config.preview, currentConfigRef.config.preview.previewFps ?? 10);
       ocrService.start(currentConfigRef.config.ocr);
       ollamaService.start(currentConfigRef.config.ollama);
     }
@@ -142,7 +142,7 @@ export function registerIpcHandlers(
     const captureSourceString = captureConfig.captureSource;
     const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
     previewService.setCaptureDisplayIndex(displayIndex);
-    previewService.start(currentConfigRef.config.preview, currentConfigRef.config.gameCapture.targetFps);
+    previewService.start(currentConfigRef.config.preview, currentConfigRef.config.preview.previewFps ?? 10);
     ocrService.start(currentConfigRef.config.ocr);
     ollamaService.start(currentConfigRef.config.ollama);
 

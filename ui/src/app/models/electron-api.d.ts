@@ -30,6 +30,31 @@ export interface PreviewFrameData {
   displayScaleFactor: number;
 }
 
+export interface RegionPerfMetrics {
+  medianColorPerSec: number;
+  colorThresholdPerSec: number;
+  ocrPerSec: number;
+  ollamaPerSec: number;
+  totalCalcsPerSec: number;
+  /** Total milliseconds spent in calculation over the last 10 seconds. */
+  timeInCalcMs: number;
+}
+
+export interface PerfMetrics {
+  captureFps: number;
+  previewFps: number;
+  stateEvalPerSec: number;
+  medianColorCalcsPerSec: number;
+  colorThresholdCalcsPerSec: number;
+  ocrCalcsPerSec: number;
+  ollamaCalcsPerSec: number;
+  pipelineAvgMs: number;
+  activeRegionCount: number;
+  activeOverlayGroupCount: number;
+  /** Per-region calc counts, keyed by region ID. */
+  regionMetrics: Record<string, RegionPerfMetrics>;
+}
+
 export interface FundidoApi {
   globalEnable(): Promise<{ success: boolean }>;
   globalDisable(): Promise<{ success: boolean }>;
@@ -54,6 +79,8 @@ export interface FundidoApi {
   onDebugLog(callback: (entry: LogEntry) => void): void;
   onStateUpdated(callback: (frameState: any) => void): void;
   onPreviewFrame(callback: (previewData: PreviewFrameData) => void): void;
+  onPerfMetrics(callback: (metrics: PerfMetrics) => void): void;
+  setActivePage(page: string): void;
 }
 
 declare global {

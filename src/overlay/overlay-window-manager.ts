@@ -82,6 +82,89 @@ export class OverlayWindowManager {
   }
 
   /**
+   * Extracts raw RGBA pixel crops for each mirrored region and sends them
+   * directly to overlay windows at capture FPS. No JPEG encoding, no downscaling.
+   *
+   * This is the fast path for mirror rendering — completely decoupled from the
+   * preview service's encode/throttle pipeline.
+   */
+  public broadcastMirrorCrops(
+    frameBuffer: Buffer,
+    frameWidth: number,
+    frameHeight: number,
+    monitoredRegions: any[],
+    displayOriginX: number,
+    displayOriginY: number,
+    dpiScaleFactor: number,
+  ): void {
+    if (this.overlayWindowsByGroupId.size === 0) return;
+
+    // Collect all unique mirrored region IDs across all active overlay groups
+    const mirroredRegionIds = new Set<string>();
+    for (const [_groupId, groupConfig] of this.overlayGroupConfigs) {
+      for (const overlay of (groupConfig.overlays || [])) {
+        if (overlay.contentType === 'regionMirror' && overlay.regionMirrorConfig?.monitoredRegionId) {
+          mirroredRegionIds.add(overlay.regionMirrorConfig.monitoredRegionId);
+        }
+      }
+    }
+
+    if (mirroredRegionIds.size === 0) return;
+
+    // Extract raw RGBA crops for each mirrored region
+    const bytesPerPixel = 4;
+    const frameRowBytes = frameWidth * bytesPerPixel;
+    const crops: Record<string, { buffer: Buffer; width: number; height: number }> = {};
+
+    for (const regionId of mirroredRegionIds) {
+      const region = monitoredRegions.find((r: any) => r.id === regionId);
+      if (!region || !region.bounds) continue;
+
+      // Convert screen-absolute logical coords to physical pixels
+      const physX = Math.round((region.bounds.x - displayOriginX) * dpiScaleFactor);
+      const physY = Math.round((region.bounds.y - displayOriginY) * dpiScaleFactor);
+      const physW = Math.round(region.bounds.width * dpiScaleFactor);
+      const physH = Math.round(region.bounds.height * dpiScaleFactor);
+
+      // Clamp to frame bounds
+      const clampedX = Math.max(0, Math.min(physX, frameWidth));
+      const clampedY = Math.max(0, Math.min(physY, frameHeight));
+      const clampedW = Math.min(physW, frameWidth - clampedX);
+      const clampedH = Math.min(physH, frameHeight - clampedY);
+
+      if (clampedW <= 0 || clampedH <= 0) continue;
+
+      // Extract BGRA rows and convert to RGBA in a single pass
+      const rgbaBuffer = Buffer.allocUnsafe(clampedW * clampedH * bytesPerPixel);
+      let destOffset = 0;
+
+      for (let row = 0; row < clampedH; row++) {
+        const srcRowStart = (clampedY + row) * frameRowBytes + clampedX * bytesPerPixel;
+        for (let col = 0; col < clampedW; col++) {
+          const srcPixel = srcRowStart + col * bytesPerPixel;
+          // BGRA → RGBA
+          rgbaBuffer[destOffset]     = frameBuffer[srcPixel + 2]; // R
+          rgbaBuffer[destOffset + 1] = frameBuffer[srcPixel + 1]; // G
+          rgbaBuffer[destOffset + 2] = frameBuffer[srcPixel];     // B
+          rgbaBuffer[destOffset + 3] = 255;                       // A
+          destOffset += bytesPerPixel;
+        }
+      }
+
+      crops[regionId] = { buffer: rgbaBuffer, width: clampedW, height: clampedH };
+    }
+
+    if (Object.keys(crops).length === 0) return;
+
+    // Send crops to all overlay windows
+    for (const [_groupId, window] of this.overlayWindowsByGroupId) {
+      if (!window.isDestroyed()) {
+        window.webContents.send('overlay:mirror-crops', crops);
+      }
+    }
+  }
+
+  /**
    * Closes all overlay windows. Called on app shutdown.
    */
   public closeAll(): void {
@@ -317,7 +400,56 @@ function buildOverlayRendererHtml(): string {
   let previewImg = null;
   let previewImgReady = false;
 
-  // Update mirror overlays by cropping the preview frame to each region's bounds
+  // ---- FAST PATH: Raw RGBA mirror crops sent at capture FPS ----
+  ipcRenderer.on('overlay:mirror-crops', (_event, crops) => {
+    if (!crops) return;
+    const canvases = document.querySelectorAll('canvas[data-mirror-region-id]');
+    for (const canvas of canvases) {
+      const regionId = canvas.dataset.mirrorRegionId;
+      if (!regionId || !crops[regionId]) continue;
+
+      const crop = crops[regionId];
+      const rawBuffer = crop.buffer;
+      const cropW = crop.width;
+      const cropH = crop.height;
+
+      const mirrorScale = parseFloat(canvas.dataset.mirrorScale) || 1;
+      const mirrorMaxW = parseInt(canvas.dataset.mirrorMaxWidth) || 0;
+      const mirrorMaxH = parseInt(canvas.dataset.mirrorMaxHeight) || 0;
+
+      // Compute display size
+      var displayW = Math.round(cropW * mirrorScale);
+      var displayH = Math.round(cropH * mirrorScale);
+      if (mirrorMaxW > 0 && displayW > mirrorMaxW) {
+        const r = mirrorMaxW / displayW;
+        displayW = mirrorMaxW;
+        displayH = Math.round(displayH * r);
+      }
+      if (mirrorMaxH > 0 && displayH > mirrorMaxH) {
+        const r = mirrorMaxH / displayH;
+        displayH = mirrorMaxH;
+        displayW = Math.round(displayW * r);
+      }
+
+      canvas.style.width = displayW + 'px';
+      canvas.style.height = displayH + 'px';
+
+      // If scale is 1:1, draw directly at crop resolution
+      // Otherwise, draw at crop resolution then let CSS scale
+      canvas.width = cropW;
+      canvas.height = cropH;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+
+      // Create ImageData from raw RGBA buffer
+      const uint8 = new Uint8ClampedArray(rawBuffer.buffer || rawBuffer);
+      const imgData = new ImageData(uint8, cropW, cropH);
+      ctx.putImageData(imgData, 0, 0);
+    }
+  });
+
+  // ---- SLOW PATH: Preview-based mirror (fallback, used by UI preview) ----
   ipcRenderer.on('overlay:preview-frame', (_event, previewData) => {
     if (!previewData || !previewData.imageDataUrl) return;
 

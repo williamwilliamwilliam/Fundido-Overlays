@@ -40,6 +40,8 @@ const IPC = {
   PICKER_REGION_UPDATE:        'picker:region-update',
   DIALOG_OPEN_FILE:            'dialog:open-file',
   OLLAMA_LIST_MODELS:          'ollama:list-models',
+  PERF_METRICS:                'perf:metrics',
+  UI_ACTIVE_PAGE:              'ui:active-page',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -111,6 +113,11 @@ const fundidoApi = {
   ollamaListModels: (): Promise<Array<{ name: string; size: number }>> =>
     ipcRenderer.invoke(IPC.OLLAMA_LIST_MODELS),
 
+  // -- UI state ----------------------------------------------------------------
+  setActivePage: (page: string): void => {
+    ipcRenderer.send(IPC.UI_ACTIVE_PAGE, page);
+  },
+
   onPickerRegionUpdate: (callback: (region: { x: number; y: number; width: number; height: number }) => void): void => {
     ipcRenderer.on(IPC.PICKER_REGION_UPDATE, (_event, region) => {
       callback(region);
@@ -135,6 +142,13 @@ const fundidoApi = {
   onPreviewFrame: (callback: (previewData: any) => void): void => {
     ipcRenderer.on(IPC.CAPTURE_PREVIEW_FRAME, (_event, previewData) => {
       callback(previewData);
+    });
+  },
+
+  // -- Performance metrics listener ------------------------------------------
+  onPerfMetrics: (callback: (metrics: any) => void): void => {
+    ipcRenderer.on(IPC.PERF_METRICS, (_event, metrics) => {
+      callback(metrics);
     });
   },
 };

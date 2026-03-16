@@ -52,7 +52,48 @@ import { ElectronService } from '../../services/electron.service';
       </div>
 
       <div class="settings-section">
+        <h3>Performance</h3>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label">Max Calculation Frequency</label>
+            <span class="setting-hint">
+              Maximum number of times each state calculation evaluates per second.
+              Lower values reduce CPU usage. Higher values give faster overlay response.
+            </span>
+          </div>
+          <div class="setting-control">
+            <input
+              type="range"
+              min="1" max="50" step="1"
+              [(ngModel)]="maxCalcFrequency"
+              (ngModelChange)="onSettingChanged()" />
+            <span class="setting-value">{{ maxCalcFrequency }}/sec</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <h3>Preview</h3>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label">Preview FPS</label>
+            <span class="setting-hint">
+              How often the capture preview image updates in the UI.
+              Lower values free up CPU for the capture pipeline.
+              Does not affect overlay mirror rendering.
+            </span>
+          </div>
+          <div class="setting-control">
+            <input
+              type="range"
+              min="1" max="30" step="1"
+              [(ngModel)]="previewFps"
+              (ngModelChange)="onSettingChanged()" />
+            <span class="setting-value">{{ previewFps }} fps</span>
+          </div>
+        </div>
 
         <div class="setting-row">
           <div class="setting-info">
@@ -326,7 +367,11 @@ export class SettingsComponent implements OnInit, OnDestroy {
   captureSource = '0';
   availableDisplays: Array<{ name: string; width: number; height: number }> = [];
 
+  // Performance settings
+  maxCalcFrequency = 10;
+
   // Preview settings
+  previewFps = 10;
   previewScalePercent = 50;
   downsampleMethod = 'bilinear';
   jpegQuality = 70;
@@ -352,9 +397,11 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
     this.captureTargetFps = config.gameCapture?.targetFps ?? 30;
     this.captureSource = config.gameCapture?.captureSource ?? 'primary';
+    this.maxCalcFrequency = config.maxCalcFrequency ?? 10;
 
     const preview = config.preview;
     if (preview) {
+      this.previewFps = preview.previewFps ?? 10;
       this.previewScalePercent = Math.round((preview.previewScale ?? 0.5) * 100);
       this.downsampleMethod = preview.downsampleMethod ?? 'bilinear';
       this.jpegQuality = preview.jpegQuality ?? 70;
@@ -422,8 +469,10 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
     config.gameCapture.targetFps = this.captureTargetFps;
     config.gameCapture.captureSource = this.captureSource;
+    config.maxCalcFrequency = this.maxCalcFrequency;
 
     config.preview = {
+      previewFps: this.previewFps,
       previewScale: this.previewScalePercent / 100,
       downsampleMethod: this.downsampleMethod,
       jpegQuality: this.jpegQuality,

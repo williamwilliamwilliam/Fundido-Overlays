@@ -73,6 +73,34 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
               (ngModelChange)="region.enabled = $event; onFieldChanged()" />
           </label>
           <input [(ngModel)]="region.name" (ngModelChange)="onFieldChanged()" placeholder="Region name" class="name-input" />
+          <div class="region-perf-badges" *ngIf="getRegionPerfMetrics(region.id) as rpm">
+            <span class="perf-badge"
+              [class.perf-warn]="rpm.totalCalcsPerSec > 200"
+              title="Total state calculation evaluations per second for this region. Orange when exceeding 200/sec.">
+              {{ rpm.totalCalcsPerSec }}/s
+            </span>
+            <span class="perf-badge perf-detail" *ngIf="rpm.medianColorPerSec > 0"
+              title="Median Pixel Color calculations per second — how often this region's median color is sampled and compared against color-state mappings.">
+              MC {{ rpm.medianColorPerSec }}
+            </span>
+            <span class="perf-badge perf-detail" *ngIf="rpm.colorThresholdPerSec > 0"
+              title="Color Threshold calculations per second — how often this region's color is evaluated against threshold match percentages.">
+              CT {{ rpm.colorThresholdPerSec }}
+            </span>
+            <span class="perf-badge perf-detail" *ngIf="rpm.ocrPerSec > 0"
+              title="OCR (text recognition) calculations per second — how often Tesseract processes this region for text extraction.">
+              OCR {{ rpm.ocrPerSec }}
+            </span>
+            <span class="perf-badge perf-detail" *ngIf="rpm.ollamaPerSec > 0"
+              title="Ollama LLM inference calls per second — how often a vision model analyzes this region's image content.">
+              LLM {{ rpm.ollamaPerSec }}
+            </span>
+            <span class="perf-badge perf-time"
+              [class.perf-warn]="rpm.timeInCalcMs > 2000"
+              title="Total CPU time spent evaluating this region's calculations over the last 10 seconds. Orange when exceeding 2000ms (2 seconds of CPU time per 10 seconds).">
+              {{ rpm.timeInCalcMs }}ms / 10s
+            </span>
+          </div>
           <button class="danger-text" (click)="removeRegion(regionIndex)">Remove</button>
         </div>
         <div class="cross-ref-row" *ngIf="regionCrossRefs.get(region.id)?.length">
@@ -117,6 +145,12 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                     <option value="OCR">OCR (Text Recognition)</option>
                     <option value="OllamaLLM">Ollama LLM Prompt</option>
                   </select>
+                  <label class="checkbox-label skip-unchanged-label" title="Skip this calculation if the region's pixels have not changed since the last evaluation. Saves CPU when monitoring static content.">
+                    <input type="checkbox"
+                      [(ngModel)]="calc.skipIfUnchanged"
+                      (ngModelChange)="onFieldChanged()" />
+                    Skip if unchanged
+                  </label>
                   <button class="danger-text small" (click)="removeStateCalculation(region, calcIndex)">Remove</button>
                 </div>
 
@@ -494,6 +528,41 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       opacity: var(--opacity-disabled);
     }
 
+    .region-perf-badges {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .perf-badge {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      padding: 1px 6px;
+      border-radius: var(--radius-sm);
+      background-color: var(--color-bg-panel);
+      color: var(--color-text-secondary);
+      white-space: nowrap;
+    }
+
+    .perf-badge.perf-warn {
+      color: var(--color-warning);
+      background-color: rgba(255, 152, 0, 0.15);
+    }
+
+    .perf-detail {
+      font-size: 0.65rem;
+      opacity: 0.7;
+    }
+
+    .perf-time {
+      font-size: 0.65rem;
+      color: var(--color-text-secondary);
+      border-left: 1px solid var(--color-border);
+      padding-left: 6px;
+      margin-left: 2px;
+    }
+
     .cross-ref-row {
       display: flex;
       align-items: center;
@@ -535,7 +604,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
 
     .region-left {
       flex: 1;
-      min-width: 0;
+      min-width: 400px;
     }
 
     .region-right {
@@ -608,6 +677,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       border-radius: var(--radius-sm);
       padding: var(--spacing-sm);
       margin-bottom: var(--spacing-sm);
+      min-width: 380px;
     }
 
     .calc-header {
@@ -630,6 +700,16 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     .calc-type-select {
       font-size: 0.8rem;
       min-width: 180px;
+    }
+
+    .skip-unchanged-label {
+      font-size: 0.75rem;
+      white-space: nowrap;
+      flex-shrink: 0;
+      color: var(--color-text-secondary);
+    }
+    .skip-unchanged-label input[type="checkbox"] {
+      margin-right: 3px;
     }
 
     .mappings-list {
@@ -1011,7 +1091,11 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   private previewSubscription: Subscription | null = null;
   private pickerUpdateSubscription: Subscription | null = null;
   private stateSubscription: Subscription | null = null;
+  private perfSubscription: Subscription | null = null;
   private previewImage: HTMLImageElement | null = null;
+
+  /** Latest perf metrics from main process, updated every second. */
+  private latestPerfMetrics: any = null;
 
   constructor(
     private readonly electronService: ElectronService,
@@ -1046,6 +1130,8 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   }
 
   async ngOnInit(): Promise<void> {
+    this.electronService.setActivePage('regions');
+
     const config = await this.electronService.loadConfig();
     this.regions = config.monitoredRegions || [];
     this.overlayGroups = config.overlayGroups || [];
@@ -1072,6 +1158,10 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
 
     this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
       this.processFrameState(frameState);
+    });
+
+    this.perfSubscription = this.electronService.perfMetricsStream.subscribe((metrics: any) => {
+      this.latestPerfMetrics = metrics;
     });
 
     // Scroll to and highlight an element if navigated here with ?highlight=id
@@ -1110,6 +1200,8 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     this.previewSubscription?.unsubscribe();
     this.pickerUpdateSubscription?.unsubscribe();
     this.stateSubscription?.unsubscribe();
+    this.perfSubscription?.unsubscribe();
+    this.electronService.setActivePage('');
     // Clear working regions so the pipeline falls back to saved config
     this.electronService.setWorkingRegions(null as any);
   }
@@ -1409,6 +1501,15 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     if (!calcResult) return null;
     const ms = (calcResult as any).ollamaResponseTimeMs;
     return ms !== undefined && ms > 0 ? ms : null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Per-region performance metrics
+  // ---------------------------------------------------------------------------
+
+  getRegionPerfMetrics(regionId: string): { medianColorPerSec: number; colorThresholdPerSec: number; ocrPerSec: number; ollamaPerSec: number; totalCalcsPerSec: number; timeInCalcMs: number } | null {
+    if (!this.latestPerfMetrics || !this.latestPerfMetrics.regionMetrics) return null;
+    return this.latestPerfMetrics.regionMetrics[regionId] || null;
   }
 
   // ---------------------------------------------------------------------------

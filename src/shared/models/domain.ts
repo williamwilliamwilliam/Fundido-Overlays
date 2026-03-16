@@ -68,6 +68,8 @@ export interface PreviewConfig {
   downsampleMethod: PreviewDownsampleMethod;
   /** JPEG quality for the preview image (1–100). Higher = sharper but more data. */
   jpegQuality: number;
+  /** Target FPS for the preview stream. Default 10. */
+  previewFps?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +188,8 @@ export interface StateCalculation {
   ocrPreprocess?: OcrPreprocessConfig;
   /** Ollama LLM config for OllamaLLM type. */
   ollamaConfig?: OllamaCalcConfig;
+  /** Skip this calculation if the region's pixels haven't changed since the last evaluation. */
+  skipIfUnchanged?: boolean;
 }
 
 /**
@@ -362,6 +366,8 @@ export interface FundidoConfig {
   ollama: OllamaConfig;
   monitoredRegions: MonitoredRegion[];
   overlayGroups: OverlayGroup[];
+  /** Max state calculation evaluations per second per calculation. Default 10. */
+  maxCalcFrequency?: number;
 }
 
 // ---------------------------------------------------------------------------
