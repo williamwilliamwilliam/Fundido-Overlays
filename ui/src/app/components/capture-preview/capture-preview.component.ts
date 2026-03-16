@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -41,11 +41,11 @@ import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
       </div>
 
       <div class="preview-area">
-        <img
+        <canvas
+          #previewCanvas
           *ngIf="latestPreview"
-          [src]="latestPreview.imageDataUrl"
-          class="preview-image"
-          alt="Capture preview" />
+          class="preview-image">
+        </canvas>
         <div *ngIf="!latestPreview && !isCapturing" class="placeholder">
           Click "Start Capture" to begin previewing your display.
         </div>
@@ -215,6 +215,8 @@ export class CapturePreviewComponent implements OnInit, OnDestroy {
   latestPreview: PreviewFrameData | null = null;
   metrics: PerfMetrics | null = null;
 
+  @ViewChild('previewCanvas') previewCanvasRef!: ElementRef<HTMLCanvasElement>;
+
   private previewSubscription: Subscription | null = null;
   private metricsSubscription: Subscription | null = null;
 
@@ -230,11 +232,44 @@ export class CapturePreviewComponent implements OnInit, OnDestroy {
 
     this.previewSubscription = this.electronService.previewFrameStream.subscribe((previewData) => {
       this.latestPreview = previewData;
+      this.renderPreviewToCanvas(previewData);
     });
 
     this.metricsSubscription = this.electronService.perfMetricsStream.subscribe((metrics) => {
       this.metrics = metrics;
     });
+  }
+
+  private renderPreviewToCanvas(previewData: PreviewFrameData): void {
+    // Wait for Angular to create the canvas element after latestPreview becomes truthy
+    setTimeout(() => {
+      const canvas = this.previewCanvasRef?.nativeElement;
+      if (!canvas || !previewData.bgraBuffer) return;
+
+      const width = previewData.previewWidth;
+      const height = previewData.previewHeight;
+
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Convert BGRA → RGBA in the renderer process
+      const src = new Uint8Array(previewData.bgraBuffer as any);
+      const pixelCount = width * height;
+      const rgba = new Uint8ClampedArray(pixelCount * 4);
+      for (let i = 0; i < pixelCount; i++) {
+        const offset = i * 4;
+        rgba[offset]     = src[offset + 2]; // R ← B
+        rgba[offset + 1] = src[offset + 1]; // G
+        rgba[offset + 2] = src[offset];     // B ← R
+        rgba[offset + 3] = 255;             // A
+      }
+
+      const imgData = new ImageData(rgba, width, height);
+      ctx.putImageData(imgData, 0, 0);
+    }, 0);
   }
 
   ngOnDestroy(): void {

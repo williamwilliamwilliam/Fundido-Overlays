@@ -1092,7 +1092,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   private pickerUpdateSubscription: Subscription | null = null;
   private stateSubscription: Subscription | null = null;
   private perfSubscription: Subscription | null = null;
-  private previewImage: HTMLImageElement | null = null;
+  private previewImage: HTMLImageElement | ImageBitmap | null = null;
 
   /** Latest perf metrics from main process, updated every second. */
   private latestPerfMetrics: any = null;
@@ -1609,9 +1609,24 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   }
 
   private updatePreviewImage(frame: PreviewFrameData): void {
-    const image = new Image();
-    image.onload = () => { this.previewImage = image; };
-    image.src = frame.imageDataUrl;
+    // Convert BGRA buffer to an ImageBitmap for use with drawImage
+    if (!frame.bgraBuffer) return;
+    const width = frame.previewWidth;
+    const height = frame.previewHeight;
+    const src = new Uint8Array(frame.bgraBuffer as any);
+    const pixelCount = width * height;
+    const rgba = new Uint8ClampedArray(pixelCount * 4);
+    for (let i = 0; i < pixelCount; i++) {
+      const offset = i * 4;
+      rgba[offset]     = src[offset + 2]; // R ← B
+      rgba[offset + 1] = src[offset + 1]; // G
+      rgba[offset + 2] = src[offset];     // B ← R
+      rgba[offset + 3] = 255;             // A
+    }
+    const imgData = new ImageData(rgba, width, height);
+    createImageBitmap(imgData).then((bitmap) => {
+      this.previewImage = bitmap as any;
+    });
   }
 
   private renderAllRegionPreviews(): void {
@@ -1635,8 +1650,8 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       const physicalWidth = region.bounds.width * dpiScaleFactor;
       const physicalHeight = region.bounds.height * dpiScaleFactor;
 
-      const previewScaleX = this.previewImage.naturalWidth / this.latestPreviewFrame.originalWidth;
-      const previewScaleY = this.previewImage.naturalHeight / this.latestPreviewFrame.originalHeight;
+      const previewScaleX = this.latestPreviewFrame.previewWidth / this.latestPreviewFrame.originalWidth;
+      const previewScaleY = this.latestPreviewFrame.previewHeight / this.latestPreviewFrame.originalHeight;
 
       const sourceX = physicalX * previewScaleX;
       const sourceY = physicalY * previewScaleY;

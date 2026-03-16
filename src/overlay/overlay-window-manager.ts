@@ -17,6 +17,17 @@ export class OverlayWindowManager {
   private overlayGroupConfigs = new Map<OverlayGroupId, OverlayGroup>();
   private hasCursorFollowingGroups = false;
 
+  /** Tracks which mirror region IDs are currently visible, updated when frame state arrives. */
+  private visibleMirrorRegionIds = new Set<string>();
+
+  /** Last frame state used for visibility evaluation. */
+  private lastFrameState: FrameState | null = null;
+
+  /** Returns the number of currently visible mirror regions (for diagnostics). */
+  public getVisibleMirrorCount(): number {
+    return this.visibleMirrorRegionIds.size;
+  }
+
   /**
    * Creates, updates, or removes overlay windows to match the given groups.
    * Call this whenever the overlay group configuration changes.
@@ -59,11 +70,98 @@ export class OverlayWindowManager {
    * re-evaluate rules and update their display.
    */
   public broadcastFrameState(frameState: FrameState): void {
+    this.lastFrameState = frameState;
+    this.updateVisibleMirrorRegionIds(frameState);
+
     for (const [_groupId, window] of this.overlayWindowsByGroupId) {
       if (!window.isDestroyed()) {
         window.webContents.send('overlay:frame-state', frameState);
       }
     }
+  }
+
+  /**
+   * Evaluates overlay rules in the main process to determine which mirror
+   * region IDs are currently visible. This avoids sending crop data for
+   * hidden overlays on every frame.
+   */
+  private updateVisibleMirrorRegionIds(frameState: FrameState): void {
+    const visibleIds = new Set<string>();
+
+    for (const [_groupId, groupConfig] of this.overlayGroupConfigs) {
+      for (const overlay of (groupConfig.overlays || [])) {
+        const isMirrorOverlay = overlay.contentType === 'regionMirror'
+          && overlay.regionMirrorConfig?.monitoredRegionId;
+        if (!isMirrorOverlay) continue;
+
+        const regionId = overlay.regionMirrorConfig!.monitoredRegionId;
+
+        // Evaluate the overlay's rules to determine visibility
+        const defaultVisible = overlay.defaultVisible !== false;
+        let isVisible = defaultVisible;
+
+        const rules = overlay.rules || [];
+        for (const rule of rules) {
+          const conditionsMatch = this.evaluateConditions(
+            rule.conditions || [],
+            rule.logicMode || 'AND',
+            frameState,
+          );
+          if (conditionsMatch) {
+            if (rule.action === 'show') isVisible = true;
+            else if (rule.action === 'hide') isVisible = false;
+            else if (rule.action === 'opacity') {
+              const opacityIsEffectivelyHidden = (rule.opacityValue ?? 1) <= 0;
+              isVisible = !opacityIsEffectivelyHidden;
+            }
+            break; // First matching rule wins
+          }
+        }
+
+        if (isVisible) {
+          visibleIds.add(regionId);
+        }
+      }
+    }
+
+    this.visibleMirrorRegionIds = visibleIds;
+  }
+
+  private evaluateConditions(
+    conditions: any[],
+    logicMode: string,
+    frameState: FrameState,
+  ): boolean {
+    if (!conditions || conditions.length === 0) return true;
+
+    for (const cond of conditions) {
+      const regionState = frameState.regionStates.find(
+        (rs: any) => rs.monitoredRegionId === cond.monitoredRegionId
+      );
+      if (!regionState) {
+        // Missing region state means condition can't be evaluated
+        if (logicMode === 'AND') return false;
+        continue;
+      }
+
+      const calcResult = regionState.calculationResults.find(
+        (cr: any) => cr.stateCalculationId === cond.stateCalculationId
+      );
+      if (!calcResult) {
+        if (logicMode === 'AND') return false;
+        continue;
+      }
+
+      let result = true;
+      if (cond.operator === 'equals') result = calcResult.currentValue === cond.value;
+      else if (cond.operator === 'notEquals') result = calcResult.currentValue !== cond.value;
+      if (cond.negate) result = !result;
+
+      if (logicMode === 'OR' && result) return true;
+      if (logicMode === 'AND' && !result) return false;
+    }
+
+    return logicMode === 'AND';
   }
 
   /**
@@ -99,25 +197,23 @@ export class OverlayWindowManager {
   ): void {
     if (this.overlayWindowsByGroupId.size === 0) return;
 
-    // Collect all unique mirrored region IDs across all active overlay groups
-    const mirroredRegionIds = new Set<string>();
-    for (const [_groupId, groupConfig] of this.overlayGroupConfigs) {
-      for (const overlay of (groupConfig.overlays || [])) {
-        if (overlay.contentType === 'regionMirror' && overlay.regionMirrorConfig?.monitoredRegionId) {
-          mirroredRegionIds.add(overlay.regionMirrorConfig.monitoredRegionId);
-        }
-      }
+    // Only crop regions whose mirror overlay is currently visible.
+    // This avoids extracting and sending pixel data for hidden overlays.
+    if (this.visibleMirrorRegionIds.size === 0) return;
+
+    // Build a lookup map for monitored regions to avoid find() per region
+    const regionById = new Map<string, any>();
+    for (const region of monitoredRegions) {
+      regionById.set(region.id, region);
     }
 
-    if (mirroredRegionIds.size === 0) return;
-
-    // Extract raw RGBA crops for each mirrored region
+    // Extract raw BGRA crops for each visible mirrored region
     const bytesPerPixel = 4;
     const frameRowBytes = frameWidth * bytesPerPixel;
     const crops: Record<string, { buffer: Buffer; width: number; height: number }> = {};
 
-    for (const regionId of mirroredRegionIds) {
-      const region = monitoredRegions.find((r: any) => r.id === regionId);
+    for (const regionId of this.visibleMirrorRegionIds) {
+      const region = regionById.get(regionId);
       if (!region || !region.bounds) continue;
 
       // Convert screen-absolute logical coords to physical pixels
@@ -134,24 +230,19 @@ export class OverlayWindowManager {
 
       if (clampedW <= 0 || clampedH <= 0) continue;
 
-      // Extract BGRA rows and convert to RGBA in a single pass
-      const rgbaBuffer = Buffer.allocUnsafe(clampedW * clampedH * bytesPerPixel);
-      let destOffset = 0;
+      // Extract raw BGRA rows directly — no channel swap on the main thread.
+      // The overlay renderer handles BGRA→RGBA conversion in its own process.
+      const cropBytes = clampedW * clampedH * bytesPerPixel;
+      const bgraBuffer = Buffer.allocUnsafe(cropBytes);
 
+      const cropRowBytes = clampedW * bytesPerPixel;
       for (let row = 0; row < clampedH; row++) {
         const srcRowStart = (clampedY + row) * frameRowBytes + clampedX * bytesPerPixel;
-        for (let col = 0; col < clampedW; col++) {
-          const srcPixel = srcRowStart + col * bytesPerPixel;
-          // BGRA → RGBA
-          rgbaBuffer[destOffset]     = frameBuffer[srcPixel + 2]; // R
-          rgbaBuffer[destOffset + 1] = frameBuffer[srcPixel + 1]; // G
-          rgbaBuffer[destOffset + 2] = frameBuffer[srcPixel];     // B
-          rgbaBuffer[destOffset + 3] = 255;                       // A
-          destOffset += bytesPerPixel;
-        }
+        const destRowStart = row * cropRowBytes;
+        frameBuffer.copy(bgraBuffer, destRowStart, srcRowStart, srcRowStart + cropRowBytes);
       }
 
-      crops[regionId] = { buffer: rgbaBuffer, width: clampedW, height: clampedH };
+      crops[regionId] = { buffer: bgraBuffer, width: clampedW, height: clampedH };
     }
 
     if (Object.keys(crops).length === 0) return;
@@ -433,95 +524,33 @@ function buildOverlayRendererHtml(): string {
 
       canvas.style.width = displayW + 'px';
       canvas.style.height = displayH + 'px';
-
-      // If scale is 1:1, draw directly at crop resolution
-      // Otherwise, draw at crop resolution then let CSS scale
       canvas.width = cropW;
       canvas.height = cropH;
 
       const ctx = canvas.getContext('2d');
       if (!ctx) continue;
 
-      // Create ImageData from raw RGBA buffer
-      const uint8 = new Uint8ClampedArray(rawBuffer.buffer || rawBuffer);
-      const imgData = new ImageData(uint8, cropW, cropH);
+      // Convert BGRA → RGBA in the renderer process (off main thread)
+      const src = new Uint8Array(rawBuffer.buffer || rawBuffer);
+      const pixelCount = cropW * cropH;
+      const rgba = new Uint8ClampedArray(pixelCount * 4);
+      for (var i = 0; i < pixelCount; i++) {
+        var offset = i * 4;
+        rgba[offset]     = src[offset + 2]; // R ← B
+        rgba[offset + 1] = src[offset + 1]; // G
+        rgba[offset + 2] = src[offset];     // B ← R
+        rgba[offset + 3] = 255;             // A
+      }
+
+      const imgData = new ImageData(rgba, cropW, cropH);
       ctx.putImageData(imgData, 0, 0);
     }
   });
 
-  // ---- SLOW PATH: Preview-based mirror (fallback, used by UI preview) ----
+  // ---- LEGACY: Preview-based mirror path (disabled — fast path handles mirrors now) ----
+  // Kept as reference but no longer receives imageDataUrl data.
   ipcRenderer.on('overlay:preview-frame', (_event, previewData) => {
-    if (!previewData || !previewData.imageDataUrl) return;
-
-    const regions = previewData.monitoredRegions || [];
-    const originX = previewData.displayOriginX || 0;
-    const originY = previewData.displayOriginY || 0;
-    const dpiScale = previewData.displayScaleFactor || 1;
-    const origW = previewData.originalWidth;
-    const origH = previewData.originalHeight;
-    const prevW = previewData.previewWidth;
-    const prevH = previewData.previewHeight;
-
-    const img = new Image();
-    img.onload = function() {
-      const canvases = document.querySelectorAll('canvas[data-mirror-region-id]');
-      for (const canvas of canvases) {
-        const regionId = canvas.dataset.mirrorRegionId;
-        if (!regionId) continue;
-
-        const region = regions.find(function(r) { return r.id === regionId; });
-        if (!region || !region.bounds) continue;
-
-        const bounds = region.bounds;
-        const mirrorScale = parseFloat(canvas.dataset.mirrorScale) || 1;
-        const mirrorMaxW = parseInt(canvas.dataset.mirrorMaxWidth) || 0;
-        const mirrorMaxH = parseInt(canvas.dataset.mirrorMaxHeight) || 0;
-
-        // Compute the display size based on the region's logical pixel size and scale
-        var displayW = Math.round(bounds.width * mirrorScale);
-        var displayH = Math.round(bounds.height * mirrorScale);
-
-        // Apply max constraints
-        if (mirrorMaxW > 0 && displayW > mirrorMaxW) {
-          const constrainRatio = mirrorMaxW / displayW;
-          displayW = mirrorMaxW;
-          displayH = Math.round(displayH * constrainRatio);
-        }
-        if (mirrorMaxH > 0 && displayH > mirrorMaxH) {
-          const constrainRatio = mirrorMaxH / displayH;
-          displayH = mirrorMaxH;
-          displayW = Math.round(displayW * constrainRatio);
-        }
-
-        // Set canvas internal resolution to display size (good enough for overlays)
-        canvas.width = displayW;
-        canvas.height = displayH;
-        // Set CSS size to match so layout uses the correct dimensions
-        canvas.style.width = displayW + 'px';
-        canvas.style.height = displayH + 'px';
-
-        // Convert screen-absolute logical coords to physical then to preview coords
-        const physX = (bounds.x - originX) * dpiScale;
-        const physY = (bounds.y - originY) * dpiScale;
-        const physW = bounds.width * dpiScale;
-        const physH = bounds.height * dpiScale;
-
-        const scaleToPreviewX = prevW / origW;
-        const scaleToPreviewY = prevH / origH;
-
-        const srcX = physX * scaleToPreviewX;
-        const srcY = physY * scaleToPreviewY;
-        const srcW = physW * scaleToPreviewX;
-        const srcH = physH * scaleToPreviewY;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) continue;
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, canvas.width, canvas.height);
-      }
-    };
-    img.src = previewData.imageDataUrl;
+    // No-op: mirrors are now rendered via overlay:mirror-crops at capture FPS
   });
 
   function applyDefaults(group) {

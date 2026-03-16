@@ -19,9 +19,17 @@ export class PreviewFrameService {
   private displayOriginY = 0;
   private displayScaleFactor = 1;
   private onPreviewFrameSentCallback: ((previewData: any) => void) | null = null;
+  private currentConfig: PreviewConfig | null = null;
 
   public setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
+  }
+
+  /** Dynamically update the preview scale without restarting the service. */
+  public setPreviewScale(scale: number): void {
+    if (this.currentConfig) {
+      this.currentConfig = { ...this.currentConfig, previewScale: scale };
+    }
   }
 
   /**
@@ -74,16 +82,19 @@ export class PreviewFrameService {
       this.stop();
     }
 
+    this.currentConfig = { ...config };
     const intervalMilliseconds = Math.round(1000 / fps);
 
     logger.info(
       LogCategory.Capture,
-      `Preview started: ${fps}fps, scale=${config.previewScale}, method=${config.downsampleMethod}, jpeg=${config.jpegQuality}%`
+      `Preview started: ${fps}fps, scale=${config.previewScale}, method=${config.downsampleMethod}`
     );
 
     this.isRunning = true;
     this.previewIntervalHandle = setInterval(() => {
-      this.sendPreviewFrame(config);
+      if (this.currentConfig) {
+        this.sendPreviewFrame(this.currentConfig);
+      }
     }, intervalMilliseconds);
   }
 
@@ -113,10 +124,9 @@ export class PreviewFrameService {
 
     const frame = this.latestFrame!;
     const downsampled = this.downsampleFrame(frame, config);
-    const base64Jpeg = this.encodeBgraToBase64Jpeg(downsampled.buffer, downsampled.width, downsampled.height, config.jpegQuality);
 
     const previewData = {
-      imageDataUrl: `data:image/jpeg;base64,${base64Jpeg}`,
+      bgraBuffer: downsampled.buffer,
       originalWidth: frame.width,
       originalHeight: frame.height,
       previewWidth: downsampled.width,

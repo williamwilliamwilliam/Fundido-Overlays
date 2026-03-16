@@ -314,8 +314,22 @@ function createMainWindow(): void {
     overlayWindowManager.closeAll();
   });
 
-  mainWindow.on('minimize', () => { uiMinimizedRef.minimized = true; });
-  mainWindow.on('restore', () => { uiMinimizedRef.minimized = false; });
+  mainWindow.on('minimize', () => {
+    uiMinimizedRef.minimized = true;
+    previewService.setPreviewScale(0.1);
+  });
+  mainWindow.on('restore', () => {
+    uiMinimizedRef.minimized = false;
+    const userScale = currentConfigRef.config.preview?.previewScale ?? 0.5;
+    previewService.setPreviewScale(userScale);
+  });
+  mainWindow.on('focus', () => {
+    const userScale = currentConfigRef.config.preview?.previewScale ?? 0.5;
+    previewService.setPreviewScale(userScale);
+  });
+  mainWindow.on('blur', () => {
+    previewService.setPreviewScale(0.1);
+  });
 
   // Application menu
   const menuTemplate: Electron.MenuItemConstructorOptions[] = [
@@ -514,16 +528,23 @@ function refreshCaptureDisplayCache(): void {
 
 function setupCaptureToOverlayPipeline(): void {
   refreshCaptureDisplayCache();
+  let diagFrameCount = 0;
+  let lastFrameTimestamp = 0;
 
   captureService.setFrameCapturedCallback((frame) => {
+    const callbackEntryTime = Date.now();
+    const timeSinceLastFrame = lastFrameTimestamp > 0 ? callbackEntryTime - lastFrameTimestamp : 0;
+    lastFrameTimestamp = callbackEntryTime;
+
     perfCounters.captureFrames++;
+    diagFrameCount++;
     latestFrameRef.frame = frame;
 
     // Feed frame to preview service (it has its own throttled interval)
     previewService.onFrameCaptured(frame);
 
     // FAST PATH: Send raw pixel crops directly to overlay windows for mirror rendering.
-    // This runs at full capture FPS with no JPEG encoding.
+    const t0 = Date.now();
     const monitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions ?? [];
     overlayWindowManager.broadcastMirrorCrops(
       frame.buffer,
@@ -534,6 +555,14 @@ function setupCaptureToOverlayPipeline(): void {
       captureDisplayCache.originY,
       captureDisplayCache.scaleFactor,
     );
+    const mirrorElapsed = Date.now() - t0;
+    const totalCallbackTime = Date.now() - callbackEntryTime;
+
+    if (diagFrameCount % 30 === 0) {
+      logger.info(LogCategory.General,
+        `[PERF DIAG] gap=${timeSinceLastFrame}ms callback=${totalCallbackTime}ms mirrors=${mirrorElapsed}ms visible=${overlayWindowManager.getVisibleMirrorCount()} frame#${diagFrameCount}`
+      );
+    }
   });
 }
 
