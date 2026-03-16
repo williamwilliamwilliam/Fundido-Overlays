@@ -36,6 +36,7 @@ const IPC = {
   GROUPS_SET_WORKING:          'groups:set-working',
   DEBUG_LOG:                   'debug:log',
   PICKER_START:                'picker:start',
+  PICKER_COLOR:                'picker:color',
   PICKER_REGION_UPDATE:        'picker:region-update',
   DIALOG_OPEN_FILE:            'dialog:open-file',
   OLLAMA_LIST_MODELS:          'ollama:list-models',
@@ -91,6 +92,9 @@ const fundidoApi = {
   // -- Screen picker --------------------------------------------------------
   pickRegion: (): Promise<{ x: number; y: number; width: number; height: number } | null> =>
     ipcRenderer.invoke(IPC.PICKER_START),
+
+  pickColor: (): Promise<{ red: number; green: number; blue: number } | null> =>
+    ipcRenderer.invoke(IPC.PICKER_COLOR),
 
   // -- Working regions/groups (live evaluation without saving) ---------------
   setWorkingRegions: (regions: any[]): Promise<{ success: boolean }> =>

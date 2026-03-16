@@ -196,6 +196,13 @@ export function registerIpcHandlers(
     return result;
   });
 
+  ipcMain.handle(IpcChannels.PICKER_COLOR, async (_event: IpcMainInvokeEvent) => {
+    logger.debug(LogCategory.Ipc, 'PICKER_COLOR invoked');
+    const { pickScreenColor } = require('../picker/screen-color-picker');
+    const result = await pickScreenColor(captureService);
+    return result;
+  });
+
   // -------------------------------------------------------------------------
   // Working Regions (unsaved, for live evaluation)
   // -------------------------------------------------------------------------

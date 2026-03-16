@@ -42,6 +42,13 @@ export class OcrService {
   /** Latest OCR results keyed by `regionId:calcId`. */
   private latestResults = new Map<string, StateCalculationResult>();
 
+  /**
+   * Tracks when each OCR mapping first started matching continuously.
+   * Keyed by `calcId:mappingIndex` → timestamp (ms) when the match began.
+   * Reset to null when the match breaks.
+   */
+  private matchStartTimes = new Map<string, number>();
+
   /** The most recent frame to OCR against. Updated by the capture pipeline. */
   private latestFrame: CapturedFrame | null = null;
 
@@ -173,7 +180,8 @@ export class OcrService {
         });
 
         const { data } = await this.worker.recognize(processedPng);
-        const rawText = data.text.trim().substring(0, this.ocrConfig.maxCharacters);
+        const maxChars = preprocessConfig?.maxCharacters ?? this.ocrConfig.maxCharacters ?? 10;
+        const rawText = data.text.trim().substring(0, maxChars);
 
         const result = this.evaluateSubstringMappings(rawText, calculation);
         this.latestResults.set(`${region.id}:${calculation.id}`, result);
@@ -385,11 +393,14 @@ export class OcrService {
   ): StateCalculationResult {
     const lowerText = ocrText.toLowerCase();
     let matchedValue = '';
+    const now = Date.now();
 
     const mappings = calculation.substringMappings || [];
-    for (const mapping of mappings) {
+    for (let i = 0; i < mappings.length; i++) {
+      const mapping = mappings[i];
       const matchMode = mapping.matchMode || 'contains';
       const substringLower = mapping.substring.toLowerCase();
+      const durationKey = `${calculation.id}:${i}`;
 
       let isMatch = false;
 
@@ -408,8 +419,30 @@ export class OcrService {
       }
 
       if (isMatch) {
-        matchedValue = mapping.stateValue;
-        break; // First match wins
+        const minDurationMs = mapping.minDurationMs || 0;
+        const hasDurationRequirement = minDurationMs > 0;
+
+        if (hasDurationRequirement) {
+          const existingStartTime = this.matchStartTimes.get(durationKey);
+          if (existingStartTime === undefined) {
+            // First time this mapping matches — start the clock
+            this.matchStartTimes.set(durationKey, now);
+          } else {
+            const elapsedMs = now - existingStartTime;
+            const durationMet = elapsedMs >= minDurationMs;
+            if (durationMet && matchedValue === '') {
+              matchedValue = mapping.stateValue;
+            }
+          }
+        } else {
+          // No duration requirement — match immediately
+          if (matchedValue === '') {
+            matchedValue = mapping.stateValue;
+          }
+        }
+      } else {
+        // Match broken — reset the clock
+        this.matchStartTimes.delete(durationKey);
       }
     }
 

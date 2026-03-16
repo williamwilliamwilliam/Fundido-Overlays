@@ -45,6 +45,7 @@ export interface FundidoApi {
   getCaptureStatus(): Promise<{ isCapturing: boolean; isNativeAvailable: boolean }>;
   listDisplays(): Promise<DisplayInfo[]>;
   pickRegion(): Promise<{ x: number; y: number; width: number; height: number } | null>;
+  pickColor(): Promise<{ red: number; green: number; blue: number } | null>;
   setWorkingRegions(regions: any[]): Promise<{ success: boolean }>;
   setWorkingGroups(groups: any[]): Promise<{ success: boolean }>;
   openFileDialog(options?: any): Promise<string | null>;

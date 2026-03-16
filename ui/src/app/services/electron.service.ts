@@ -140,6 +140,11 @@ export class ElectronService {
     return window.fundidoApi.pickRegion();
   }
 
+  public async pickColor(): Promise<{ red: number; green: number; blue: number } | null> {
+    if (!this.isRunningInElectron) return null;
+    return window.fundidoApi.pickColor();
+  }
+
   // -- Working regions/groups (live evaluation) ------------------------------
 
   public async setWorkingRegions(regions: any[]): Promise<void> {

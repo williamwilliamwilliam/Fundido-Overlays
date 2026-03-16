@@ -83,6 +83,7 @@ export class GameCaptureService {
   private captureIntervalHandle: ReturnType<typeof setInterval> | null = null;
   private isCapturing = false;
   private onFrameCaptured: FrameCapturedCallback | null = null;
+  private latestFrame: CapturedFrame | null = null;
 
   private readonly nativeCapture: NativeDxgiCapture | null;
   private readonly isNativeAvailable: boolean;
@@ -94,6 +95,10 @@ export class GameCaptureService {
 
   public getIsNativeAvailable(): boolean {
     return this.isNativeAvailable;
+  }
+
+  public getLatestFrame(): CapturedFrame | null {
+    return this.latestFrame;
   }
 
   /**
@@ -243,6 +248,8 @@ export class GameCaptureService {
         capturedAt: performance.now(),
       };
     }
+
+    this.latestFrame = frame;
 
     if (this.onFrameCaptured) {
       this.onFrameCaptured(frame);

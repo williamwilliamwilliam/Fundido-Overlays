@@ -115,6 +115,8 @@ export interface SubstringMapping {
   substring: string;
   /** How to compare the OCR text against the substring. Default 'contains'. */
   matchMode: OcrMatchMode;
+  /** Minimum duration in ms that the match must hold continuously before triggering. 0 = immediate. */
+  minDurationMs: number;
   /** The state value to emit when this mapping matches. */
   stateValue: string;
 }
@@ -148,6 +150,8 @@ export interface OcrPreprocessConfig {
   charWhitelist: string;
   /** Tesseract page segmentation mode. 7=single line, 8=single word, 10=single char. Default 7. */
   pageSegMode: number;
+  /** Maximum characters to return from OCR. Trims the result to this length. Default 10. */
+  maxCharacters: number;
 }
 
 /**

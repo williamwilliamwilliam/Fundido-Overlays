@@ -200,7 +200,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                     <span class="info-label">OCR Text</span>
                     <span class="ocr-text-value">{{ getOcrText(region.id, calc.id) || '(empty)' }}</span>
                   </div>
-                  <div *ngFor="let mapping of calc.substringMappings; let mappingIndex = index" class="mapping-row">
+                  <div *ngFor="let mapping of calc.substringMappings; let mappingIndex = index" class="mapping-row ocr-mapping-row">
                     <select class="match-mode-select" [(ngModel)]="mapping.matchMode" (ngModelChange)="onFieldChanged()">
                       <option value="contains">Contains</option>
                       <option value="equals">Equals</option>
@@ -214,6 +214,16 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                       [(ngModel)]="mapping.substring"
                       (ngModelChange)="onFieldChanged()"
                       placeholder="Text to match" />
+                    <label class="duration-label" *ngIf="mapping.minDurationMs > 0 || mapping.showDuration">
+                      for
+                      <input type="number" class="duration-input"
+                        [(ngModel)]="mapping.minDurationMs"
+                        (ngModelChange)="onFieldChanged()"
+                        min="0" step="100" placeholder="0" />
+                      ms
+                    </label>
+                    <button class="duration-toggle-btn" *ngIf="!mapping.minDurationMs && !mapping.showDuration"
+                      (click)="mapping.showDuration = true" title="Add minimum duration">⏱</button>
                     <span class="mapping-arrow">&rarr;</span>
                     <input
                       class="state-value-input"
@@ -253,7 +263,8 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                     </div>
 
                     <div class="config-row color-filter-row">
-                      <label class="checkbox-label">
+                      <label class="checkbox-label"
+                        title="Isolates specific colored text from a busy background before OCR runs. When enabled, every pixel in the monitored region is compared to your target color. Pixels that are close to the target (within the tolerance range) are kept as-is, while all other pixels are blacked out. This effectively strips away background noise and leaves only the text you care about.&#10;&#10;Use the Pick button to click directly on a character in your game to sample its exact color, then adjust tolerance until the OCR text readout shows clean results. This works best when the text is a consistent color that's distinct from the background.">
                         <input type="checkbox"
                           [(ngModel)]="calc.ocrPreprocess.colorFilterEnabled"
                           (ngModelChange)="onFieldChanged()" />
@@ -269,7 +280,11 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                           [ngModel]="rgbToHex(calc.ocrPreprocess.colorFilterTarget.red, calc.ocrPreprocess.colorFilterTarget.green, calc.ocrPreprocess.colorFilterTarget.blue)"
                           (ngModelChange)="onPreprocessColorChanged(calc.ocrPreprocess, $event)"
                           placeholder="#FFFFFF" />
-                        <label>±
+                        <button class="pick-color-btn" (click)="pickColorForPreprocess(calc.ocrPreprocess)" title="Pick a color from the screen">
+                          {{ pickingColorForPreprocess === calc.ocrPreprocess ? 'Picking...' : '🎯 Pick' }}
+                        </button>
+                        <label
+                          title="Controls how strictly pixels must match the target color. Each pixel's red, green, and blue channels are compared independently — a tolerance of 40 means each channel can differ by up to 40 from the target.&#10;&#10;Lower tolerance is stricter (only very similar colors pass through), higher tolerance is more permissive (a wider range of shades are kept). If your text color varies slightly frame to frame, increase the tolerance.">±
                           <input type="range" min="5" max="128" step="1"
                             [(ngModel)]="calc.ocrPreprocess.colorFilterTolerance"
                             (ngModelChange)="onFieldChanged()" />
@@ -294,6 +309,13 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                           <option [ngValue]="6">6 – Block of Text</option>
                           <option [ngValue]="13">13 – Raw Line</option>
                         </select>
+                      </label>
+                      <label title="Maximum number of characters returned from OCR. The result is trimmed to this length.">Max Chars
+                        <input type="number"
+                          [(ngModel)]="calc.ocrPreprocess.maxCharacters"
+                          (ngModelChange)="onFieldChanged()"
+                          min="1" max="100" step="1"
+                          style="width: 55px; font-size: 0.8rem; text-align: center" />
                       </label>
                     </div>
                   </div>
@@ -697,6 +719,36 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       min-width: 110px;
     }
 
+    .ocr-mapping-row { flex-wrap: wrap; }
+
+    .duration-label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.8rem;
+      color: var(--color-text-secondary);
+    }
+    .duration-input {
+      width: 65px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      text-align: center;
+    }
+    .duration-toggle-btn {
+      background: transparent;
+      border: 1px dashed var(--color-border);
+      font-size: 0.75rem;
+      padding: 1px 6px;
+      cursor: pointer;
+    }
+    .duration-toggle-btn:hover { border-color: var(--color-accent); }
+
+    .pick-color-btn {
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      white-space: nowrap;
+    }
+
     .substring-input {
       width: 140px;
       font-size: 0.85rem;
@@ -942,6 +994,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   showImportDialog = false;
   importJsonText = '';
   pickingRegionId: string | null = null;
+  pickingColorForPreprocess: any = null;
   latestPreviewFrame: PreviewFrameData | null = null;
   hasUnsavedChanges = false;
   highlightId: string | null = null;
@@ -1121,6 +1174,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
         colorFilterTolerance: 40,
         charWhitelist: '',
         pageSegMode: 7,
+        maxCharacters: 10,
       };
     }
     if (calc.type === 'OllamaLLM' && !calc.ollamaConfig) {
@@ -1209,7 +1263,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
 
   addSubstringMapping(calc: any): void {
     if (!calc.substringMappings) calc.substringMappings = [];
-    calc.substringMappings.push({ substring: '', matchMode: 'contains', stateValue: '' });
+    calc.substringMappings.push({ substring: '', matchMode: 'contains', minDurationMs: 0, stateValue: '' });
     this.pushWorkingRegions();
   }
 
@@ -1230,6 +1284,16 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     const rgb = hexToRgb(hexValue);
     if (rgb) {
       ocrPreprocess.colorFilterTarget = rgb;
+      this.pushWorkingRegions();
+    }
+  }
+
+  async pickColorForPreprocess(ocrPreprocess: any): Promise<void> {
+    this.pickingColorForPreprocess = ocrPreprocess;
+    const result = await this.electronService.pickColor();
+    this.pickingColorForPreprocess = null;
+    if (result) {
+      ocrPreprocess.colorFilterTarget = result;
       this.pushWorkingRegions();
     }
   }

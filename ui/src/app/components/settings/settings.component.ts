@@ -128,24 +128,6 @@ import { ElectronService } from '../../services/electron.service';
             <span class="setting-value">{{ ocrIntervalMs }} ms</span>
           </div>
         </div>
-
-        <div class="setting-row">
-          <div class="setting-info">
-            <label class="setting-label">Max Characters</label>
-            <span class="setting-hint">
-              Maximum characters expected in OCR regions.
-              Lower values help Tesseract optimize for short text.
-            </span>
-          </div>
-          <div class="setting-control">
-            <input
-              type="range"
-              min="1" max="50" step="1"
-              [(ngModel)]="ocrMaxCharacters"
-              (ngModelChange)="onSettingChanged()" />
-            <span class="setting-value">{{ ocrMaxCharacters }}</span>
-          </div>
-        </div>
       </div>
 
       <div class="settings-section">
@@ -351,7 +333,6 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
   // OCR settings
   ocrIntervalMs = 200;
-  ocrMaxCharacters = 10;
 
   // Ollama settings
   ollamaBaseUrl = 'http://localhost:11434';
@@ -382,7 +363,6 @@ export class SettingsComponent implements OnInit, OnDestroy {
     const ocr = config.ocr;
     if (ocr) {
       this.ocrIntervalMs = ocr.ocrIntervalMs ?? 200;
-      this.ocrMaxCharacters = ocr.maxCharacters ?? 10;
     }
 
     const ollama = config.ollama;
@@ -451,7 +431,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
     config.ocr = {
       ocrIntervalMs: this.ocrIntervalMs,
-      maxCharacters: this.ocrMaxCharacters,
+      maxCharacters: config.ocr?.maxCharacters ?? 10,
     };
 
     config.ollama = {
