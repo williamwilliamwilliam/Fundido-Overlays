@@ -13,7 +13,8 @@
           {
             "libraries": [
               "d3d11.lib",
-              "dxgi.lib"
+              "dxgi.lib",
+              "winmm.lib"
             ]
           }
         ]

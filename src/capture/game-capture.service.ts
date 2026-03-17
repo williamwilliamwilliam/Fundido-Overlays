@@ -36,7 +36,7 @@ export interface DisplayInfo {
  */
 interface NativeDxgiCapture {
   listDisplays(): DisplayInfo[];
-  startCapture(displayIndex: number): boolean;
+  startCapture(displayIndex: number, callback?: (frame: { buffer: Buffer; width: number; height: number }) => void): boolean;
   stopCapture(): void;
   getLatestFrame(): { buffer: Buffer; width: number; height: number } | null;
 }
@@ -145,24 +145,42 @@ export class GameCaptureService {
     );
 
     if (this.isNativeAvailable && this.nativeCapture) {
+      // Threaded capture mode: the native addon runs a capture thread and calls
+      // us back via napi_threadsafe_function when each frame is ready.
+      // No setInterval, no polling — frames arrive at the display's refresh rate.
+      const nativeFrameCallback = (nativeFrame: { buffer: Buffer; width: number; height: number }) => {
+        const frame: CapturedFrame = {
+          buffer: nativeFrame.buffer,
+          width: nativeFrame.width,
+          height: nativeFrame.height,
+          capturedAt: performance.now(),
+        };
+        this.latestFrame = frame;
+        if (this.onFrameCaptured) {
+          this.onFrameCaptured(frame);
+        }
+      };
+
       try {
-        const startedSuccessfully = this.nativeCapture.startCapture(displayIndex);
+        const startedSuccessfully = this.nativeCapture.startCapture(displayIndex, nativeFrameCallback);
         if (!startedSuccessfully) {
           logger.error(LogCategory.Capture, 'Native startCapture returned false.');
           return;
         }
+        logger.info(LogCategory.Capture, 'Native threaded capture started — frames delivered via callback.');
       } catch (error) {
         logger.error(LogCategory.Capture, 'Native startCapture threw an error.', error);
         return;
       }
+    } else {
+      // Stub mode: use setInterval to produce blank frames
+      const intervalMilliseconds = Math.round(1000 / config.targetFps);
+      this.captureIntervalHandle = setInterval(() => {
+        this.grabStubFrame();
+      }, intervalMilliseconds);
     }
 
     this.isCapturing = true;
-
-    const intervalMilliseconds = Math.round(1000 / config.targetFps);
-    this.captureIntervalHandle = setInterval(() => {
-      this.grabFrame();
-    }, intervalMilliseconds);
   }
 
   public stop(): void {
@@ -212,42 +230,18 @@ export class GameCaptureService {
     return 0;
   }
 
-  private grabFrame(): void {
-    let frame: CapturedFrame;
+  private grabStubFrame(): void {
+    const stubWidth = 1920;
+    const stubHeight = 1080;
+    const bytesPerPixel = 4;
+    const stubBuffer = Buffer.alloc(stubWidth * stubHeight * bytesPerPixel, 0);
 
-    if (this.isNativeAvailable && this.nativeCapture) {
-      try {
-        const nativeFrame = this.nativeCapture.getLatestFrame();
-
-        const noNewFrameAvailable = nativeFrame === null;
-        if (noNewFrameAvailable) {
-          return;
-        }
-
-        frame = {
-          buffer: nativeFrame.buffer,
-          width: nativeFrame.width,
-          height: nativeFrame.height,
-          capturedAt: performance.now(),
-        };
-      } catch (error) {
-        logger.error(LogCategory.Capture, 'Native getLatestFrame threw an error.', error);
-        return;
-      }
-    } else {
-      // Stub mode: produce a blank frame for UI development
-      const stubWidth = 1920;
-      const stubHeight = 1080;
-      const bytesPerPixel = 4; // BGRA
-      const stubBuffer = Buffer.alloc(stubWidth * stubHeight * bytesPerPixel, 0);
-
-      frame = {
-        buffer: stubBuffer,
-        width: stubWidth,
-        height: stubHeight,
-        capturedAt: performance.now(),
-      };
-    }
+    const frame: CapturedFrame = {
+      buffer: stubBuffer,
+      width: stubWidth,
+      height: stubHeight,
+      capturedAt: performance.now(),
+    };
 
     this.latestFrame = frame;
 
