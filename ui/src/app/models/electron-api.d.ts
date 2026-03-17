@@ -80,6 +80,7 @@ export interface FundidoApi {
   onStateUpdated(callback: (frameState: any) => void): void;
   onPreviewFrame(callback: (previewData: PreviewFrameData) => void): void;
   onPerfMetrics(callback: (metrics: PerfMetrics) => void): void;
+  onPreviewPaused(callback: (paused: boolean) => void): void;
   setActivePage(page: string): void;
 }
 

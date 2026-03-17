@@ -180,11 +180,10 @@ export class OverlayWindowManager {
   }
 
   /**
-   * Extracts raw RGBA pixel crops for each mirrored region and sends them
-   * directly to overlay windows at capture FPS. No JPEG encoding, no downscaling.
-   *
-   * This is the fast path for mirror rendering — completely decoupled from the
-   * preview service's encode/throttle pipeline.
+   * Extracts BGRA pixel crops for visible mirrored regions into a single
+   * contiguous buffer and sends it with metadata to overlay windows.
+   * One IPC message per overlay window with one Buffer — minimizes
+   * structured clone overhead compared to many separate Buffers.
    */
   public broadcastMirrorCrops(
     frameBuffer: Buffer,
@@ -196,33 +195,29 @@ export class OverlayWindowManager {
     dpiScaleFactor: number,
   ): void {
     if (this.overlayWindowsByGroupId.size === 0) return;
-
-    // Only crop regions whose mirror overlay is currently visible.
-    // This avoids extracting and sending pixel data for hidden overlays.
     if (this.visibleMirrorRegionIds.size === 0) return;
 
-    // Build a lookup map for monitored regions to avoid find() per region
     const regionById = new Map<string, any>();
     for (const region of monitoredRegions) {
       regionById.set(region.id, region);
     }
 
-    // Extract raw BGRA crops for each visible mirrored region
     const bytesPerPixel = 4;
     const frameRowBytes = frameWidth * bytesPerPixel;
-    const crops: Record<string, { buffer: Buffer; width: number; height: number }> = {};
+
+    // First pass: compute total bytes needed and collect crop metadata
+    const cropInfos: Array<{ id: string; clampedX: number; clampedY: number; clampedW: number; clampedH: number; cropBytes: number }> = [];
+    let totalBytes = 0;
 
     for (const regionId of this.visibleMirrorRegionIds) {
       const region = regionById.get(regionId);
       if (!region || !region.bounds) continue;
 
-      // Convert screen-absolute logical coords to physical pixels
       const physX = Math.round((region.bounds.x - displayOriginX) * dpiScaleFactor);
       const physY = Math.round((region.bounds.y - displayOriginY) * dpiScaleFactor);
       const physW = Math.round(region.bounds.width * dpiScaleFactor);
       const physH = Math.round(region.bounds.height * dpiScaleFactor);
 
-      // Clamp to frame bounds
       const clampedX = Math.max(0, Math.min(physX, frameWidth));
       const clampedY = Math.max(0, Math.min(physY, frameHeight));
       const clampedW = Math.min(physW, frameWidth - clampedX);
@@ -230,27 +225,33 @@ export class OverlayWindowManager {
 
       if (clampedW <= 0 || clampedH <= 0) continue;
 
-      // Extract raw BGRA rows directly — no channel swap on the main thread.
-      // The overlay renderer handles BGRA→RGBA conversion in its own process.
       const cropBytes = clampedW * clampedH * bytesPerPixel;
-      const bgraBuffer = Buffer.allocUnsafe(cropBytes);
-
-      const cropRowBytes = clampedW * bytesPerPixel;
-      for (let row = 0; row < clampedH; row++) {
-        const srcRowStart = (clampedY + row) * frameRowBytes + clampedX * bytesPerPixel;
-        const destRowStart = row * cropRowBytes;
-        frameBuffer.copy(bgraBuffer, destRowStart, srcRowStart, srcRowStart + cropRowBytes);
-      }
-
-      crops[regionId] = { buffer: bgraBuffer, width: clampedW, height: clampedH };
+      cropInfos.push({ id: regionId, clampedX, clampedY, clampedW, clampedH, cropBytes });
+      totalBytes += cropBytes;
     }
 
-    if (Object.keys(crops).length === 0) return;
+    if (cropInfos.length === 0) return;
 
-    // Send crops to all overlay windows
+    // Second pass: pack all crops into a single contiguous buffer
+    const batchedBuffer = Buffer.allocUnsafe(totalBytes);
+    const cropMeta: Array<{ id: string; offset: number; width: number; height: number }> = [];
+    let writeOffset = 0;
+
+    for (const info of cropInfos) {
+      const cropRowBytes = info.clampedW * bytesPerPixel;
+      for (let row = 0; row < info.clampedH; row++) {
+        const srcRowStart = (info.clampedY + row) * frameRowBytes + info.clampedX * bytesPerPixel;
+        frameBuffer.copy(batchedBuffer, writeOffset + row * cropRowBytes, srcRowStart, srcRowStart + cropRowBytes);
+      }
+      cropMeta.push({ id: info.id, offset: writeOffset, width: info.clampedW, height: info.clampedH });
+      writeOffset += info.cropBytes;
+    }
+
+    // Single IPC message: one Buffer + small metadata array
+    const message = { buffer: batchedBuffer, crops: cropMeta };
     for (const [_groupId, window] of this.overlayWindowsByGroupId) {
       if (!window.isDestroyed()) {
-        window.webContents.send('overlay:mirror-crops', crops);
+        window.webContents.send('overlay:mirror-batch', message);
       }
     }
   }
@@ -327,14 +328,13 @@ export class OverlayWindowManager {
       webPreferences: {
         contextIsolation: false,
         nodeIntegration: true,
-        webSecurity: false, // Allow loading local file:// images from data URL origin
+        webSecurity: false,
       },
     });
 
     overlayWindow.setIgnoreMouseEvents(true);
     overlayWindow.setAlwaysOnTop(true, 'screen-saver');
 
-    // Load inline HTML as a data URL to avoid file path issues between src/ and dist/
     const html = buildOverlayRendererHtml();
     overlayWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
@@ -367,7 +367,7 @@ function buildOverlayRendererHtml(): string {
     position: absolute;
     display: flex;
     will-change: transform;
-    transition: transform 30ms linear;
+    transition: transform 20ms linear;
   }
   .overlay-item {
     transition: opacity 0.15s ease;
@@ -491,24 +491,28 @@ function buildOverlayRendererHtml(): string {
   let previewImg = null;
   let previewImgReady = false;
 
-  // ---- FAST PATH: Raw RGBA mirror crops sent at capture FPS ----
-  ipcRenderer.on('overlay:mirror-crops', (_event, crops) => {
-    if (!crops) return;
+  // ---- FAST PATH: Single batched buffer with all visible mirror crops ----
+  ipcRenderer.on('overlay:mirror-batch', (_event, message) => {
+    if (!message || !message.buffer || !message.crops) return;
+
+    const batchedData = new Uint8Array(message.buffer.buffer || message.buffer);
     const canvases = document.querySelectorAll('canvas[data-mirror-region-id]');
+
     for (const canvas of canvases) {
       const regionId = canvas.dataset.mirrorRegionId;
-      if (!regionId || !crops[regionId]) continue;
+      if (!regionId) continue;
 
-      const crop = crops[regionId];
-      const rawBuffer = crop.buffer;
-      const cropW = crop.width;
-      const cropH = crop.height;
+      const meta = message.crops.find(function(m) { return m.id === regionId; });
+      if (!meta) continue;
+
+      const cropW = meta.width;
+      const cropH = meta.height;
+      const pixelCount = cropW * cropH;
 
       const mirrorScale = parseFloat(canvas.dataset.mirrorScale) || 1;
       const mirrorMaxW = parseInt(canvas.dataset.mirrorMaxWidth) || 0;
       const mirrorMaxH = parseInt(canvas.dataset.mirrorMaxHeight) || 0;
 
-      // Compute display size
       var displayW = Math.round(cropW * mirrorScale);
       var displayH = Math.round(cropH * mirrorScale);
       if (mirrorMaxW > 0 && displayW > mirrorMaxW) {
@@ -530,16 +534,15 @@ function buildOverlayRendererHtml(): string {
       const ctx = canvas.getContext('2d');
       if (!ctx) continue;
 
-      // Convert BGRA → RGBA in the renderer process (off main thread)
-      const src = new Uint8Array(rawBuffer.buffer || rawBuffer);
-      const pixelCount = cropW * cropH;
+      // Read BGRA from the batched buffer at this crop's offset, convert to RGBA
       const rgba = new Uint8ClampedArray(pixelCount * 4);
       for (var i = 0; i < pixelCount; i++) {
-        var offset = i * 4;
-        rgba[offset]     = src[offset + 2]; // R ← B
-        rgba[offset + 1] = src[offset + 1]; // G
-        rgba[offset + 2] = src[offset];     // B ← R
-        rgba[offset + 3] = 255;             // A
+        var px = i * 4;
+        var sp = meta.offset + px;
+        rgba[px]     = batchedData[sp + 2]; // R ← B
+        rgba[px + 1] = batchedData[sp + 1]; // G
+        rgba[px + 2] = batchedData[sp];     // B ← R
+        rgba[px + 3] = 255;                 // A
       }
 
       const imgData = new ImageData(rgba, cropW, cropH);
@@ -547,11 +550,10 @@ function buildOverlayRendererHtml(): string {
     }
   });
 
-  // ---- LEGACY: Preview-based mirror path (disabled — fast path handles mirrors now) ----
-  // Kept as reference but no longer receives imageDataUrl data.
-  ipcRenderer.on('overlay:preview-frame', (_event, previewData) => {
-    // No-op: mirrors are now rendered via overlay:mirror-crops at capture FPS
-  });
+  // ---- LEGACY handlers (no-op, kept to avoid errors from stale messages) ----
+  ipcRenderer.on('overlay:mirror-crops', function() {});
+  ipcRenderer.on('overlay:mirror-meta', function() {});
+  ipcRenderer.on('overlay:preview-frame', function() {});
 
   function applyDefaults(group) {
     for (const ov of group.overlays) {

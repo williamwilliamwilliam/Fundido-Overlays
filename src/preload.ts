@@ -42,6 +42,7 @@ const IPC = {
   OLLAMA_LIST_MODELS:          'ollama:list-models',
   PERF_METRICS:                'perf:metrics',
   UI_ACTIVE_PAGE:              'ui:active-page',
+  PREVIEW_PAUSED:              'preview:paused',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -149,6 +150,12 @@ const fundidoApi = {
   onPerfMetrics: (callback: (metrics: any) => void): void => {
     ipcRenderer.on(IPC.PERF_METRICS, (_event, metrics) => {
       callback(metrics);
+    });
+  },
+
+  onPreviewPaused: (callback: (paused: boolean) => void): void => {
+    ipcRenderer.on(IPC.PREVIEW_PAUSED, (_event, paused) => {
+      callback(paused);
     });
   },
 };

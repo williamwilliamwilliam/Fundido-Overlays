@@ -44,13 +44,19 @@ import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
         <canvas
           #previewCanvas
           *ngIf="latestPreview"
-          class="preview-image">
+          class="preview-image"
+          [class.preview-dimmed]="isPreviewPaused">
         </canvas>
         <div *ngIf="!latestPreview && !isCapturing" class="placeholder">
           Click "Start Capture" to begin previewing your display.
         </div>
         <div *ngIf="!latestPreview && isCapturing" class="placeholder">
           Waiting for first frame...
+        </div>
+
+        <!-- Paused overlay -->
+        <div class="paused-overlay" *ngIf="isPreviewPaused && latestPreview">
+          <span class="paused-text">Preview paused while you're not working in this window</span>
         </div>
 
         <!-- FPS / metrics overlay -->
@@ -206,6 +212,30 @@ import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
       border-top: 1px solid rgba(255, 255, 255, 0.1);
       margin: 3px 0;
     }
+
+    .preview-dimmed {
+      opacity: 0.3;
+      filter: grayscale(0.5);
+    }
+
+    .paused-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+
+    .paused-text {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      text-align: center;
+      padding: var(--spacing-lg);
+      background-color: rgba(0, 0, 0, 0.5);
+      border-radius: var(--radius-md);
+    }
   `],
 })
 export class CapturePreviewComponent implements OnInit, OnDestroy {
@@ -214,11 +244,13 @@ export class CapturePreviewComponent implements OnInit, OnDestroy {
   availableDisplays: Array<{ name: string; width: number; height: number }> = [];
   latestPreview: PreviewFrameData | null = null;
   metrics: PerfMetrics | null = null;
+  isPreviewPaused = false;
 
   @ViewChild('previewCanvas') previewCanvasRef!: ElementRef<HTMLCanvasElement>;
 
   private previewSubscription: Subscription | null = null;
   private metricsSubscription: Subscription | null = null;
+  private pausedSubscription: Subscription | null = null;
 
   constructor(private readonly electronService: ElectronService) {}
 
@@ -237,6 +269,10 @@ export class CapturePreviewComponent implements OnInit, OnDestroy {
 
     this.metricsSubscription = this.electronService.perfMetricsStream.subscribe((metrics) => {
       this.metrics = metrics;
+    });
+
+    this.pausedSubscription = this.electronService.previewPausedStream.subscribe((paused) => {
+      this.isPreviewPaused = paused;
     });
   }
 
@@ -275,6 +311,7 @@ export class CapturePreviewComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.previewSubscription?.unsubscribe();
     this.metricsSubscription?.unsubscribe();
+    this.pausedSubscription?.unsubscribe();
     this.electronService.setActivePage('');
   }
 

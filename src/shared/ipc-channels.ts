@@ -84,3 +84,8 @@ export const PERF_METRICS = 'perf:metrics';
 // UI state
 // ---------------------------------------------------------------------------
 export const UI_ACTIVE_PAGE = 'ui:active-page';
+
+// ---------------------------------------------------------------------------
+// Preview state
+// ---------------------------------------------------------------------------
+export const PREVIEW_PAUSED = 'preview:paused';

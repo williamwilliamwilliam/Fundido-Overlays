@@ -32,6 +32,16 @@ export class PreviewFrameService {
     }
   }
 
+  /** Pause or unpause the preview. When paused, no frames are encoded or sent. */
+  private paused = false;
+  public setPaused(paused: boolean): void {
+    const changed = this.paused !== paused;
+    this.paused = paused;
+    if (changed && this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('preview:paused', paused);
+    }
+  }
+
   /**
    * Sets a callback that fires each time a preview frame is encoded and sent.
    * Used to pipe preview data to overlay windows for region mirror rendering.
@@ -112,6 +122,8 @@ export class PreviewFrameService {
   }
 
   private sendPreviewFrame(config: PreviewConfig): void {
+    if (this.paused) return;
+
     const hasNoFrame = this.latestFrame === null;
     if (hasNoFrame) {
       return;

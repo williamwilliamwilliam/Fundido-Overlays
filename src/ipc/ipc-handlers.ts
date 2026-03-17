@@ -21,7 +21,8 @@ export function registerIpcHandlers(
   ollamaService: OllamaService,
   currentConfigRef: { config: FundidoConfig },
   workingRegionsRef: { regions: any[] | null },
-  globalEnabledRef: { enabled: boolean }
+  globalEnabledRef: { enabled: boolean },
+  pickerActiveRef: { active: boolean },
 ): void {
 
   // -------------------------------------------------------------------------
@@ -182,6 +183,8 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IpcChannels.PICKER_START, async (_event: IpcMainInvokeEvent) => {
     logger.debug(LogCategory.Ipc, 'PICKER_START invoked');
+    pickerActiveRef.active = true;
+    previewService.setPaused(false);
     const { pickScreenRegion } = require('../picker/screen-position-picker');
 
     // Forward live region updates to the renderer so the UI can show a preview
@@ -193,13 +196,17 @@ export function registerIpcHandlers(
     };
 
     const result = await pickScreenRegion(onRegionUpdate);
+    pickerActiveRef.active = false;
     return result;
   });
 
   ipcMain.handle(IpcChannels.PICKER_COLOR, async (_event: IpcMainInvokeEvent) => {
     logger.debug(LogCategory.Ipc, 'PICKER_COLOR invoked');
+    pickerActiveRef.active = true;
+    previewService.setPaused(false);
     const { pickScreenColor } = require('../picker/screen-color-picker');
     const result = await pickScreenColor(captureService);
+    pickerActiveRef.active = false;
     return result;
   });
 

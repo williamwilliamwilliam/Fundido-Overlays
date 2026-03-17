@@ -27,11 +27,13 @@ export class ElectronService {
   private readonly stateUpdated$ = new Subject<any>();
   private readonly previewFrame$ = new Subject<PreviewFrameData>();
   private readonly perfMetrics$ = new Subject<any>();
+  private readonly previewPaused$ = new Subject<boolean>();
 
   public readonly debugLogStream = this.debugLog$.asObservable();
   public readonly stateUpdateStream = this.stateUpdated$.asObservable();
   public readonly previewFrameStream = this.previewFrame$.asObservable();
   public readonly perfMetricsStream = this.perfMetrics$.asObservable();
+  public readonly previewPausedStream = this.previewPaused$.asObservable();
 
   public readonly isRunningInElectron: boolean;
 
@@ -201,6 +203,10 @@ export class ElectronService {
 
     window.fundidoApi.onPerfMetrics((metrics: any) => {
       this.ngZone.run(() => this.perfMetrics$.next(metrics));
+    });
+
+    window.fundidoApi.onPreviewPaused((paused: boolean) => {
+      this.ngZone.run(() => this.previewPaused$.next(paused));
     });
   }
 }
