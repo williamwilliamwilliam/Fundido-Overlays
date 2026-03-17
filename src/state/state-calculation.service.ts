@@ -8,7 +8,6 @@ import {
   Rectangle,
 } from '../shared';
 import { CapturedFrame } from '../capture/game-capture.service';
-import { logger, LogCategory } from '../shared/logger';
 
 // ---------------------------------------------------------------------------
 // Color math helpers
@@ -71,7 +70,7 @@ function computeMedianColorForRegion(frame: CapturedFrame, bounds: Rectangle): R
   }
 
   if (redValues.length === 0) {
-    logger.warn(LogCategory.StateCalculation, 'Region has zero pixels — returning black.');
+    console.warn('StateCalculation', 'Region has zero pixels — returning black.');
     return { red: 0, green: 0, blue: 0 };
   }
 
