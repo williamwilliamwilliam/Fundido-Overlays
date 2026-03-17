@@ -440,8 +440,17 @@ function getRegionIdsReferencedByEnabledOverlays(): Set<string> {
     const groupIsDisabled = group.enabled === false;
     if (groupIsDisabled) continue;
 
+    // Collect from group-level rules
+    for (const rule of ((group as any).rules || [])) {
+      for (const cond of (rule.conditions || [])) {
+        if (cond.monitoredRegionId) {
+          referencedIds.add(cond.monitoredRegionId);
+        }
+      }
+    }
+
     for (const overlay of (group.overlays || [])) {
-      // Collect from rules
+      // Collect from overlay rules
       for (const rule of (overlay.rules || [])) {
         for (const cond of (rule.conditions || [])) {
           if (cond.monitoredRegionId) {

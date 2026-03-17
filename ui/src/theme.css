@@ -22,7 +22,7 @@
   /* --------------------------------------------------------------------------
    * Brand / accent colors
    * -------------------------------------------------------------------------- */
-  --color-accent: #45b8e9;    /* Primary accent (buttons, links, focus)  */
+  --color-accent: #7fd9ff;    /* Primary accent (buttons, links, focus)  */
   --color-accent-hover:   #ff6b81;    /* Accent hover state                     */
   --color-accent-subtle:  rgba(233, 69, 96, 0.12);  /* Accent tint for bg      */
   --color-highlight:      #5b9cf5;    /* Cross-ref highlight / selection glow    */

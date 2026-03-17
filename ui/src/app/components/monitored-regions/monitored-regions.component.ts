@@ -110,13 +110,21 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
           <button class="danger-text" (click)="removeRegion(regionIndex)">Remove</button>
         </div>
         <div class="cross-ref-row" *ngIf="regionCrossRefs.get(region.id)?.length">
-          <span class="cross-ref-label">Overlays using this region:</span>
-          <a *ngFor="let ref of regionCrossRefs.get(region.id)"
-            class="cross-ref-link"
-            [routerLink]="['/overlays']"
-            [queryParams]="{ highlight: ref.overlayId }">
-            {{ ref.groupName }} → {{ ref.overlayName }}
-          </a>
+          <span class="cross-ref-label">Used by:</span>
+          <ng-container *ngFor="let ref of regionCrossRefs.get(region.id)">
+            <a *ngIf="ref.source === 'groupRule'"
+              class="cross-ref-link cross-ref-group"
+              [routerLink]="['/overlays']"
+              [queryParams]="{ highlight: ref.groupId }">
+              {{ ref.groupName }} (group rule)
+            </a>
+            <a *ngIf="ref.source !== 'groupRule'"
+              class="cross-ref-link"
+              [routerLink]="['/overlays']"
+              [queryParams]="{ highlight: ref.overlayId }">
+              {{ ref.groupName }} → {{ ref.overlayName }}
+            </a>
+          </ng-container>
         </div>
 
         <div class="region-content-row">
@@ -615,6 +623,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       white-space: nowrap;
     }
     .cross-ref-link:hover { opacity: 0.8; }
+    .cross-ref-group { font-style: italic; }
 
     .name-input {
       font-size: 1rem;
@@ -1124,8 +1133,8 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   highlightId: string | null = null;
   isUiUnfocused = false;
 
-  /** Cached cross-references: regionId → overlay groups that reference it. Built once on load. */
-  regionCrossRefs = new Map<string, Array<{ groupId: string; groupName: string; overlayId: string; overlayName: string }>>();
+  /** Cached cross-references: regionId → overlay groups/overlays that reference it. Built once on load. */
+  regionCrossRefs = new Map<string, Array<{ groupId: string; groupName: string; overlayId?: string; overlayName?: string; source: 'groupRule' | 'overlayRule' | 'mirror' }>>();
 
   /** Maps regionId → { medianHex, calcResults: Map<calcId, { currentValue, confidences }> } */
   private regionStateMap = new Map<string, {
@@ -1574,6 +1583,20 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   private buildRegionCrossRefs(): void {
     this.regionCrossRefs.clear();
     for (const group of this.overlayGroups) {
+      // Collect from group-level rules
+      const groupRuleRegionIds = new Set<string>();
+      for (const rule of (group.rules || [])) {
+        for (const cond of (rule.conditions || [])) {
+          if (cond.monitoredRegionId) groupRuleRegionIds.add(cond.monitoredRegionId);
+        }
+      }
+      for (const regionId of groupRuleRegionIds) {
+        const existing = this.regionCrossRefs.get(regionId) || [];
+        existing.push({ groupId: group.id, groupName: group.name, source: 'groupRule' });
+        this.regionCrossRefs.set(regionId, existing);
+      }
+
+      // Collect from individual overlays
       for (const overlay of (group.overlays || [])) {
         const rulesRegionIds = new Set<string>();
         for (const rule of (overlay.rules || [])) {
@@ -1581,16 +1604,18 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
             if (cond.monitoredRegionId) rulesRegionIds.add(cond.monitoredRegionId);
           }
         }
+        for (const regionId of rulesRegionIds) {
+          const existing = this.regionCrossRefs.get(regionId) || [];
+          existing.push({ groupId: group.id, groupName: group.name, overlayId: overlay.id, overlayName: overlay.name, source: 'overlayRule' });
+          this.regionCrossRefs.set(regionId, existing);
+        }
+
         const mirrorRegionId = overlay.contentType === 'regionMirror'
           ? overlay.regionMirrorConfig?.monitoredRegionId : null;
-
-        const allRegionIds = new Set(rulesRegionIds);
-        if (mirrorRegionId) allRegionIds.add(mirrorRegionId);
-
-        for (const regionId of allRegionIds) {
-          const existing = this.regionCrossRefs.get(regionId) || [];
-          existing.push({ groupId: group.id, groupName: group.name, overlayId: overlay.id, overlayName: overlay.name });
-          this.regionCrossRefs.set(regionId, existing);
+        if (mirrorRegionId) {
+          const existing = this.regionCrossRefs.get(mirrorRegionId) || [];
+          existing.push({ groupId: group.id, groupName: group.name, overlayId: overlay.id, overlayName: overlay.name, source: 'mirror' });
+          this.regionCrossRefs.set(mirrorRegionId, existing);
         }
       }
     }

@@ -89,6 +89,28 @@ export class OverlayWindowManager {
     const visibleIds = new Set<string>();
 
     for (const [_groupId, groupConfig] of this.overlayGroupConfigs) {
+      // Evaluate group-level rules first
+      let groupOverrideAction: string | null = null;
+      let groupOverrideOpacity: number = 1;
+      const groupRules = (groupConfig as any).rules || [];
+      for (const rule of groupRules) {
+        const conditionsMatch = this.evaluateConditions(
+          rule.conditions || [],
+          rule.logicMode || 'AND',
+          frameState,
+        );
+        if (conditionsMatch) {
+          groupOverrideAction = rule.action;
+          groupOverrideOpacity = rule.opacityValue ?? 1;
+          break;
+        }
+      }
+
+      // If group rule says hide, no mirrors in this group are visible
+      if (groupOverrideAction === 'hide') continue;
+      // If group rule says opacity 0, same as hide
+      if (groupOverrideAction === 'opacity' && groupOverrideOpacity <= 0) continue;
+
       for (const overlay of (groupConfig.overlays || [])) {
         const isMirrorOverlay = overlay.contentType === 'regionMirror'
           && overlay.regionMirrorConfig?.monitoredRegionId;
@@ -96,7 +118,13 @@ export class OverlayWindowManager {
 
         const regionId = overlay.regionMirrorConfig!.monitoredRegionId;
 
-        // Evaluate the overlay's rules to determine visibility
+        if (groupOverrideAction === 'show' || groupOverrideAction === 'opacity') {
+          // Group rule says show/opacity — all mirrors are visible regardless of individual rules
+          visibleIds.add(regionId);
+          continue;
+        }
+
+        // No group rule matched — evaluate individual overlay rules
         const defaultVisible = overlay.defaultVisible !== false;
         let isVisible = defaultVisible;
 
@@ -114,7 +142,7 @@ export class OverlayWindowManager {
               const opacityIsEffectivelyHidden = (rule.opacityValue ?? 1) <= 0;
               isVisible = !opacityIsEffectivelyHidden;
             }
-            break; // First matching rule wins
+            break;
           }
         }
 
@@ -572,23 +600,49 @@ function buildOverlayRendererHtml(): string {
   }
 
   function evaluateRules(group, frameState) {
+    // --- Group-level rules: evaluated first, override all individual overlay rules ---
+    var groupOverride = null; // null = no group rule matched
+    var groupRules = group.rules || [];
+    for (var gi = 0; gi < groupRules.length; gi++) {
+      var groupRule = groupRules[gi];
+      if (evalConds(groupRule.conditions, groupRule.logicMode || 'AND', frameState)) {
+        groupOverride = groupRule;
+        break; // First matching group rule wins
+      }
+    }
+
     for (const ov of group.overlays) {
       const el = document.querySelector('[data-overlay-id="' + ov.id + '"]');
       if (!el) continue;
-      const defVis = ov.defaultVisible !== false;
-      const defOp = ov.defaultOpacity !== undefined ? ov.defaultOpacity : 1;
-      let vis = defVis, op = defOp;
-      const rules = ov.rules || [];
-      for (const rule of rules) {
-        if (evalConds(rule.conditions, rule.logicMode || 'AND', frameState)) {
-          if (rule.action === 'show') { vis = true; op = 1; }
-          else if (rule.action === 'hide') { vis = false; }
-          else if (rule.action === 'opacity') { vis = true; op = rule.opacityValue !== undefined ? rule.opacityValue : 1; }
-          break;
+
+      if (groupOverride !== null) {
+        // Group rule overrides all individual overlay rules
+        if (groupOverride.action === 'show') {
+          el.style.display = '';
+          el.style.opacity = '1';
+        } else if (groupOverride.action === 'hide') {
+          el.style.display = 'none';
+        } else if (groupOverride.action === 'opacity') {
+          el.style.display = '';
+          el.style.opacity = String(groupOverride.opacityValue !== undefined ? groupOverride.opacityValue : 1);
         }
+      } else {
+        // No group rule matched — evaluate individual overlay rules as normal
+        const defVis = ov.defaultVisible !== false;
+        const defOp = ov.defaultOpacity !== undefined ? ov.defaultOpacity : 1;
+        let vis = defVis, op = defOp;
+        const rules = ov.rules || [];
+        for (const rule of rules) {
+          if (evalConds(rule.conditions, rule.logicMode || 'AND', frameState)) {
+            if (rule.action === 'show') { vis = true; op = 1; }
+            else if (rule.action === 'hide') { vis = false; }
+            else if (rule.action === 'opacity') { vis = true; op = rule.opacityValue !== undefined ? rule.opacityValue : 1; }
+            break;
+          }
+        }
+        el.style.display = vis ? '' : 'none';
+        el.style.opacity = String(op);
       }
-      el.style.display = vis ? '' : 'none';
-      el.style.opacity = String(op);
     }
   }
 

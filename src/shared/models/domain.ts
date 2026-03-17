@@ -329,6 +329,12 @@ export interface OverlayGroup {
   /** Gap between overlays in pixels. */
   gap: number;
   overlays: Overlay[];
+  /**
+   * Group-level rules evaluated top-down, first match wins.
+   * When a group rule fires, its action overrides ALL individual overlay rules.
+   * If no group rules match, individual overlay rules are evaluated as normal.
+   */
+  rules?: OverlayRule[];
 }
 
 // ---------------------------------------------------------------------------
