@@ -137,8 +137,17 @@ export class PreviewFrameService {
     const frame = this.latestFrame!;
     const downsampled = this.downsampleFrame(frame, config);
 
+    // Encode to JPEG for the UI preview path — much smaller IPC payload
+    // than raw BGRA, and the renderer just sets img.src (no per-pixel conversion).
+    const base64Jpeg = this.encodeBgraToBase64Jpeg(
+      downsampled.buffer,
+      downsampled.width,
+      downsampled.height,
+      config.jpegQuality ?? 70,
+    );
+
     const previewData = {
-      bgraBuffer: downsampled.buffer,
+      imageDataUrl: `data:image/jpeg;base64,${base64Jpeg}`,
       originalWidth: frame.width,
       originalHeight: frame.height,
       previewWidth: downsampled.width,

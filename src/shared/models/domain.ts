@@ -190,6 +190,8 @@ export interface StateCalculation {
   ollamaConfig?: OllamaCalcConfig;
   /** Skip this calculation if the region's pixels haven't changed since the last evaluation. */
   skipIfUnchanged?: boolean;
+  /** Fallback state value used when the calculation cannot resolve a value. */
+  defaultStateValue?: string;
 }
 
 /**

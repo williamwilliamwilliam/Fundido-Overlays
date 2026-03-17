@@ -20,7 +20,7 @@ export interface DisplayInfo {
 }
 
 export interface PreviewFrameData {
-  bgraBuffer: ArrayBuffer;
+  imageDataUrl: string;
   originalWidth: number;
   originalHeight: number;
   previewWidth: number;

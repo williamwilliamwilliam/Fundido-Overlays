@@ -232,6 +232,16 @@ export function evaluateFrameState(
       }
     }
 
+    // Apply defaultStateValue for any calculation that couldn't resolve a value
+    for (const result of calculationResults) {
+      if (result.currentValue === '') {
+        const matchingCalc = region.stateCalculations.find((c) => c.id === result.stateCalculationId);
+        if (matchingCalc?.defaultStateValue) {
+          result.currentValue = matchingCalc.defaultStateValue;
+        }
+      }
+    }
+
     return {
       monitoredRegionId: region.id,
       medianColor,
