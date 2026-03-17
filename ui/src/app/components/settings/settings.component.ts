@@ -26,7 +26,7 @@ import { ElectronService } from '../../services/electron.service';
           <div class="setting-control">
             <input
               type="range"
-              min="1" max="60" step="1"
+              min="1" max="120" step="1"
               [(ngModel)]="captureTargetFps"
               (ngModelChange)="onSettingChanged()" />
             <span class="setting-value">{{ captureTargetFps }} fps</span>

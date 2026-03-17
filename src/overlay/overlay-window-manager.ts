@@ -179,6 +179,9 @@ export class OverlayWindowManager {
     }
   }
 
+  /** Pre-allocated buffer for batching mirror crops. Grows as needed, never shrinks. */
+  private batchedCropBuffer: Buffer = Buffer.alloc(0);
+
   /**
    * Extracts BGRA pixel crops for visible mirrored regions into a single
    * contiguous buffer and sends it with metadata to overlay windows.
@@ -232,8 +235,12 @@ export class OverlayWindowManager {
 
     if (cropInfos.length === 0) return;
 
-    // Second pass: pack all crops into a single contiguous buffer
-    const batchedBuffer = Buffer.allocUnsafe(totalBytes);
+    // Grow the pre-allocated buffer if needed (never shrinks — avoids GC churn)
+    if (this.batchedCropBuffer.length < totalBytes) {
+      this.batchedCropBuffer = Buffer.allocUnsafe(totalBytes);
+    }
+
+    // Second pass: pack all crops into the pre-allocated buffer
     const cropMeta: Array<{ id: string; offset: number; width: number; height: number }> = [];
     let writeOffset = 0;
 
@@ -241,14 +248,14 @@ export class OverlayWindowManager {
       const cropRowBytes = info.clampedW * bytesPerPixel;
       for (let row = 0; row < info.clampedH; row++) {
         const srcRowStart = (info.clampedY + row) * frameRowBytes + info.clampedX * bytesPerPixel;
-        frameBuffer.copy(batchedBuffer, writeOffset + row * cropRowBytes, srcRowStart, srcRowStart + cropRowBytes);
+        frameBuffer.copy(this.batchedCropBuffer, writeOffset + row * cropRowBytes, srcRowStart, srcRowStart + cropRowBytes);
       }
       cropMeta.push({ id: info.id, offset: writeOffset, width: info.clampedW, height: info.clampedH });
       writeOffset += info.cropBytes;
     }
 
-    // Single IPC message: one Buffer + small metadata array
-    const message = { buffer: batchedBuffer, crops: cropMeta };
+    // Send a slice of the pre-allocated buffer (only the bytes we wrote)
+    const message = { buffer: this.batchedCropBuffer.subarray(0, totalBytes), crops: cropMeta };
     for (const [_groupId, window] of this.overlayWindowsByGroupId) {
       if (!window.isDestroyed()) {
         window.webContents.send('overlay:mirror-batch', message);
@@ -367,7 +374,7 @@ function buildOverlayRendererHtml(): string {
     position: absolute;
     display: flex;
     will-change: transform;
-    transition: transform 20ms linear;
+    transition: transform 30ms linear;
   }
   .overlay-item {
     transition: opacity 0.15s ease;
