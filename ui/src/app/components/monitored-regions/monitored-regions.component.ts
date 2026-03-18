@@ -86,6 +86,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
         class="region-card"
         [attr.data-highlight-id]="region.id"
         [class.highlight-flash]="highlightId === region.id"
+        [class.region-card-collapsed]="!isRegionExpanded(region.id)"
         [class.region-disabled]="region.enabled === false">
         <div class="region-header">
           <button
@@ -128,6 +129,17 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
               title="Total CPU time spent evaluating this region's calculations over the last 10 seconds. Orange when exceeding 2000ms (2 seconds of CPU time per 10 seconds).">
               {{ rpm.timeInCalcMs }}ms / 10s
             </span>
+          </div>
+          <div
+            class="collapsed-region-preview"
+            *ngIf="!isRegionExpanded(region.id) && hasValidBounds(region) && hasPreviewFrame">
+            <canvas
+              #previewCanvas
+              [attr.data-region-id]="region.id"
+              class="preview-canvas preview-canvas-collapsed"
+              [width]="getCollapsedPreviewCanvasWidth(region)"
+              [height]="getCollapsedPreviewCanvasHeight(region)">
+            </canvas>
           </div>
           <button class="danger-text" (click)="removeRegion(regionIndex)">Remove</button>
         </div>
@@ -584,11 +596,15 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       margin-bottom: var(--spacing-md);
     }
 
+    .region-card-collapsed {
+      padding-top: 5px;
+      padding-bottom: 5px;
+    }
+
     .region-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: var(--spacing-sm);
       gap: var(--spacing-sm);
     }
 
@@ -650,6 +666,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       gap: var(--spacing-sm);
       flex-wrap: wrap;
       margin-bottom: var(--spacing-sm);
+      margin-top: var(--spacing-sm);
       padding: 4px var(--spacing-sm);
       background-color: var(--color-bg-primary);
       border-radius: var(--radius-sm);
@@ -676,8 +693,15 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       border: 1px solid transparent;
       padding: var(--spacing-xs);
       flex: 1;
+      min-width: 0;
     }
     .name-input:focus { border-color: var(--color-accent); }
+
+    .collapsed-region-preview {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
 
     .region-content-row {
       display: flex;
@@ -979,6 +1003,11 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       background-color: var(--color-bg-canvas);
       max-width: 160px;
       max-height: 120px;
+    }
+
+    .preview-canvas-collapsed {
+      max-width: 96px;
+      max-height: 56px;
     }
 
     .placeholder-preview {
@@ -1843,6 +1872,26 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     const heightIfConstrainedByWidth = maxPreviewWidth / regionAspectRatio;
     return heightIfConstrainedByWidth <= maxPreviewHeight
       ? Math.round(heightIfConstrainedByWidth)
+      : maxPreviewHeight;
+  }
+
+  getCollapsedPreviewCanvasWidth(region: any): number {
+    const maxPreviewWidth = 96;
+    const maxPreviewHeight = 56;
+    const regionAspectRatio = region.bounds.width / region.bounds.height;
+    const widthIfConstrainedByHeight = maxPreviewHeight * regionAspectRatio;
+    return widthIfConstrainedByHeight <= maxPreviewWidth
+      ? Math.max(1, Math.round(widthIfConstrainedByHeight))
+      : maxPreviewWidth;
+  }
+
+  getCollapsedPreviewCanvasHeight(region: any): number {
+    const maxPreviewWidth = 96;
+    const maxPreviewHeight = 56;
+    const regionAspectRatio = region.bounds.width / region.bounds.height;
+    const heightIfConstrainedByWidth = maxPreviewWidth / regionAspectRatio;
+    return heightIfConstrainedByWidth <= maxPreviewHeight
+      ? Math.max(1, Math.round(heightIfConstrainedByWidth))
       : maxPreviewHeight;
   }
 
