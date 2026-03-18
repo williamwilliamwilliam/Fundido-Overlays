@@ -1,8 +1,10 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { DebugConsoleComponent } from './components/debug-console/debug-console.component';
 import { ElectronService } from './services/electron.service';
+import { PendingChangesService } from './services/pending-changes.service';
 
 const MINIMIZED_PANEL_HEIGHT_PX = 36;
 const DEFAULT_PANEL_HEIGHT_PX = 250;
@@ -223,21 +225,33 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
     }
   `],
 })
-export class AppComponent implements OnInit {
+export class AppComponent implements OnInit, OnDestroy {
   globalEnabled = true;
   isDebugMinimized = true;
 
   private expandedPanelHeightPx = DEFAULT_PANEL_HEIGHT_PX;
+  private appCloseRequestSubscription: Subscription | null = null;
 
   private static readonly STORAGE_KEY_DEBUG_MINIMIZED = 'fundido:debugMinimized';
   private static readonly STORAGE_KEY_DEBUG_HEIGHT = 'fundido:debugHeight';
 
-  constructor(private readonly electronService: ElectronService) {
+  constructor(
+    private readonly electronService: ElectronService,
+    private readonly pendingChangesService: PendingChangesService,
+  ) {
     this.loadDebugPanelState();
   }
 
   async ngOnInit(): Promise<void> {
     this.globalEnabled = await this.electronService.globalStatus();
+    this.appCloseRequestSubscription = this.electronService.appCloseRequestedStream.subscribe(async () => {
+      const allowClose = await this.pendingChangesService.confirmClose();
+      this.electronService.respondToAppCloseRequest(allowClose);
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.appCloseRequestSubscription?.unsubscribe();
   }
 
   async toggleGlobal(): Promise<void> {

@@ -17,6 +17,7 @@ import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { PendingChangesComponent } from '../../guards/pending-changes.guard';
 import { ElectronService } from '../../services/electron.service';
+import { PendingChangesService } from '../../services/pending-changes.service';
 import type { RegionsPreviewFrameData } from '../../models/electron-api';
 
 /** Helper to convert RGB to hex string. */
@@ -1587,6 +1588,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
   constructor(
     private readonly electronService: ElectronService,
+    private readonly pendingChangesService: PendingChangesService,
     private readonly router: Router,
     private readonly route: ActivatedRoute,
     private readonly changeDetectorRef: ChangeDetectorRef,
@@ -1606,16 +1608,6 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   onWindowBlur(): void {
     this.isUiUnfocused = true;
     this.changeDetectorRef.markForCheck();
-  }
-
-  @HostListener('window:beforeunload', ['$event'])
-  onBeforeUnload(event: BeforeUnloadEvent): void {
-    if (!this.hasUnsavedChanges) {
-      return;
-    }
-
-    event.preventDefault();
-    event.returnValue = '';
   }
 
   @HostListener('window:keydown', ['$event'])
@@ -1642,6 +1634,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   }
 
   async ngOnInit(): Promise<void> {
+    this.pendingChangesService.register(this);
     this.electronService.setActivePage('regions');
 
     const config = await this.electronService.loadConfig();
@@ -1759,6 +1752,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   }
 
   ngOnDestroy(): void {
+    this.pendingChangesService.unregister(this);
     this.previewSubscription?.unsubscribe();
     this.pickerUpdateSubscription?.unsubscribe();
     this.stateSubscription?.unsubscribe();

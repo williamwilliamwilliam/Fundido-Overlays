@@ -85,6 +85,8 @@ export const PERF_METRICS = 'perf:metrics';
 // UI state
 // ---------------------------------------------------------------------------
 export const UI_ACTIVE_PAGE = 'ui:active-page';
+export const APP_CLOSE_REQUESTED = 'app:close-requested';
+export const APP_CLOSE_RESPONSE = 'app:close-response';
 
 // ---------------------------------------------------------------------------
 // Preview state

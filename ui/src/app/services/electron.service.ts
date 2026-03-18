@@ -29,6 +29,7 @@ export class ElectronService {
   private readonly regionsPreviewFrame$ = new Subject<RegionsPreviewFrameData>();
   private readonly perfMetrics$ = new Subject<any>();
   private readonly previewPaused$ = new Subject<boolean>();
+  private readonly appCloseRequested$ = new Subject<void>();
 
   public readonly debugLogStream = this.debugLog$.asObservable();
   public readonly stateUpdateStream = this.stateUpdated$.asObservable();
@@ -36,6 +37,7 @@ export class ElectronService {
   public readonly regionsPreviewFrameStream = this.regionsPreviewFrame$.asObservable();
   public readonly perfMetricsStream = this.perfMetrics$.asObservable();
   public readonly previewPausedStream = this.previewPaused$.asObservable();
+  public readonly appCloseRequestedStream = this.appCloseRequested$.asObservable();
 
   public readonly isRunningInElectron: boolean;
 
@@ -184,6 +186,11 @@ export class ElectronService {
     window.fundidoApi.setActivePage(page);
   }
 
+  public respondToAppCloseRequest(allowClose: boolean): void {
+    if (!this.isRunningInElectron) return;
+    window.fundidoApi.respondToAppCloseRequest(allowClose);
+  }
+
   // -- IPC listeners --------------------------------------------------------
 
   private registerIpcListeners(): void {
@@ -217,6 +224,10 @@ export class ElectronService {
 
     window.fundidoApi.onPreviewPaused((paused: boolean) => {
       this.ngZone.run(() => this.previewPaused$.next(paused));
+    });
+
+    window.fundidoApi.onAppCloseRequested(() => {
+      this.ngZone.run(() => this.appCloseRequested$.next());
     });
   }
 }

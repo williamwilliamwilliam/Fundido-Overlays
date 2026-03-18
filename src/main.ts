@@ -287,6 +287,8 @@ function stopPerfMetricsReporting(): void {
 // ---------------------------------------------------------------------------
 
 let mainWindow: BrowserWindow | null = null;
+let allowMainWindowClose = false;
+let pendingCloseRequest = false;
 
 function createMainWindow(): void {
   const isDevelopmentMode = process.argv.includes('--dev');
@@ -310,6 +312,22 @@ function createMainWindow(): void {
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+
+  ipcMain.on(IpcChannels.APP_CLOSE_RESPONSE, (_event, allowClose: boolean) => {
+    pendingCloseRequest = false;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+
+    if (allowClose) {
+      allowMainWindowClose = true;
+      mainWindow.close();
+      return;
+    }
+
+    allowMainWindowClose = false;
+    mainWindow.focus();
+  });
 
   if (savedBounds?.isMaximized) {
     mainWindow.maximize();
@@ -370,6 +388,8 @@ function createMainWindow(): void {
   }
 
   mainWindow.on('closed', () => {
+    allowMainWindowClose = false;
+    pendingCloseRequest = false;
     mainWindow = null;
     // Close all overlay windows so the app can fully exit
     captureService.stop();
@@ -393,6 +413,21 @@ function createMainWindow(): void {
   mainWindow.on('blur', () => {
     syncPreviewRuntimeState();
     startPerfDiagWindow();
+  });
+
+  mainWindow.on('close', (event) => {
+    if (allowMainWindowClose) {
+      return;
+    }
+
+    if (pendingCloseRequest) {
+      event.preventDefault();
+      return;
+    }
+
+    event.preventDefault();
+    pendingCloseRequest = true;
+    mainWindow?.webContents.send(IpcChannels.APP_CLOSE_REQUESTED);
   });
 
   // Application menu

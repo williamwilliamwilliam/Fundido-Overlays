@@ -5,6 +5,7 @@ import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { PendingChangesComponent } from '../../guards/pending-changes.guard';
 import { ElectronService } from '../../services/electron.service';
+import { PendingChangesService } from '../../services/pending-changes.service';
 
 @Component({
   selector: 'app-overlay-groups',
@@ -679,6 +680,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
 
   constructor(
     private readonly electronService: ElectronService,
+    private readonly pendingChangesService: PendingChangesService,
     private readonly router: Router,
     private readonly route: ActivatedRoute,
   ) {}
@@ -702,17 +704,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     }
   }
 
-  @HostListener('window:beforeunload', ['$event'])
-  onBeforeUnload(event: BeforeUnloadEvent): void {
-    if (!this.hasUnsavedChanges) {
-      return;
-    }
-
-    event.preventDefault();
-    event.returnValue = '';
-  }
-
   async ngOnInit(): Promise<void> {
+    this.pendingChangesService.register(this);
     const config = await this.electronService.loadConfig();
     this.groups = config.overlayGroups || [];
     this.normalizeGroupDefaults();
@@ -762,6 +755,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   }
 
   ngOnDestroy(): void {
+    this.pendingChangesService.unregister(this);
     this.stateSubscription?.unsubscribe();
     this.resolvePendingNavigation(false);
   }

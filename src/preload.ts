@@ -43,6 +43,8 @@ const IPC = {
   OLLAMA_LIST_MODELS:          'ollama:list-models',
   PERF_METRICS:                'perf:metrics',
   UI_ACTIVE_PAGE:              'ui:active-page',
+  APP_CLOSE_REQUESTED:         'app:close-requested',
+  APP_CLOSE_RESPONSE:          'app:close-response',
   PREVIEW_PAUSED:              'preview:paused',
 } as const;
 
@@ -120,6 +122,10 @@ const fundidoApi = {
     ipcRenderer.send(IPC.UI_ACTIVE_PAGE, page);
   },
 
+  respondToAppCloseRequest: (allowClose: boolean): void => {
+    ipcRenderer.send(IPC.APP_CLOSE_RESPONSE, allowClose);
+  },
+
   onPickerRegionUpdate: (callback: (region: { x: number; y: number; width: number; height: number }) => void): void => {
     ipcRenderer.on(IPC.PICKER_REGION_UPDATE, (_event, region) => {
       callback(region);
@@ -163,6 +169,12 @@ const fundidoApi = {
   onPreviewPaused: (callback: (paused: boolean) => void): void => {
     ipcRenderer.on(IPC.PREVIEW_PAUSED, (_event, paused) => {
       callback(paused);
+    });
+  },
+
+  onAppCloseRequested: (callback: () => void): void => {
+    ipcRenderer.on(IPC.APP_CLOSE_REQUESTED, () => {
+      callback();
     });
   },
 };

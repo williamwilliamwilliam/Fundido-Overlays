@@ -93,7 +93,9 @@ export interface FundidoApi {
   onRegionsPreviewFrame(callback: (previewData: RegionsPreviewFrameData) => void): void;
   onPerfMetrics(callback: (metrics: PerfMetrics) => void): void;
   onPreviewPaused(callback: (paused: boolean) => void): void;
+  onAppCloseRequested(callback: () => void): void;
   setActivePage(page: string): void;
+  respondToAppCloseRequest(allowClose: boolean): void;
 }
 
 declare global {
