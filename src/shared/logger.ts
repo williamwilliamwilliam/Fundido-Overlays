@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import type { BrowserWindow } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as IpcChannels from '../shared/ipc-channels';
@@ -22,6 +22,11 @@ export interface LogEntry {
   level: 'debug' | 'info' | 'warn' | 'error';
   message: string;
   data?: unknown;
+}
+
+export interface WorkerLogMessage {
+  type: 'worker-log';
+  entry: LogEntry;
 }
 
 const MAX_LOG_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -49,42 +54,45 @@ class DebugLogger {
    */
   public initFileLogging(): void {
     try {
-      const userDataPath = app.getPath('userData');
+      const electronModule = this.tryGetElectronModule();
+      const electronApp = electronModule?.app;
+      if (!electronApp) {
+        console.error('Failed to initialize file logging: Electron app is unavailable in this process.');
+        return;
+      }
+
+      const userDataPath = electronApp.getPath('userData');
       this.logFilePath = path.join(userDataPath, 'fundido.log');
 
       this.rotateLogIfNeeded();
 
       this.logStream = fs.createWriteStream(this.logFilePath, { flags: 'a' });
 
-      // Write startup header
       const startupHeader = [
         '',
         '='.repeat(80),
-        `Fundido Overlays — Starting at ${new Date().toISOString()}`,
-        `  App version:   ${app.getVersion()}`,
+        `Fundido Overlays - Starting at ${new Date().toISOString()}`,
+        `  App version:   ${electronApp.getVersion()}`,
         `  Electron:      ${process.versions.electron}`,
         `  Chrome:        ${process.versions.chrome}`,
         `  Node:          ${process.versions.node}`,
         `  Platform:      ${process.platform} ${process.arch}`,
         `  User data:     ${userDataPath}`,
-        `  App path:      ${app.getAppPath()}`,
+        `  App path:      ${electronApp.getAppPath()}`,
         `  __dirname:     ${__dirname}`,
-        `  Packaged:      ${app.isPackaged}`,
+        `  Packaged:      ${electronApp.isPackaged}`,
         `  Argv:          ${process.argv.join(' ')}`,
         `  Log file:      ${this.logFilePath}`,
         '='.repeat(80),
       ].join('\n');
       this.logStream.write(startupHeader + '\n');
 
-      // Flush any buffered early log lines
       for (const line of this.earlyBuffer) {
         this.logStream.write(line + '\n');
       }
       this.earlyBuffer = [];
 
-      // Register global error handlers
       this.registerGlobalErrorHandlers();
-
     } catch (err) {
       console.error('Failed to initialize file logging:', err);
     }
@@ -93,7 +101,6 @@ class DebugLogger {
   public setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
 
-    // Capture renderer process errors
     window.webContents.on('crashed', (_event: any, killed: boolean) => {
       this.error(LogCategory.General, `Renderer process crashed (killed=${killed})`);
     });
@@ -129,16 +136,10 @@ class DebugLogger {
     this.emit('error', category, message, data);
   }
 
-  /**
-   * Returns the path to the log file, or null if file logging isn't initialized.
-   */
   public getLogFilePath(): string | null {
     return this.logFilePath;
   }
 
-  /**
-   * Flushes and closes the log file. Call on app shutdown.
-   */
   public shutdown(): void {
     this.info(LogCategory.General, 'Fundido Overlays shutting down.');
     if (this.logStream) {
@@ -147,9 +148,9 @@ class DebugLogger {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Internal
-  // ---------------------------------------------------------------------------
+  public logFromWorker(entry: LogEntry): void {
+    this.writeEntry(entry);
+  }
 
   private emit(
     level: LogEntry['level'],
@@ -165,28 +166,44 @@ class DebugLogger {
       data,
     };
 
-    // Format for file and stdout
+    const workerPort = this.tryGetWorkerParentPort();
+    if (workerPort) {
+      const workerMessage: WorkerLogMessage = {
+        type: 'worker-log',
+        entry,
+      };
+
+      try {
+        workerPort.postMessage(workerMessage);
+        return;
+      } catch {
+        // Fall back to local logging if forwarding fails.
+      }
+    }
+
+    this.writeEntry(entry);
+  }
+
+  private writeEntry(entry: LogEntry): void {
+    const { level, category, message, data } = entry;
     const timestamp = new Date(entry.timestamp).toISOString();
     const prefix = `[${timestamp}][${level.toUpperCase()}][${category}]`;
     const dataString = data !== undefined ? ` ${this.serializeData(data)}` : '';
     const formattedLine = `${prefix} ${message}${dataString}`;
 
-    // Write to stdout
     if (level === 'error') {
       console.error(formattedLine);
     } else {
       console.log(formattedLine);
     }
 
-    // Write to log file
     this.writeToFile(formattedLine);
 
-    // Forward to the UI if the window is available
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       try {
         this.mainWindow.webContents.send(IpcChannels.DEBUG_LOG, entry);
       } catch {
-        // Window might be in a bad state during shutdown
+        // Window might be in a bad state during shutdown.
       }
     }
   }
@@ -195,7 +212,6 @@ class DebugLogger {
     if (this.logStream) {
       this.logStream.write(line + '\n');
     } else {
-      // Buffer early log lines before file logging is initialized
       this.earlyBuffer.push(line);
     }
   }
@@ -222,7 +238,6 @@ class DebugLogger {
       const fileIsOverSizeLimit = stats.size > MAX_LOG_FILE_SIZE_BYTES;
       if (!fileIsOverSizeLimit) return;
 
-      // Rotate: fundido.log → fundido.1.log → fundido.2.log → ...
       for (let i = MAX_OLD_LOG_FILES - 1; i >= 1; i--) {
         const older = this.logFilePath.replace('.log', `.${i}.log`);
         const newer = i === 1 ? this.logFilePath : this.logFilePath.replace('.log', `.${i - 1}.log`);
@@ -231,11 +246,10 @@ class DebugLogger {
         }
       }
 
-      // Rename current log to .1.log
       const rotatedPath = this.logFilePath.replace('.log', '.1.log');
       try { fs.renameSync(this.logFilePath, rotatedPath); } catch { /* ignore */ }
     } catch {
-      // If rotation fails, just continue — we'll append to the existing file
+      // If rotation fails, just continue - we'll append to the existing file.
     }
   }
 
@@ -250,7 +264,23 @@ class DebugLogger {
       this.error(LogCategory.General, `UNHANDLED REJECTION: ${message}`, data);
     });
   }
+
+  private tryGetElectronModule(): typeof import('electron') | null {
+    try {
+      return require('electron') as typeof import('electron');
+    } catch {
+      return null;
+    }
+  }
+
+  private tryGetWorkerParentPort(): import('worker_threads').MessagePort | null {
+    try {
+      const workerThreads = require('worker_threads') as typeof import('worker_threads');
+      return workerThreads.parentPort ?? null;
+    } catch {
+      return null;
+    }
+  }
 }
 
-/** Singleton logger instance used throughout the main process. */
 export const logger = new DebugLogger();

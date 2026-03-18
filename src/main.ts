@@ -10,7 +10,7 @@ import { evaluateFrameState } from './state/state-calculation.service';
 import { OcrService } from './state/ocr.service';
 import { OllamaService } from './state/ollama.service';
 import { registerIpcHandlers } from './ipc/ipc-handlers';
-import { logger, LogCategory } from './shared/logger';
+import { logger, LogCategory, WorkerLogMessage } from './shared/logger';
 import { computeRegionPixelHash } from './shared/pixel-hash';
 import { FundidoConfig } from './shared';
 import * as IpcChannels from './shared/ipc-channels';
@@ -612,6 +612,27 @@ function setupCaptureToOverlayPipeline(): void {
 let stateEvalWorker: Worker | null = null;
 let workerBusy = false;
 
+function fallbackFromWorkerFailure(error: unknown): void {
+  workerBusy = false;
+  logger.error(LogCategory.General, 'State eval worker error — falling back to main thread.', error);
+
+  if (stateEvalInterval) {
+    clearInterval(stateEvalInterval);
+    stateEvalInterval = null;
+  }
+
+  if (stateEvalWorker) {
+    const workerToTerminate = stateEvalWorker;
+    stateEvalWorker = null;
+    workerToTerminate.removeAllListeners();
+    workerToTerminate.terminate().catch(() => {
+      // Ignore termination failures during fallback cleanup.
+    });
+  }
+
+  startStateEvaluationLoopFallback();
+}
+
 function startStateEvaluationLoop(): void {
   if (stateEvalInterval) return;
 
@@ -628,8 +649,12 @@ function startStateEvaluationLoop(): void {
   }
 
   stateEvalWorker.on('message', (result: any) => {
-    workerBusy = false;
+    if (result.type === 'worker-log') {
+      logger.logFromWorker((result as WorkerLogMessage).entry);
+      return;
+    }
     if (result.type !== 'result') return;
+    workerBusy = false;
 
     const frameState = result.frameState;
     const evalDurationMs = result.evalDurationMs;
@@ -699,8 +724,7 @@ function startStateEvaluationLoop(): void {
   });
 
   stateEvalWorker.on('error', (err) => {
-    workerBusy = false;
-    logger.error(LogCategory.General, 'State eval worker error.', err);
+    fallbackFromWorkerFailure(err);
   });
 
   const sendEvalRequest = () => {
