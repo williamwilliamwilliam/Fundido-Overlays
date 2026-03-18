@@ -60,6 +60,8 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
         <button (click)="saveAllRegions()" [disabled]="!hasUnsavedChanges">
           {{ hasUnsavedChanges ? 'Save (Ctrl+S)' : 'Saved' }}
         </button>
+        <button (click)="expandAllRegions()">Expand All</button>
+        <button (click)="collapseAllRegions()">Collapse All</button>
         <button (click)="exportRegions()">Export</button>
         <button (click)="showImportDialog = true">Import</button>
       </div>
@@ -86,6 +88,13 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
         [class.highlight-flash]="highlightId === region.id"
         [class.region-disabled]="region.enabled === false">
         <div class="region-header">
+          <button
+            class="collapse-toggle"
+            (click)="toggleRegionExpanded(region.id)"
+            [attr.aria-label]="isRegionExpanded(region.id) ? 'Collapse region' : 'Expand region'"
+            [title]="isRegionExpanded(region.id) ? 'Collapse' : 'Expand'">
+            {{ isRegionExpanded(region.id) ? '▾' : '▸' }}
+          </button>
           <label class="enabled-toggle" title="Enable/disable this region">
             <input type="checkbox"
               [ngModel]="region.enabled !== false"
@@ -122,6 +131,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
           </div>
           <button class="danger-text" (click)="removeRegion(regionIndex)">Remove</button>
         </div>
+        <ng-container *ngIf="isRegionExpanded(region.id)">
         <div class="cross-ref-row" *ngIf="regionCrossRefs.get(region.id)?.length">
           <span class="cross-ref-label">Used by:</span>
           <ng-container *ngFor="let ref of regionCrossRefs.get(region.id)">
@@ -484,6 +494,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
             </div>
           </div>
         </div>
+        </ng-container>
       </div>
 
       <button class="primary add-bottom-btn" (click)="addRegion()">+ Add Region</button>
@@ -513,6 +524,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       display: flex;
       gap: var(--spacing-sm);
       margin-bottom: var(--spacing-lg);
+      flex-wrap: wrap;
     }
 
     .import-dialog {
@@ -531,6 +543,24 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     }
 
     .import-actions { display: flex; gap: var(--spacing-sm); }
+
+    .collapse-toggle {
+      background: transparent;
+      border: 1px solid var(--color-border);
+      color: var(--color-text-secondary);
+      border-radius: var(--radius-sm);
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      font-size: 0.95rem;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .collapse-toggle:hover {
+      color: var(--color-text-primary);
+      border-color: var(--color-accent);
+      background-color: var(--color-bg-panel);
+    }
 
     .empty-state {
       color: var(--color-text-secondary);
@@ -999,7 +1029,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       max-width: 140px;
       overflow: hidden;
       text-overflow: ellipsis;
-      white-space: nowrap;
+      white-space: wrap;
     }
 
     .ollama-timing {
@@ -1107,6 +1137,9 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       font-size: 0.9rem;
       font-weight: 600;
       color: var(--color-accent);
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .danger-text {
@@ -1136,6 +1169,8 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
   `],
 })
 export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestroy {
+  private static readonly STORAGE_KEY_COLLAPSED_REGIONS = 'fundido:collapsedRegions';
+
   @ViewChildren('previewCanvas') private previewCanvasRefs!: QueryList<ElementRef<HTMLCanvasElement>>;
 
   regions: any[] = [];
@@ -1151,6 +1186,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
   /** Cached cross-references: regionId → overlay groups/overlays that reference it. Built once on load. */
   regionCrossRefs = new Map<string, Array<{ groupId: string; groupName: string; overlayId?: string; overlayName?: string; source: 'groupRule' | 'overlayRule' | 'mirror' }>>();
+  private collapsedRegionIds = new Set<string>();
 
   /** Maps regionId → { medianHex, calcResults: Map<calcId, { currentValue, confidences }> } */
   private regionStateMap = new Map<string, {
@@ -1227,6 +1263,8 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
     const config = await this.electronService.loadConfig();
     this.regions = config.monitoredRegions || [];
+    this.loadCollapsedRegionState();
+    this.syncCollapsedRegionState();
     this.overlayGroups = config.overlayGroups || [];
     this.buildRegionCrossRefs();
     // Push to backend for live evaluation, but don't mark as dirty since nothing changed
@@ -1359,12 +1397,46 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       stateCalculations: [],
     };
     this.regions.push(newRegion);
+    this.collapsedRegionIds.delete(newRegion.id);
+    this.saveCollapsedRegionState();
     this.pushWorkingRegions();
+    this.changeDetectorRef.markForCheck();
   }
 
   removeRegion(index: number): void {
-    this.regions.splice(index, 1);
+    const [removedRegion] = this.regions.splice(index, 1);
+    if (removedRegion?.id) {
+      this.collapsedRegionIds.delete(removedRegion.id);
+      this.saveCollapsedRegionState();
+    }
     this.pushWorkingRegions();
+    this.changeDetectorRef.markForCheck();
+  }
+
+  isRegionExpanded(regionId: string): boolean {
+    return !this.collapsedRegionIds.has(regionId);
+  }
+
+  toggleRegionExpanded(regionId: string): void {
+    if (this.collapsedRegionIds.has(regionId)) {
+      this.collapsedRegionIds.delete(regionId);
+    } else {
+      this.collapsedRegionIds.add(regionId);
+    }
+    this.saveCollapsedRegionState();
+    this.changeDetectorRef.markForCheck();
+  }
+
+  expandAllRegions(): void {
+    this.collapsedRegionIds.clear();
+    this.saveCollapsedRegionState();
+    this.changeDetectorRef.markForCheck();
+  }
+
+  collapseAllRegions(): void {
+    this.collapsedRegionIds = new Set(this.regions.map((region) => region.id));
+    this.saveCollapsedRegionState();
+    this.changeDetectorRef.markForCheck();
   }
 
   hasValidBounds(region: any): boolean {
@@ -1900,5 +1972,38 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       this.viewRefreshScheduled = false;
       this.changeDetectorRef.detectChanges();
     });
+  }
+
+  private loadCollapsedRegionState(): void {
+    try {
+      const saved = localStorage.getItem(MonitoredRegionsComponent.STORAGE_KEY_COLLAPSED_REGIONS);
+      if (!saved) return;
+
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        this.collapsedRegionIds = new Set(parsed.filter((value): value is string => typeof value === 'string'));
+      }
+    } catch {
+      this.collapsedRegionIds.clear();
+    }
+  }
+
+  private syncCollapsedRegionState(): void {
+    const validIds = new Set(this.regions.map((region) => region.id));
+    this.collapsedRegionIds = new Set(
+      Array.from(this.collapsedRegionIds).filter((regionId) => validIds.has(regionId))
+    );
+    this.saveCollapsedRegionState();
+  }
+
+  private saveCollapsedRegionState(): void {
+    try {
+      localStorage.setItem(
+        MonitoredRegionsComponent.STORAGE_KEY_COLLAPSED_REGIONS,
+        JSON.stringify(Array.from(this.collapsedRegionIds))
+      );
+    } catch {
+      // Ignore storage errors so the editor remains usable.
+    }
   }
 }

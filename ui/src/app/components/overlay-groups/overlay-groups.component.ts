@@ -22,6 +22,8 @@ import { ElectronService } from '../../services/electron.service';
         <button (click)="saveAllGroups()" [disabled]="!hasUnsavedChanges">
           {{ hasUnsavedChanges ? 'Save (Ctrl+S)' : 'Saved' }}
         </button>
+        <button (click)="expandAllGroups()">Expand All</button>
+        <button (click)="collapseAllGroups()">Collapse All</button>
         <button (click)="exportGroups()">Export</button>
         <button (click)="showImportDialog = true">Import</button>
       </div>
@@ -43,6 +45,13 @@ import { ElectronService } from '../../services/electron.service';
         class="group-card"
         [class.group-disabled]="group.enabled === false">
         <div class="group-header">
+          <button
+            class="collapse-toggle"
+            (click)="toggleGroupExpanded(group.id)"
+            [attr.aria-label]="isGroupExpanded(group.id) ? 'Collapse group' : 'Expand group'"
+            [title]="isGroupExpanded(group.id) ? 'Collapse' : 'Expand'">
+            {{ isGroupExpanded(group.id) ? '▾' : '▸' }}
+          </button>
           <label class="enabled-toggle" title="Enable/disable this group">
             <input type="checkbox"
               [ngModel]="group.enabled !== false"
@@ -51,6 +60,7 @@ import { ElectronService } from '../../services/electron.service';
           <input [(ngModel)]="group.name" (ngModelChange)="onFieldChanged()" placeholder="Group name" class="name-input" />
           <button class="danger-text" (click)="removeGroup(groupIndex)">Remove</button>
         </div>
+        <ng-container *ngIf="isGroupExpanded(group.id)">
 
         <div class="group-settings">
           <label>Position
@@ -327,6 +337,7 @@ import { ElectronService } from '../../services/electron.service';
         </div>
 
         <button class="add-overlay-btn" (click)="addOverlay(group)">+ Add Overlay</button>
+        </ng-container>
       </div>
     </div>
   `,
@@ -334,7 +345,7 @@ import { ElectronService } from '../../services/electron.service';
     .page { max-width: 1100px; }
     h2 { margin-bottom: var(--spacing-sm); }
     .description { color: var(--color-text-secondary); margin-bottom: var(--spacing-lg); }
-    .toolbar { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-lg); }
+    .toolbar { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-lg); flex-wrap: wrap; }
 
     .import-dialog {
       background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
@@ -354,6 +365,24 @@ import { ElectronService } from '../../services/electron.service';
     }
     .group-card.group-disabled { opacity: var(--opacity-disabled); }
     .group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm); gap: var(--spacing-sm); }
+
+    .collapse-toggle {
+      background: transparent;
+      border: 1px solid var(--color-border);
+      color: var(--color-text-secondary);
+      border-radius: var(--radius-sm);
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      font-size: 0.95rem;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .collapse-toggle:hover {
+      color: var(--color-text-primary);
+      border-color: var(--color-accent);
+      background-color: var(--color-bg-panel);
+    }
 
     .enabled-toggle { display: flex; align-items: center; cursor: pointer; flex-shrink: 0; }
     .enabled-toggle input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var(--color-accent); }
@@ -498,6 +527,8 @@ import { ElectronService } from '../../services/electron.service';
   `],
 })
 export class OverlayGroupsComponent implements OnInit, OnDestroy {
+  private static readonly STORAGE_KEY_COLLAPSED_GROUPS = 'fundido:collapsedOverlayGroups';
+
   groups: any[] = [];
   monitoredRegions: any[] = [];
   showImportDialog = false;
@@ -505,6 +536,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   hasUnsavedChanges = false;
   pickingGroupId: string | null = null;
   highlightId: string | null = null;
+  private collapsedGroupIds = new Set<string>();
 
   /** Cached cross-references: overlayId → monitored regions referenced by that overlay. Built once on load. */
   overlayCrossRefs = new Map<string, Array<{ id: string; name: string }>>();
@@ -548,6 +580,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   async ngOnInit(): Promise<void> {
     const config = await this.electronService.loadConfig();
     this.groups = config.overlayGroups || [];
+    this.loadCollapsedGroupState();
+    this.syncCollapsedGroupState();
     this.monitoredRegions = config.monitoredRegions || [];
     this.buildOverlayCrossRefs();
 
@@ -599,17 +633,47 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   // ---------------------------------------------------------------------------
 
   addGroup(): void {
-    this.groups.push({
+    const newGroup = {
       id: crypto.randomUUID(), name: 'New Group', enabled: true,
       position: { mode: 'absolute', x: 100, y: 100 },
       growDirection: 'right', alignment: 'start', gap: 0, overlays: [],
-    });
+    };
+    this.groups.push(newGroup);
+    this.collapsedGroupIds.delete(newGroup.id);
+    this.saveCollapsedGroupState();
     this.hasUnsavedChanges = true;
   }
 
   removeGroup(index: number): void {
-    this.groups.splice(index, 1);
+    const [removedGroup] = this.groups.splice(index, 1);
+    if (removedGroup?.id) {
+      this.collapsedGroupIds.delete(removedGroup.id);
+      this.saveCollapsedGroupState();
+    }
     this.hasUnsavedChanges = true;
+  }
+
+  isGroupExpanded(groupId: string): boolean {
+    return !this.collapsedGroupIds.has(groupId);
+  }
+
+  toggleGroupExpanded(groupId: string): void {
+    if (this.collapsedGroupIds.has(groupId)) {
+      this.collapsedGroupIds.delete(groupId);
+    } else {
+      this.collapsedGroupIds.add(groupId);
+    }
+    this.saveCollapsedGroupState();
+  }
+
+  expandAllGroups(): void {
+    this.collapsedGroupIds.clear();
+    this.saveCollapsedGroupState();
+  }
+
+  collapseAllGroups(): void {
+    this.collapsedGroupIds = new Set(this.groups.map((group) => group.id));
+    this.saveCollapsedGroupState();
   }
 
   onPositionModeChanged(group: any): void {
@@ -913,8 +977,42 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     if (result.success) {
       const config = await this.electronService.loadConfig();
       this.groups = config.overlayGroups || [];
+      this.syncCollapsedGroupState();
       this.showImportDialog = false;
       this.importJsonText = '';
+    }
+  }
+
+  private loadCollapsedGroupState(): void {
+    try {
+      const saved = localStorage.getItem(OverlayGroupsComponent.STORAGE_KEY_COLLAPSED_GROUPS);
+      if (!saved) return;
+
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        this.collapsedGroupIds = new Set(parsed.filter((value): value is string => typeof value === 'string'));
+      }
+    } catch {
+      this.collapsedGroupIds.clear();
+    }
+  }
+
+  private syncCollapsedGroupState(): void {
+    const validIds = new Set(this.groups.map((group) => group.id));
+    this.collapsedGroupIds = new Set(
+      Array.from(this.collapsedGroupIds).filter((groupId) => validIds.has(groupId))
+    );
+    this.saveCollapsedGroupState();
+  }
+
+  private saveCollapsedGroupState(): void {
+    try {
+      localStorage.setItem(
+        OverlayGroupsComponent.STORAGE_KEY_COLLAPSED_GROUPS,
+        JSON.stringify(Array.from(this.collapsedGroupIds))
+      );
+    } catch {
+      // Ignore storage errors so the editor remains usable.
     }
   }
 }
