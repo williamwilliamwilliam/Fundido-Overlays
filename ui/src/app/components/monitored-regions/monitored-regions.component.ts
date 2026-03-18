@@ -1,4 +1,16 @@
-import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
+import {
+  AfterViewInit,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  ElementRef,
+  HostListener,
+  NgZone,
+  OnDestroy,
+  OnInit,
+  QueryList,
+  ViewChildren,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
@@ -29,6 +41,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
   selector: 'app-monitored-regions',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <!-- CPU warning banner when page is open but UI is not focused -->
@@ -67,7 +80,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
         No monitored regions defined yet. Click "+ Add Region" to get started.
       </div>
 
-      <div *ngFor="let region of regions; let regionIndex = index"
+      <div *ngFor="let region of regions; let regionIndex = index; trackBy: trackByRegionId"
         class="region-card"
         [attr.data-highlight-id]="region.id"
         [class.highlight-flash]="highlightId === region.id"
@@ -150,7 +163,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                 <button class="add-btn" (click)="addStateCalculation(region)">+ Add</button>
               </div>
 
-              <div *ngFor="let calc of region.stateCalculations; let calcIndex = index" class="calc-card">
+              <div *ngFor="let calc of region.stateCalculations; let calcIndex = index; trackBy: trackByCalcId" class="calc-card">
                 <div class="calc-header">
                   <input [(ngModel)]="calc.name" (ngModelChange)="onFieldChanged()" placeholder="Calculation name" class="calc-name-input" />
                   <select [(ngModel)]="calc.type" (ngModelChange)="onCalcTypeChanged(calc)" class="calc-type-select">
@@ -414,20 +427,21 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
 
           <!-- Right: live preview + per-calc readouts -->
           <div class="region-right">
-            <div class="region-preview" *ngIf="hasValidBounds(region) && latestPreviewFrame">
+            <div class="region-preview" *ngIf="hasValidBounds(region) && hasPreviewFrame">
               <canvas
-                [id]="'preview-' + region.id"
+                #previewCanvas
+                [attr.data-region-id]="region.id"
                 class="preview-canvas"
                 [width]="getPreviewCanvasWidth(region)"
                 [height]="getPreviewCanvasHeight(region)">
               </canvas>
             </div>
-            <div class="region-preview placeholder-preview" *ngIf="!latestPreviewFrame || !hasValidBounds(region)">
-              <span class="preview-label">{{ !latestPreviewFrame ? 'Start capture' : 'Set bounds' }}</span>
+            <div class="region-preview placeholder-preview" *ngIf="!hasPreviewFrame || !hasValidBounds(region)">
+              <span class="preview-label">{{ !hasPreviewFrame ? 'Start capture' : 'Set bounds' }}</span>
             </div>
 
             <!-- Per-calculation readouts -->
-            <div *ngFor="let calc of region.stateCalculations" class="calc-readout">
+            <div *ngFor="let calc of region.stateCalculations; trackBy: trackByCalcId" class="calc-readout">
 
               <!-- Median color (MedianPixelColor and ColorThreshold calcs) -->
               <div class="median-color-row" *ngIf="(calc.type === 'MedianPixelColor' || calc.type === 'ColorThreshold') && getMedianHex(region.id)">
@@ -1121,14 +1135,16 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     }
   `],
 })
-export class MonitoredRegionsComponent implements OnInit, OnDestroy {
+export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestroy {
+  @ViewChildren('previewCanvas') private previewCanvasRefs!: QueryList<ElementRef<HTMLCanvasElement>>;
+
   regions: any[] = [];
   overlayGroups: any[] = [];
   showImportDialog = false;
   importJsonText = '';
   pickingRegionId: string | null = null;
   pickingColorForPreprocess: any = null;
-  latestPreviewFrame: PreviewFrameData | null = null;
+  hasPreviewFrame = false;
   hasUnsavedChanges = false;
   highlightId: string | null = null;
   isUiUnfocused = false;
@@ -1146,7 +1162,14 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   private pickerUpdateSubscription: Subscription | null = null;
   private stateSubscription: Subscription | null = null;
   private perfSubscription: Subscription | null = null;
-  private previewImage: HTMLImageElement | null = null;
+  private previewCanvasChangesSubscription: Subscription | null = null;
+  private previewImageElement: HTMLImageElement | null = null;
+  private latestPreviewFrame: PreviewFrameData | null = null;
+  private previewCanvasByRegionId = new Map<string, HTMLCanvasElement>();
+  private visiblePreviewRegionIds = new Set<string>();
+  private previewVisibilityObserver: IntersectionObserver | null = null;
+  private previewRenderScheduled = false;
+  private viewRefreshScheduled = false;
 
   /** Latest perf metrics from main process, updated every second. */
   private latestPerfMetrics: any = null;
@@ -1155,6 +1178,8 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     private readonly electronService: ElectronService,
     private readonly router: Router,
     private readonly route: ActivatedRoute,
+    private readonly changeDetectorRef: ChangeDetectorRef,
+    private readonly ngZone: NgZone,
   ) {}
 
   // Expose helper to template
@@ -1163,11 +1188,13 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   @HostListener('window:focus')
   onWindowFocus(): void {
     this.isUiUnfocused = false;
+    this.changeDetectorRef.markForCheck();
   }
 
   @HostListener('window:blur')
   onWindowBlur(): void {
     this.isUiUnfocused = true;
+    this.changeDetectorRef.markForCheck();
   }
 
   @HostListener('window:keydown', ['$event'])
@@ -1200,13 +1227,15 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     this.regions = config.monitoredRegions || [];
     this.overlayGroups = config.overlayGroups || [];
     this.buildRegionCrossRefs();
+    this.initializePreviewImageElement();
     // Push to backend for live evaluation, but don't mark as dirty since nothing changed
     this.electronService.setWorkingRegions(this.regions);
+    this.changeDetectorRef.markForCheck();
 
-    this.previewSubscription = this.electronService.previewFrameStream.subscribe((frame) => {
-      this.latestPreviewFrame = frame;
-      this.updatePreviewImage(frame);
-      this.renderAllRegionPreviews();
+    this.ngZone.runOutsideAngular(() => {
+      this.previewSubscription = this.electronService.previewFrameStream.subscribe((frame) => {
+        this.handlePreviewFrame(frame);
+      });
     });
 
     this.pickerUpdateSubscription = this.electronService.pickerRegionUpdateStream.subscribe((region) => {
@@ -1217,15 +1246,21 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
         pickingRegion.bounds.width = region.width;
         pickingRegion.bounds.height = region.height;
         this.pushWorkingRegions();
+        this.scheduleRegionPreviewRender();
+        this.changeDetectorRef.markForCheck();
       }
     });
 
-    this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
-      this.processFrameState(frameState);
+    this.ngZone.runOutsideAngular(() => {
+      this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
+        this.processFrameState(frameState);
+        this.scheduleViewRefresh();
+      });
     });
 
     this.perfSubscription = this.electronService.perfMetricsStream.subscribe((metrics: any) => {
       this.latestPerfMetrics = metrics;
+      this.changeDetectorRef.markForCheck();
     });
 
     // Scroll to and highlight an element if navigated here with ?highlight=id
@@ -1246,7 +1281,11 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
           scrollTimer = setTimeout(() => {
             scrollContainer.removeEventListener('scroll', onScrollEnd);
             this.highlightId = targetId;
-            setTimeout(() => { this.highlightId = null; }, 2500);
+            setTimeout(() => {
+              this.highlightId = null;
+              this.changeDetectorRef.markForCheck();
+            }, 2500);
+            this.changeDetectorRef.markForCheck();
           }, 150);
         };
 
@@ -1254,9 +1293,43 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
         scrollTimer = setTimeout(() => {
           scrollContainer.removeEventListener('scroll', onScrollEnd);
           this.highlightId = targetId;
-          setTimeout(() => { this.highlightId = null; }, 2500);
+          setTimeout(() => {
+            this.highlightId = null;
+            this.changeDetectorRef.markForCheck();
+          }, 2500);
+          this.changeDetectorRef.markForCheck();
         }, 600);
       }, 150);
+    });
+  }
+
+  ngAfterViewInit(): void {
+    this.ngZone.runOutsideAngular(() => {
+      this.previewVisibilityObserver = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          const target = entry.target as HTMLCanvasElement;
+          const regionId = target.dataset['regionId'];
+          if (!regionId) continue;
+
+          if (entry.isIntersecting) {
+            this.visiblePreviewRegionIds.add(regionId);
+          } else {
+            this.visiblePreviewRegionIds.delete(regionId);
+          }
+        }
+
+        this.scheduleRegionPreviewRender();
+      }, {
+        root: null,
+        rootMargin: '200px 0px 200px 0px',
+        threshold: 0,
+      });
+
+      this.previewCanvasChangesSubscription = this.previewCanvasRefs.changes.subscribe(() => {
+        this.refreshPreviewCanvasTracking();
+      });
+
+      this.refreshPreviewCanvasTracking();
     });
   }
 
@@ -1265,6 +1338,8 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
     this.pickerUpdateSubscription?.unsubscribe();
     this.stateSubscription?.unsubscribe();
     this.perfSubscription?.unsubscribe();
+    this.previewCanvasChangesSubscription?.unsubscribe();
+    this.previewVisibilityObserver?.disconnect();
     this.electronService.setActivePage('');
     // Clear working regions so the pipeline falls back to saved config
     this.electronService.setWorkingRegions(null as any);
@@ -1480,6 +1555,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
    */
   onFieldChanged(): void {
     this.pushWorkingRegions();
+    this.scheduleRegionPreviewRender();
   }
 
   /**
@@ -1639,6 +1715,7 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       region.bounds.width = result.width;
       region.bounds.height = result.height;
       this.pushWorkingRegions();
+      this.scheduleRegionPreviewRender();
     }
 
     this.pickingRegionId = null;
@@ -1668,6 +1745,14 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
   // Preview rendering
   // ---------------------------------------------------------------------------
 
+  trackByRegionId(_index: number, region: any): string {
+    return region.id;
+  }
+
+  trackByCalcId(_index: number, calc: any): string {
+    return calc.id;
+  }
+
   getPreviewCanvasWidth(region: any): number {
     const maxPreviewWidth = 160;
     const maxPreviewHeight = 120;
@@ -1688,28 +1773,80 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       : maxPreviewHeight;
   }
 
-  private updatePreviewImage(frame: PreviewFrameData): void {
-    const image = new Image();
-    image.onload = () => { this.previewImage = image; };
-    image.src = frame.imageDataUrl;
+  private initializePreviewImageElement(): void {
+    if (this.previewImageElement) {
+      return;
+    }
+
+    this.previewImageElement = new Image();
+    this.previewImageElement.onload = () => {
+      this.scheduleRegionPreviewRender();
+    };
+  }
+
+  private handlePreviewFrame(frame: PreviewFrameData): void {
+    this.latestPreviewFrame = frame;
+    this.initializePreviewImageElement();
+
+    if (this.previewImageElement) {
+      this.previewImageElement.src = frame.imageDataUrl;
+    }
+
+    if (!this.hasPreviewFrame) {
+      this.hasPreviewFrame = true;
+      this.changeDetectorRef.detectChanges();
+    }
+  }
+
+  private refreshPreviewCanvasTracking(): void {
+    if (!this.previewVisibilityObserver) {
+      return;
+    }
+
+    this.previewVisibilityObserver.disconnect();
+    this.previewCanvasByRegionId.clear();
+    this.visiblePreviewRegionIds.clear();
+
+    for (const canvasRef of this.previewCanvasRefs.toArray()) {
+      const canvas = canvasRef.nativeElement;
+      const regionId = canvas.dataset['regionId'];
+      if (!regionId) continue;
+
+      this.previewCanvasByRegionId.set(regionId, canvas);
+      this.previewVisibilityObserver.observe(canvas);
+    }
+
+    this.scheduleRegionPreviewRender();
+  }
+
+  private scheduleRegionPreviewRender(): void {
+    if (this.previewRenderScheduled) {
+      return;
+    }
+
+    this.previewRenderScheduled = true;
+    requestAnimationFrame(() => {
+      this.previewRenderScheduled = false;
+      this.renderAllRegionPreviews();
+    });
   }
 
   private renderAllRegionPreviews(): void {
-    if (!this.previewImage || !this.latestPreviewFrame) return;
+    if (!this.previewImageElement || !this.latestPreviewFrame) return;
+    if (this.previewImageElement.naturalWidth === 0 || this.previewImageElement.naturalHeight === 0) return;
 
     const displayOriginX = this.latestPreviewFrame.displayOriginX || 0;
     const displayOriginY = this.latestPreviewFrame.displayOriginY || 0;
     const dpiScaleFactor = this.latestPreviewFrame.displayScaleFactor || 1;
+    const previewScaleX = this.previewImageElement.naturalWidth / this.latestPreviewFrame.originalWidth;
+    const previewScaleY = this.previewImageElement.naturalHeight / this.latestPreviewFrame.originalHeight;
 
     for (const region of this.regions) {
       if (region.bounds.width <= 0 || region.bounds.height <= 0) continue;
+      if (!this.visiblePreviewRegionIds.has(region.id)) continue;
 
-      const canvas = document.getElementById('preview-' + region.id) as HTMLCanvasElement;
+      const canvas = this.previewCanvasByRegionId.get(region.id);
       if (!canvas) continue;
-
-      // Skip rendering for canvases not visible in the viewport
-      const canvasIsVisible = this.isElementInViewport(canvas);
-      if (!canvasIsVisible) continue;
 
       const context = canvas.getContext('2d');
       if (!context) continue;
@@ -1719,9 +1856,6 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
       const physicalWidth = region.bounds.width * dpiScaleFactor;
       const physicalHeight = region.bounds.height * dpiScaleFactor;
 
-      const previewScaleX = this.previewImage.naturalWidth / this.latestPreviewFrame.originalWidth;
-      const previewScaleY = this.previewImage.naturalHeight / this.latestPreviewFrame.originalHeight;
-
       const sourceX = physicalX * previewScaleX;
       const sourceY = physicalY * previewScaleY;
       const sourceWidth = physicalWidth * previewScaleX;
@@ -1729,21 +1863,22 @@ export class MonitoredRegionsComponent implements OnInit, OnDestroy {
 
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(
-        this.previewImage,
+        this.previewImageElement,
         sourceX, sourceY, sourceWidth, sourceHeight,
         0, 0, canvas.width, canvas.height
       );
     }
   }
 
-  /** Returns true if the element is at least partially visible in the viewport. */
-  private isElementInViewport(element: HTMLElement): boolean {
-    const rect = element.getBoundingClientRect();
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-    // Add a generous margin so elements just about to scroll into view are pre-rendered
-    const margin = 200;
-    const isAboveViewport = rect.bottom < -margin;
-    const isBelowViewport = rect.top > viewportHeight + margin;
-    return !isAboveViewport && !isBelowViewport;
+  private scheduleViewRefresh(): void {
+    if (this.viewRefreshScheduled) {
+      return;
+    }
+
+    this.viewRefreshScheduled = true;
+    requestAnimationFrame(() => {
+      this.viewRefreshScheduled = false;
+      this.changeDetectorRef.detectChanges();
+    });
   }
 }

@@ -1,7 +1,34 @@
-import { BrowserWindow, screen } from 'electron';
+import { BrowserWindow, nativeImage, screen } from 'electron';
+import * as path from 'path';
+import { Worker } from 'worker_threads';
 import { CapturedFrame } from './game-capture.service';
-import { PreviewConfig } from '../shared';
+import { PreviewConfig, PreviewDownsampleMethod } from '../shared';
 import { logger, LogCategory } from '../shared/logger';
+import * as IpcChannels from '../shared/ipc-channels';
+
+interface PreviewWorkerRequest {
+  type: 'process-preview';
+  jobId: number;
+  frameBuffer: Buffer;
+  frameWidth: number;
+  frameHeight: number;
+  previewScale: number;
+  downsampleMethod: PreviewDownsampleMethod;
+}
+
+interface PreviewWorkerResult {
+  type: 'process-preview-result';
+  jobId: number;
+  buffer: Buffer;
+  width: number;
+  height: number;
+}
+
+interface PendingPreviewJob {
+  originalWidth: number;
+  originalHeight: number;
+  jpegQuality: number;
+}
 
 /**
  * Handles downsampling captured frames and encoding them as base64 JPEG
@@ -9,6 +36,8 @@ import { logger, LogCategory } from '../shared/logger';
  *
  * The preview runs on its own throttled interval, independent of the
  * capture FPS, so the UI gets smooth previews without overwhelming IPC.
+ * When scaling is required, the expensive pixel resampling runs in a
+ * worker thread so the Electron main thread only handles encoding + IPC.
  */
 export class PreviewFrameService {
   private previewIntervalHandle: ReturnType<typeof setInterval> | null = null;
@@ -20,12 +49,38 @@ export class PreviewFrameService {
   private displayScaleFactor = 1;
   private onPreviewFrameSentCallback: ((previewData: any) => void) | null = null;
   private currentConfig: PreviewConfig | null = null;
+  private previewFps = 10;
+
+  private paused = false;
+
+  private previewWorker: Worker | null = null;
+  private previewWorkerBusy = false;
+  private previewWorkerDisabled = false;
+  private nextPreviewJobId = 1;
+  private pendingPreviewJobs = new Map<number, PendingPreviewJob>();
+
+  constructor() {
+    this.initializePreviewWorker();
+  }
 
   public setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
   }
 
-  /** Dynamically update the preview scale without restarting the service. */
+  /** Dynamically update preview settings without restarting capture. */
+  public updateRuntimeConfig(config: PreviewConfig, fps: number): void {
+    this.currentConfig = { ...config };
+
+    const nextFps = Math.max(1, Math.round(fps));
+    const fpsChanged = nextFps !== this.previewFps;
+    this.previewFps = nextFps;
+
+    if (this.isRunning && fpsChanged) {
+      this.restartPreviewInterval();
+    }
+  }
+
+  /** Kept for compatibility with existing callers. */
   public setPreviewScale(scale: number): void {
     if (this.currentConfig) {
       this.currentConfig = { ...this.currentConfig, previewScale: scale };
@@ -33,12 +88,11 @@ export class PreviewFrameService {
   }
 
   /** Pause or unpause the preview. When paused, no frames are encoded or sent. */
-  private paused = false;
   public setPaused(paused: boolean): void {
     const changed = this.paused !== paused;
     this.paused = paused;
     if (changed && this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send('preview:paused', paused);
+      this.mainWindow.webContents.send(IpcChannels.PREVIEW_PAUSED, paused);
     }
   }
 
@@ -54,10 +108,8 @@ export class PreviewFrameService {
    * Sets which display is being captured so we can include its screen
    * origin and DPI scale factor in the preview frame data.
    *
-   * This lets the UI convert between screen-absolute coordinates (from
-   * the picker, which are in DPI-scaled logical pixels) and frame-relative
-   * coordinates (which are in native physical pixels, since DXGI captures
-   * at native resolution).
+   * This lets the UI convert between screen-absolute coordinates and
+   * frame-relative coordinates.
    */
   public setCaptureDisplayIndex(displayIndex: number): void {
     const allDisplays = screen.getAllDisplays();
@@ -80,7 +132,7 @@ export class PreviewFrameService {
 
   /**
    * Called by the capture pipeline each time a new frame arrives.
-   * We just stash the reference — the preview interval picks it up
+   * We just stash the reference - the preview interval picks it up
    * at the preview FPS rate.
    */
   public onFrameCaptured(frame: CapturedFrame): void {
@@ -93,19 +145,16 @@ export class PreviewFrameService {
     }
 
     this.currentConfig = { ...config };
-    const intervalMilliseconds = Math.round(1000 / fps);
+    this.previewFps = Math.max(1, Math.round(fps));
 
     logger.info(
       LogCategory.Capture,
-      `Preview started: ${fps}fps, scale=${config.previewScale}, method=${config.downsampleMethod}`
+      `Preview started: ${this.previewFps}fps, scale=${config.previewScale}, method=${config.downsampleMethod}`
     );
 
     this.isRunning = true;
-    this.previewIntervalHandle = setInterval(() => {
-      if (this.currentConfig) {
-        this.sendPreviewFrame(this.currentConfig);
-      }
-    }, intervalMilliseconds);
+    this.initializePreviewWorker();
+    this.restartPreviewInterval();
   }
 
   public stop(): void {
@@ -113,12 +162,125 @@ export class PreviewFrameService {
       clearInterval(this.previewIntervalHandle);
       this.previewIntervalHandle = null;
     }
+
     this.isRunning = false;
     this.latestFrame = null;
+    this.previewWorkerBusy = false;
+    this.pendingPreviewJobs.clear();
+
+    if (this.previewWorker) {
+      const workerToTerminate = this.previewWorker;
+      this.previewWorker = null;
+      workerToTerminate.removeAllListeners();
+      workerToTerminate.terminate().catch(() => {
+        // Ignore shutdown races while tearing down preview.
+      });
+    }
   }
 
   public getIsRunning(): boolean {
     return this.isRunning;
+  }
+
+  private restartPreviewInterval(): void {
+    if (this.previewIntervalHandle !== null) {
+      clearInterval(this.previewIntervalHandle);
+      this.previewIntervalHandle = null;
+    }
+
+    if (!this.isRunning) {
+      return;
+    }
+
+    const intervalMilliseconds = Math.max(1, Math.round(1000 / this.previewFps));
+    this.previewIntervalHandle = setInterval(() => {
+      if (this.currentConfig) {
+        this.sendPreviewFrame(this.currentConfig);
+      }
+    }, intervalMilliseconds);
+  }
+
+  private initializePreviewWorker(): void {
+    if (this.previewWorker || this.previewWorkerDisabled) {
+      return;
+    }
+
+    const workerPath = path.join(__dirname, 'preview-frame.worker.js');
+    try {
+      const worker = new Worker(workerPath);
+      worker.on('message', (message: PreviewWorkerResult) => {
+        this.handlePreviewWorkerMessage(message);
+      });
+      worker.on('error', (error) => {
+        this.handlePreviewWorkerError(error);
+      });
+      worker.on('exit', (exitCode) => {
+        if (this.previewWorker === worker) {
+          this.previewWorker = null;
+          this.previewWorkerBusy = false;
+          this.pendingPreviewJobs.clear();
+        }
+
+        if (exitCode !== 0 && !this.previewWorkerDisabled) {
+          logger.warn(LogCategory.Capture, `Preview worker exited unexpectedly with code ${exitCode}.`);
+        }
+      });
+
+      this.previewWorker = worker;
+      logger.info(LogCategory.Capture, `Preview worker started: ${workerPath}`);
+    } catch (error) {
+      this.previewWorkerDisabled = true;
+      logger.warn(LogCategory.Capture, 'Preview worker unavailable - falling back to main-thread downsampling.', error);
+    }
+  }
+
+  private handlePreviewWorkerMessage(message: PreviewWorkerResult): void {
+    if (!message || message.type !== 'process-preview-result') {
+      return;
+    }
+
+    this.previewWorkerBusy = false;
+
+    const pendingJob = this.pendingPreviewJobs.get(message.jobId);
+    this.pendingPreviewJobs.delete(message.jobId);
+    if (!pendingJob) {
+      return;
+    }
+
+    if (this.paused) {
+      return;
+    }
+
+    const windowIsGone = !this.mainWindow || this.mainWindow.isDestroyed();
+    if (windowIsGone) {
+      return;
+    }
+
+    this.dispatchPreviewFrame(
+      Buffer.from(message.buffer),
+      message.width,
+      message.height,
+      pendingJob.originalWidth,
+      pendingJob.originalHeight,
+      pendingJob.jpegQuality,
+    );
+  }
+
+  private handlePreviewWorkerError(error: unknown): void {
+    this.previewWorkerBusy = false;
+    this.pendingPreviewJobs.clear();
+
+    if (this.previewWorker) {
+      const workerToTerminate = this.previewWorker;
+      this.previewWorker = null;
+      workerToTerminate.removeAllListeners();
+      workerToTerminate.terminate().catch(() => {
+        // Ignore cleanup races while disabling the preview worker.
+      });
+    }
+
+    this.previewWorkerDisabled = true;
+    logger.error(LogCategory.Capture, 'Preview worker failed - falling back to main-thread downsampling.', error);
   }
 
   private sendPreviewFrame(config: PreviewConfig): void {
@@ -135,31 +297,97 @@ export class PreviewFrameService {
     }
 
     const frame = this.latestFrame!;
-    const downsampled = this.downsampleFrame(frame, config);
 
-    // Encode to JPEG for the UI preview path — much smaller IPC payload
-    // than raw BGRA, and the renderer just sets img.src (no per-pixel conversion).
-    const base64Jpeg = this.encodeBgraToBase64Jpeg(
+    if (this.shouldUsePreviewWorker(config)) {
+      this.sendPreviewFrameToWorker(frame, config);
+      return;
+    }
+
+    const downsampled = this.downsampleFrame(frame, config);
+    this.dispatchPreviewFrame(
       downsampled.buffer,
       downsampled.width,
       downsampled.height,
+      frame.width,
+      frame.height,
       config.jpegQuality ?? 70,
+    );
+  }
+
+  private shouldUsePreviewWorker(config: PreviewConfig): boolean {
+    return config.previewScale < 1 && !!this.previewWorker && !this.previewWorkerDisabled;
+  }
+
+  private sendPreviewFrameToWorker(frame: CapturedFrame, config: PreviewConfig): void {
+    if (!this.previewWorker || this.previewWorkerBusy) {
+      return;
+    }
+
+    const jobId = this.nextPreviewJobId++;
+    this.previewWorkerBusy = true;
+    this.pendingPreviewJobs.set(jobId, {
+      originalWidth: frame.width,
+      originalHeight: frame.height,
+      jpegQuality: config.jpegQuality ?? 70,
+    });
+
+    const request: PreviewWorkerRequest = {
+      type: 'process-preview',
+      jobId,
+      frameBuffer: Buffer.from(frame.buffer),
+      frameWidth: frame.width,
+      frameHeight: frame.height,
+      previewScale: config.previewScale,
+      downsampleMethod: config.downsampleMethod,
+    };
+
+    try {
+      this.previewWorker.postMessage(request);
+    } catch (error) {
+      this.previewWorkerBusy = false;
+      this.pendingPreviewJobs.delete(jobId);
+      this.handlePreviewWorkerError(error);
+
+      const downsampled = this.downsampleFrame(frame, config);
+      this.dispatchPreviewFrame(
+        downsampled.buffer,
+        downsampled.width,
+        downsampled.height,
+        frame.width,
+        frame.height,
+        config.jpegQuality ?? 70,
+      );
+    }
+  }
+
+  private dispatchPreviewFrame(
+    bgraBuffer: Buffer,
+    previewWidth: number,
+    previewHeight: number,
+    originalWidth: number,
+    originalHeight: number,
+    jpegQuality: number,
+  ): void {
+    const base64Jpeg = this.encodeBgraToBase64Jpeg(
+      bgraBuffer,
+      previewWidth,
+      previewHeight,
+      jpegQuality,
     );
 
     const previewData = {
       imageDataUrl: `data:image/jpeg;base64,${base64Jpeg}`,
-      originalWidth: frame.width,
-      originalHeight: frame.height,
-      previewWidth: downsampled.width,
-      previewHeight: downsampled.height,
+      originalWidth,
+      originalHeight,
+      previewWidth,
+      previewHeight,
       displayOriginX: this.displayOriginX,
       displayOriginY: this.displayOriginY,
       displayScaleFactor: this.displayScaleFactor,
     };
 
-    this.mainWindow!.webContents.send('capture:preview-frame', previewData);
+    this.mainWindow!.webContents.send(IpcChannels.CAPTURE_PREVIEW_FRAME, previewData);
 
-    // Also pipe to overlay windows for region mirror rendering
     if (this.onPreviewFrameSentCallback) {
       this.onPreviewFrameSentCallback(previewData);
     }
@@ -211,10 +439,10 @@ export class PreviewFrameService {
         const sourceOffset = sourceY * sourceRowPitch + sourceX * bytesPerPixel;
         const destOffset = (destY * targetWidth + destX) * bytesPerPixel;
 
-        outputBuffer[destOffset]     = frame.buffer[sourceOffset];     // B
-        outputBuffer[destOffset + 1] = frame.buffer[sourceOffset + 1]; // G
-        outputBuffer[destOffset + 2] = frame.buffer[sourceOffset + 2]; // R
-        outputBuffer[destOffset + 3] = frame.buffer[sourceOffset + 3]; // A
+        outputBuffer[destOffset] = frame.buffer[sourceOffset];
+        outputBuffer[destOffset + 1] = frame.buffer[sourceOffset + 1];
+        outputBuffer[destOffset + 2] = frame.buffer[sourceOffset + 2];
+        outputBuffer[destOffset + 3] = frame.buffer[sourceOffset + 3];
       }
     }
 
@@ -248,22 +476,22 @@ export class PreviewFrameService {
         const srcX1 = Math.min(srcX0 + 1, frame.width - 1);
         const xLerp = srcXExact - srcX0;
 
-        const offsetTopLeft     = srcY0 * sourceRowPitch + srcX0 * bytesPerPixel;
-        const offsetTopRight    = srcY0 * sourceRowPitch + srcX1 * bytesPerPixel;
-        const offsetBottomLeft  = srcY1 * sourceRowPitch + srcX0 * bytesPerPixel;
+        const offsetTopLeft = srcY0 * sourceRowPitch + srcX0 * bytesPerPixel;
+        const offsetTopRight = srcY0 * sourceRowPitch + srcX1 * bytesPerPixel;
+        const offsetBottomLeft = srcY1 * sourceRowPitch + srcX0 * bytesPerPixel;
         const offsetBottomRight = srcY1 * sourceRowPitch + srcX1 * bytesPerPixel;
 
         const destOffset = (destY * targetWidth + destX) * bytesPerPixel;
 
         for (let channel = 0; channel < 4; channel++) {
-          const topLeft     = frame.buffer[offsetTopLeft + channel];
-          const topRight    = frame.buffer[offsetTopRight + channel];
-          const bottomLeft  = frame.buffer[offsetBottomLeft + channel];
+          const topLeft = frame.buffer[offsetTopLeft + channel];
+          const topRight = frame.buffer[offsetTopRight + channel];
+          const bottomLeft = frame.buffer[offsetBottomLeft + channel];
           const bottomRight = frame.buffer[offsetBottomRight + channel];
 
-          const topInterpolated    = topLeft + (topRight - topLeft) * xLerp;
+          const topInterpolated = topLeft + (topRight - topLeft) * xLerp;
           const bottomInterpolated = bottomLeft + (bottomRight - bottomLeft) * xLerp;
-          const finalValue         = topInterpolated + (bottomInterpolated - topInterpolated) * yLerp;
+          const finalValue = topInterpolated + (bottomInterpolated - topInterpolated) * yLerp;
 
           outputBuffer[destOffset + channel] = Math.round(finalValue);
         }
@@ -274,22 +502,18 @@ export class PreviewFrameService {
   }
 
   /**
-   * Skip downsampling — just takes every Nth pixel. Fastest, lowest quality.
+   * Skip downsampling - just takes every Nth pixel. Fastest, lowest quality.
    */
   private downsampleSkip(
     frame: CapturedFrame,
     targetWidth: number,
     targetHeight: number
   ): { buffer: Buffer; width: number; height: number } {
-    // Same as nearest neighbor for this simple implementation
     return this.downsampleNearestNeighbor(frame, targetWidth, targetHeight);
   }
 
   /**
    * Encodes a BGRA buffer as a base64 JPEG string.
-   *
-   * Since we don't have a native JPEG encoder in Node, we construct
-   * a BMP in memory and use Electron's nativeImage to convert to JPEG.
    */
   private encodeBgraToBase64Jpeg(
     bgraBuffer: Buffer,
@@ -297,9 +521,6 @@ export class PreviewFrameService {
     height: number,
     quality: number
   ): string {
-    // Use Electron's nativeImage to handle the encoding.
-    // nativeImage.createFromBuffer expects BGRA on Windows.
-    const { nativeImage } = require('electron');
     const image = nativeImage.createFromBuffer(bgraBuffer, {
       width,
       height,

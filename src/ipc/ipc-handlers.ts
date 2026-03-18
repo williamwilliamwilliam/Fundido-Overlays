@@ -23,6 +23,7 @@ export function registerIpcHandlers(
   workingRegionsRef: { regions: any[] | null },
   globalEnabledRef: { enabled: boolean },
   pickerActiveRef: { active: boolean },
+  syncPreviewRuntimeState: () => void,
 ): void {
 
   // -------------------------------------------------------------------------
@@ -42,6 +43,7 @@ export function registerIpcHandlers(
       const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
       previewService.setCaptureDisplayIndex(displayIndex);
       previewService.start(currentConfigRef.config.preview, currentConfigRef.config.preview.previewFps ?? 10);
+      syncPreviewRuntimeState();
       ocrService.start(currentConfigRef.config.ocr);
       ollamaService.start(currentConfigRef.config.ollama);
     }
@@ -144,6 +146,7 @@ export function registerIpcHandlers(
     const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
     previewService.setCaptureDisplayIndex(displayIndex);
     previewService.start(currentConfigRef.config.preview, currentConfigRef.config.preview.previewFps ?? 10);
+    syncPreviewRuntimeState();
     ocrService.start(currentConfigRef.config.ocr);
     ollamaService.start(currentConfigRef.config.ollama);
 
@@ -184,7 +187,7 @@ export function registerIpcHandlers(
   ipcMain.handle(IpcChannels.PICKER_START, async (_event: IpcMainInvokeEvent) => {
     logger.debug(LogCategory.Ipc, 'PICKER_START invoked');
     pickerActiveRef.active = true;
-    previewService.setPaused(false);
+    syncPreviewRuntimeState();
     const { pickScreenRegion } = require('../picker/screen-position-picker');
 
     // Forward live region updates to the renderer so the UI can show a preview
@@ -197,16 +200,18 @@ export function registerIpcHandlers(
 
     const result = await pickScreenRegion(onRegionUpdate);
     pickerActiveRef.active = false;
+    syncPreviewRuntimeState();
     return result;
   });
 
   ipcMain.handle(IpcChannels.PICKER_COLOR, async (_event: IpcMainInvokeEvent) => {
     logger.debug(LogCategory.Ipc, 'PICKER_COLOR invoked');
     pickerActiveRef.active = true;
-    previewService.setPaused(false);
+    syncPreviewRuntimeState();
     const { pickScreenColor } = require('../picker/screen-color-picker');
     const result = await pickScreenColor(captureService);
     pickerActiveRef.active = false;
+    syncPreviewRuntimeState();
     return result;
   });
 

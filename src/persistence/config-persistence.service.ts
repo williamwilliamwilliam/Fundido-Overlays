@@ -17,9 +17,10 @@ function buildDefaultConfig(): FundidoConfig {
   };
 
   const defaultPreview: PreviewConfig = {
-    previewScale: 1,
-    downsampleMethod: 'bilinear',
-    jpegQuality: 70,
+    previewScale: 0.5,
+    downsampleMethod: 'nearestNeighbor',
+    jpegQuality: 60,
+    previewFps: 12,
   };
 
   const defaultOcr: OcrConfig = {
@@ -79,6 +80,11 @@ export class ConfigPersistenceService {
       if (configIsMissingPreviewSettings) {
         parsed.preview = defaults.preview;
         logger.info(LogCategory.Persistence, 'Backfilled missing preview config with defaults.');
+      } else {
+        parsed.preview.previewScale ??= defaults.preview.previewScale;
+        parsed.preview.downsampleMethod ??= defaults.preview.downsampleMethod;
+        parsed.preview.jpegQuality ??= defaults.preview.jpegQuality;
+        parsed.preview.previewFps ??= defaults.preview.previewFps;
       }
 
       const configIsMissingOcrSettings = !parsed.ocr;

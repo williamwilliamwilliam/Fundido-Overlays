@@ -194,11 +194,15 @@ export class ElectronService {
     });
 
     window.fundidoApi.onStateUpdated((frameState: any) => {
-      this.ngZone.run(() => this.stateUpdated$.next(frameState));
+      // High-frequency state updates stay outside Angular's zone so
+      // heavy pages can decide when to refresh their own view.
+      this.stateUpdated$.next(frameState);
     });
 
     window.fundidoApi.onPreviewFrame((previewData: PreviewFrameData) => {
-      this.ngZone.run(() => this.previewFrame$.next(previewData));
+      // Preview frames are the hottest IPC path in the app; keep them
+      // outside Angular's zone and let subscribers batch their own UI work.
+      this.previewFrame$.next(previewData);
     });
 
     window.fundidoApi.onPerfMetrics((metrics: any) => {

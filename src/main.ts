@@ -12,7 +12,7 @@ import { OllamaService } from './state/ollama.service';
 import { registerIpcHandlers } from './ipc/ipc-handlers';
 import { logger, LogCategory, WorkerLogMessage } from './shared/logger';
 import { computeRegionPixelHash } from './shared/pixel-hash';
-import { FundidoConfig } from './shared';
+import { FundidoConfig, PreviewConfig } from './shared';
 import * as IpcChannels from './shared/ipc-channels';
 
 // ---------------------------------------------------------------------------
@@ -129,6 +129,63 @@ const uiActivePageRef: { page: string } = {
 const pickerActiveRef: { active: boolean } = {
   active: false,
 };
+
+type PreviewUsageMode = 'capture' | 'regions' | 'inactive';
+
+function getRequestedPreviewConfig(): PreviewConfig {
+  return currentConfigRef.config.preview ?? {
+    previewScale: 0.5,
+    downsampleMethod: 'nearestNeighbor',
+    jpegQuality: 60,
+    previewFps: 12,
+  };
+}
+
+function buildEffectivePreviewConfig(userConfig: PreviewConfig, mode: PreviewUsageMode): PreviewConfig {
+  if (mode === 'capture') {
+    return {
+      ...userConfig,
+      previewScale: Math.min(userConfig.previewScale ?? 0.75, 0.75),
+      downsampleMethod: userConfig.downsampleMethod === 'bilinear' ? 'nearestNeighbor' : userConfig.downsampleMethod,
+      jpegQuality: Math.min(userConfig.jpegQuality ?? 60, 60),
+    };
+  }
+
+  return {
+    ...userConfig,
+    previewScale: Math.min(userConfig.previewScale ?? 0.45, 0.45),
+    downsampleMethod: 'skip',
+    jpegQuality: Math.min(userConfig.jpegQuality ?? 45, 45),
+  };
+}
+
+function resolvePreviewUsageMode(): PreviewUsageMode {
+  if (!mainWindow || mainWindow.isDestroyed()) return 'inactive';
+  if (!captureService.getIsCapturing()) return 'inactive';
+  if (uiMinimizedRef.minimized) return 'inactive';
+
+  if (pickerActiveRef.active) return 'regions';
+
+  if (uiActivePageRef.page === 'regions') return 'regions';
+  if (uiActivePageRef.page === 'capture' && mainWindow.isFocused()) return 'capture';
+  return 'inactive';
+}
+
+function syncPreviewRuntimeState(): void {
+  const userConfig = getRequestedPreviewConfig();
+  const mode = resolvePreviewUsageMode();
+  const effectiveConfig = buildEffectivePreviewConfig(userConfig, mode);
+
+  let effectiveFps = userConfig.previewFps ?? 10;
+  if (mode === 'capture') {
+    effectiveFps = Math.min(effectiveFps, 12);
+  } else {
+    effectiveFps = Math.min(effectiveFps, 8);
+  }
+
+  previewService.updateRuntimeConfig(effectiveConfig, effectiveFps);
+  previewService.setPaused(mode === 'inactive');
+}
 
 // ---------------------------------------------------------------------------
 // Performance metrics
@@ -322,25 +379,17 @@ function createMainWindow(): void {
 
   mainWindow.on('minimize', () => {
     uiMinimizedRef.minimized = true;
-    previewService.setPaused(true);
+    syncPreviewRuntimeState();
   });
   mainWindow.on('restore', () => {
     uiMinimizedRef.minimized = false;
-    const userScale = currentConfigRef.config.preview?.previewScale ?? 0.5;
-    previewService.setPreviewScale(userScale);
-    previewService.setPaused(false);
+    syncPreviewRuntimeState();
   });
   mainWindow.on('focus', () => {
-    const userScale = currentConfigRef.config.preview?.previewScale ?? 0.5;
-    previewService.setPreviewScale(userScale);
-    previewService.setPaused(false);
+    syncPreviewRuntimeState();
   });
   mainWindow.on('blur', () => {
-    const pickerIsActive = pickerActiveRef.active;
-    const userIsConfiguringRegions = uiActivePageRef.page === 'regions';
-    if (!pickerIsActive && !userIsConfiguringRegions) {
-      previewService.setPaused(true);
-    }
+    syncPreviewRuntimeState();
     startPerfDiagWindow();
   });
 
@@ -927,10 +976,23 @@ app.whenReady().then(() => {
   logger.initFileLogging();
   logger.info(LogCategory.General, 'Fundido Overlays starting up.');
 
-  registerIpcHandlers(configService, captureService, previewService, overlayWindowManager, ocrService, ollamaService, currentConfigRef, workingRegionsRef, globalEnabledRef, pickerActiveRef);
+  registerIpcHandlers(
+    configService,
+    captureService,
+    previewService,
+    overlayWindowManager,
+    ocrService,
+    ollamaService,
+    currentConfigRef,
+    workingRegionsRef,
+    globalEnabledRef,
+    pickerActiveRef,
+    syncPreviewRuntimeState,
+  );
 
   ipcMain.on(IpcChannels.UI_ACTIVE_PAGE, (_event: any, page: string) => {
     uiActivePageRef.page = page;
+    syncPreviewRuntimeState();
   });
 
   createMainWindow();
@@ -959,6 +1021,7 @@ app.whenReady().then(() => {
     const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
     previewService.setCaptureDisplayIndex(displayIndex);
     previewService.start(currentConfigRef.config.preview, currentConfigRef.config.preview.previewFps ?? 10);
+    syncPreviewRuntimeState();
     ocrService.start(currentConfigRef.config.ocr);
     ollamaService.start(currentConfigRef.config.ollama);
   }

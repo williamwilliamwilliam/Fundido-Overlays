@@ -1,14 +1,30 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import {
+  AfterViewInit,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  ElementRef,
+  NgZone,
+  OnDestroy,
+  OnInit,
+  ViewChild,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 import { ElectronService } from '../../services/electron.service';
 import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
 
+type PreviewMeta = Pick<
+  PreviewFrameData,
+  'originalWidth' | 'originalHeight' | 'previewWidth' | 'previewHeight'
+>;
+
 @Component({
   selector: 'app-capture-preview',
   standalone: true,
   imports: [CommonModule, FormsModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <h2>Game Capture</h2>
@@ -19,7 +35,7 @@ import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
           <label class="control-label">Display</label>
           <select [(ngModel)]="selectedDisplayIndex" class="display-select">
             <option *ngFor="let display of availableDisplays; let i = index" [ngValue]="i">
-              {{ display.name }} ({{ display.width }}×{{ display.height }})
+              {{ display.name }} ({{ display.width }}x{{ display.height }})
             </option>
           </select>
         </div>
@@ -34,32 +50,30 @@ import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
           {{ isCapturing ? 'Capturing' : 'Stopped' }}
         </span>
 
-        <span *ngIf="isCapturing && latestPreview" class="resolution-info">
-          {{ latestPreview.originalWidth }}×{{ latestPreview.originalHeight }}
-          → {{ latestPreview.previewWidth }}×{{ latestPreview.previewHeight }} preview
+        <span *ngIf="isCapturing && previewMeta" class="resolution-info">
+          {{ previewMeta.originalWidth }}x{{ previewMeta.originalHeight }}
+          -> {{ previewMeta.previewWidth }}x{{ previewMeta.previewHeight }} preview
         </span>
       </div>
 
       <div class="preview-area">
         <img
-          *ngIf="latestPreview"
-          [src]="latestPreview.imageDataUrl"
+          #previewImage
           class="preview-image"
+          [class.preview-visible]="hasPreviewFrame"
           [class.preview-dimmed]="isPreviewPaused"
           alt="Capture preview" />
-        <div *ngIf="!latestPreview && !isCapturing" class="placeholder">
+        <div *ngIf="!hasPreviewFrame && !isCapturing" class="placeholder">
           Click "Start Capture" to begin previewing your display.
         </div>
-        <div *ngIf="!latestPreview && isCapturing" class="placeholder">
+        <div *ngIf="!hasPreviewFrame && isCapturing" class="placeholder">
           Waiting for first frame...
         </div>
 
-        <!-- Paused overlay -->
-        <div class="paused-overlay" *ngIf="isPreviewPaused && latestPreview">
+        <div class="paused-overlay" *ngIf="isPreviewPaused && hasPreviewFrame">
           <span class="paused-text">Preview paused while you're not working in this window</span>
         </div>
 
-        <!-- FPS / metrics overlay -->
         <div class="metrics-overlay" *ngIf="isCapturing && metrics">
           <div class="metrics-row">
             <span class="metric-label">Capture</span>
@@ -165,8 +179,12 @@ import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
     .preview-image {
       width: 100%;
       height: auto;
-      display: block;
+      display: none;
       image-rendering: auto;
+    }
+
+    .preview-image.preview-visible {
+      display: block;
     }
 
     .placeholder {
@@ -174,7 +192,6 @@ import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
       font-style: italic;
     }
 
-    /* Metrics overlay */
     .metrics-overlay {
       position: absolute;
       top: var(--spacing-sm);
@@ -238,19 +255,27 @@ import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
     }
   `],
 })
-export class CapturePreviewComponent implements OnInit, OnDestroy {
+export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy {
+  @ViewChild('previewImage') private previewImageRef?: ElementRef<HTMLImageElement>;
+
   isCapturing = false;
   selectedDisplayIndex = 0;
   availableDisplays: Array<{ name: string; width: number; height: number }> = [];
-  latestPreview: PreviewFrameData | null = null;
+  previewMeta: PreviewMeta | null = null;
   metrics: PerfMetrics | null = null;
   isPreviewPaused = false;
+  hasPreviewFrame = false;
 
   private previewSubscription: Subscription | null = null;
   private metricsSubscription: Subscription | null = null;
   private pausedSubscription: Subscription | null = null;
+  private latestPreviewSrc: string | null = null;
 
-  constructor(private readonly electronService: ElectronService) {}
+  constructor(
+    private readonly electronService: ElectronService,
+    private readonly changeDetectorRef: ChangeDetectorRef,
+    private readonly ngZone: NgZone,
+  ) {}
 
   async ngOnInit(): Promise<void> {
     this.electronService.setActivePage('capture');
@@ -259,18 +284,29 @@ export class CapturePreviewComponent implements OnInit, OnDestroy {
     this.isCapturing = status.isCapturing;
 
     this.availableDisplays = await this.electronService.listDisplays();
+    this.changeDetectorRef.markForCheck();
 
-    this.previewSubscription = this.electronService.previewFrameStream.subscribe((previewData) => {
-      this.latestPreview = previewData;
+    this.ngZone.runOutsideAngular(() => {
+      this.previewSubscription = this.electronService.previewFrameStream.subscribe((previewData) => {
+        this.applyPreviewFrame(previewData);
+      });
     });
 
     this.metricsSubscription = this.electronService.perfMetricsStream.subscribe((metrics) => {
       this.metrics = metrics;
+      this.changeDetectorRef.markForCheck();
     });
 
     this.pausedSubscription = this.electronService.previewPausedStream.subscribe((paused) => {
       this.isPreviewPaused = paused;
+      this.changeDetectorRef.markForCheck();
     });
+  }
+
+  ngAfterViewInit(): void {
+    if (this.latestPreviewSrc && this.previewImageRef?.nativeElement) {
+      this.previewImageRef.nativeElement.src = this.latestPreviewSrc;
+    }
   }
 
   ngOnDestroy(): void {
@@ -283,7 +319,7 @@ export class CapturePreviewComponent implements OnInit, OnDestroy {
   async toggleCapture(): Promise<void> {
     if (this.isCapturing) {
       await this.electronService.stopCapture();
-      this.latestPreview = null;
+      this.clearPreview();
       this.metrics = null;
     } else {
       const config = await this.electronService.loadConfig();
@@ -292,6 +328,46 @@ export class CapturePreviewComponent implements OnInit, OnDestroy {
 
       await this.electronService.startCapture();
     }
+
     this.isCapturing = !this.isCapturing;
+    this.changeDetectorRef.markForCheck();
+  }
+
+  private applyPreviewFrame(previewData: PreviewFrameData): void {
+    this.latestPreviewSrc = previewData.imageDataUrl;
+
+    const previewImage = this.previewImageRef?.nativeElement;
+    if (previewImage) {
+      previewImage.src = previewData.imageDataUrl;
+    }
+
+    const previewMetaChanged =
+      !this.previewMeta ||
+      this.previewMeta.originalWidth !== previewData.originalWidth ||
+      this.previewMeta.originalHeight !== previewData.originalHeight ||
+      this.previewMeta.previewWidth !== previewData.previewWidth ||
+      this.previewMeta.previewHeight !== previewData.previewHeight;
+
+    if (!this.hasPreviewFrame || previewMetaChanged) {
+      this.hasPreviewFrame = true;
+      this.previewMeta = {
+        originalWidth: previewData.originalWidth,
+        originalHeight: previewData.originalHeight,
+        previewWidth: previewData.previewWidth,
+        previewHeight: previewData.previewHeight,
+      };
+      this.changeDetectorRef.detectChanges();
+    }
+  }
+
+  private clearPreview(): void {
+    this.latestPreviewSrc = null;
+    this.previewMeta = null;
+    this.hasPreviewFrame = false;
+
+    const previewImage = this.previewImageRef?.nativeElement;
+    if (previewImage) {
+      previewImage.src = '';
+    }
   }
 }
