@@ -372,9 +372,9 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
   // Preview settings
   previewFps = 10;
-  previewScalePercent = 50;
+  previewScalePercent = 25;
   downsampleMethod = 'bilinear';
-  jpegQuality = 70;
+  jpegQuality = 60;
 
   // OCR settings
   ocrIntervalMs = 200;
@@ -402,9 +402,9 @@ export class SettingsComponent implements OnInit, OnDestroy {
     const preview = config.preview;
     if (preview) {
       this.previewFps = preview.previewFps ?? 10;
-      this.previewScalePercent = Math.round((preview.previewScale ?? 0.5) * 100);
+      this.previewScalePercent = Math.round((preview.previewScale ?? 0.25) * 100);
       this.downsampleMethod = preview.downsampleMethod ?? 'bilinear';
-      this.jpegQuality = preview.jpegQuality ?? 70;
+      this.jpegQuality = preview.jpegQuality ?? 60;
     }
 
     const ocr = config.ocr;

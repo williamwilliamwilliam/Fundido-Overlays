@@ -17,10 +17,10 @@ function buildDefaultConfig(): FundidoConfig {
   };
 
   const defaultPreview: PreviewConfig = {
-    previewScale: 0.5,
+    previewScale: 0.25,
     downsampleMethod: 'nearestNeighbor',
     jpegQuality: 60,
-    previewFps: 12,
+    previewFps: 10,
   };
 
   const defaultOcr: OcrConfig = {

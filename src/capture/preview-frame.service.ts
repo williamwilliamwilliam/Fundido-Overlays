@@ -30,6 +30,8 @@ interface PendingPreviewJob {
   jpegQuality: number;
 }
 
+type PreviewUsageMode = 'capture' | 'regions' | 'inactive';
+
 /**
  * Handles downsampling captured frames and encoding them as base64 JPEG
  * for efficient transfer to the renderer process.
@@ -50,6 +52,7 @@ export class PreviewFrameService {
   private onPreviewFrameSentCallback: ((previewData: any) => void) | null = null;
   private currentConfig: PreviewConfig | null = null;
   private previewFps = 10;
+  private usageMode: PreviewUsageMode = 'inactive';
 
   private paused = false;
 
@@ -68,8 +71,9 @@ export class PreviewFrameService {
   }
 
   /** Dynamically update preview settings without restarting capture. */
-  public updateRuntimeConfig(config: PreviewConfig, fps: number): void {
+  public updateRuntimeConfig(config: PreviewConfig, fps: number, usageMode: PreviewUsageMode): void {
     this.currentConfig = { ...config };
+    this.usageMode = usageMode;
 
     const nextFps = Math.max(1, Math.round(fps));
     const fpsChanged = nextFps !== this.previewFps;
@@ -298,6 +302,11 @@ export class PreviewFrameService {
 
     const frame = this.latestFrame!;
 
+    if (this.usageMode === 'regions') {
+      this.dispatchRegionsPreviewFrame(frame);
+      return;
+    }
+
     if (this.shouldUsePreviewWorker(config)) {
       this.sendPreviewFrameToWorker(frame, config);
       return;
@@ -391,6 +400,21 @@ export class PreviewFrameService {
     if (this.onPreviewFrameSentCallback) {
       this.onPreviewFrameSentCallback(previewData);
     }
+  }
+
+  private dispatchRegionsPreviewFrame(frame: CapturedFrame): void {
+    const previewData = {
+      bgraBuffer: Uint8Array.from(frame.buffer),
+      originalWidth: frame.width,
+      originalHeight: frame.height,
+      previewWidth: frame.width,
+      previewHeight: frame.height,
+      displayOriginX: this.displayOriginX,
+      displayOriginY: this.displayOriginY,
+      displayScaleFactor: this.displayScaleFactor,
+    };
+
+    this.mainWindow!.webContents.send(IpcChannels.REGIONS_PREVIEW_FRAME, previewData);
   }
 
   private downsampleFrame(

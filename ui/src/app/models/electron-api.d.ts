@@ -30,6 +30,17 @@ export interface PreviewFrameData {
   displayScaleFactor: number;
 }
 
+export interface RegionsPreviewFrameData {
+  bgraBuffer: Uint8Array;
+  originalWidth: number;
+  originalHeight: number;
+  previewWidth: number;
+  previewHeight: number;
+  displayOriginX: number;
+  displayOriginY: number;
+  displayScaleFactor: number;
+}
+
 export interface RegionPerfMetrics {
   medianColorPerSec: number;
   colorThresholdPerSec: number;
@@ -79,6 +90,7 @@ export interface FundidoApi {
   onDebugLog(callback: (entry: LogEntry) => void): void;
   onStateUpdated(callback: (frameState: any) => void): void;
   onPreviewFrame(callback: (previewData: PreviewFrameData) => void): void;
+  onRegionsPreviewFrame(callback: (previewData: RegionsPreviewFrameData) => void): void;
   onPerfMetrics(callback: (metrics: PerfMetrics) => void): void;
   onPreviewPaused(callback: (paused: boolean) => void): void;
   setActivePage(page: string): void;

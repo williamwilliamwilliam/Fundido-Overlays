@@ -16,7 +16,7 @@ import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ElectronService } from '../../services/electron.service';
-import type { PreviewFrameData } from '../../models/electron-api';
+import type { RegionsPreviewFrameData } from '../../models/electron-api';
 
 /** Helper to convert RGB to hex string. */
 function rgbToHex(r: number, g: number, b: number): string {
@@ -1163,13 +1163,15 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   private stateSubscription: Subscription | null = null;
   private perfSubscription: Subscription | null = null;
   private previewCanvasChangesSubscription: Subscription | null = null;
-  private previewImageElement: HTMLImageElement | null = null;
-  private latestPreviewFrame: PreviewFrameData | null = null;
+  private latestPreviewFrame: RegionsPreviewFrameData | null = null;
   private previewCanvasByRegionId = new Map<string, HTMLCanvasElement>();
   private visiblePreviewRegionIds = new Set<string>();
   private previewVisibilityObserver: IntersectionObserver | null = null;
   private previewRenderScheduled = false;
   private viewRefreshScheduled = false;
+  private rawPreviewCanvas: HTMLCanvasElement | null = null;
+  private rawPreviewContext: CanvasRenderingContext2D | null = null;
+  private rawPreviewRgbaBuffer: Uint8ClampedArray | null = null;
 
   /** Latest perf metrics from main process, updated every second. */
   private latestPerfMetrics: any = null;
@@ -1227,13 +1229,12 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.regions = config.monitoredRegions || [];
     this.overlayGroups = config.overlayGroups || [];
     this.buildRegionCrossRefs();
-    this.initializePreviewImageElement();
     // Push to backend for live evaluation, but don't mark as dirty since nothing changed
     this.electronService.setWorkingRegions(this.regions);
     this.changeDetectorRef.markForCheck();
 
     this.ngZone.runOutsideAngular(() => {
-      this.previewSubscription = this.electronService.previewFrameStream.subscribe((frame) => {
+      this.previewSubscription = this.electronService.regionsPreviewFrameStream.subscribe((frame) => {
         this.handlePreviewFrame(frame);
       });
     });
@@ -1773,29 +1774,49 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       : maxPreviewHeight;
   }
 
-  private initializePreviewImageElement(): void {
-    if (this.previewImageElement) {
-      return;
-    }
-
-    this.previewImageElement = new Image();
-    this.previewImageElement.onload = () => {
-      this.scheduleRegionPreviewRender();
-    };
-  }
-
-  private handlePreviewFrame(frame: PreviewFrameData): void {
+  private handlePreviewFrame(frame: RegionsPreviewFrameData): void {
     this.latestPreviewFrame = frame;
-    this.initializePreviewImageElement();
-
-    if (this.previewImageElement) {
-      this.previewImageElement.src = frame.imageDataUrl;
-    }
+    this.updateRawPreviewSurface(frame);
+    this.scheduleRegionPreviewRender();
 
     if (!this.hasPreviewFrame) {
       this.hasPreviewFrame = true;
       this.changeDetectorRef.detectChanges();
     }
+  }
+
+  private updateRawPreviewSurface(frame: RegionsPreviewFrameData): void {
+    if (!this.rawPreviewCanvas) {
+      this.rawPreviewCanvas = document.createElement('canvas');
+      this.rawPreviewContext = this.rawPreviewCanvas.getContext('2d');
+    }
+
+    if (!this.rawPreviewCanvas || !this.rawPreviewContext) {
+      return;
+    }
+
+    if (this.rawPreviewCanvas.width !== frame.previewWidth || this.rawPreviewCanvas.height !== frame.previewHeight) {
+      this.rawPreviewCanvas.width = frame.previewWidth;
+      this.rawPreviewCanvas.height = frame.previewHeight;
+      this.rawPreviewRgbaBuffer = null;
+    }
+
+    const pixelCount = frame.previewWidth * frame.previewHeight;
+    if (!this.rawPreviewRgbaBuffer || this.rawPreviewRgbaBuffer.length !== pixelCount * 4) {
+      this.rawPreviewRgbaBuffer = new Uint8ClampedArray(pixelCount * 4);
+    }
+
+    const bgra = frame.bgraBuffer;
+    const rgba = this.rawPreviewRgbaBuffer;
+    for (let offset = 0; offset < bgra.length; offset += 4) {
+      rgba[offset] = bgra[offset + 2];
+      rgba[offset + 1] = bgra[offset + 1];
+      rgba[offset + 2] = bgra[offset];
+      rgba[offset + 3] = bgra[offset + 3];
+    }
+
+    const imageData = new ImageData(rgba, frame.previewWidth, frame.previewHeight);
+    this.rawPreviewContext.putImageData(imageData, 0, 0);
   }
 
   private refreshPreviewCanvasTracking(): void {
@@ -1832,14 +1853,13 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   }
 
   private renderAllRegionPreviews(): void {
-    if (!this.previewImageElement || !this.latestPreviewFrame) return;
-    if (this.previewImageElement.naturalWidth === 0 || this.previewImageElement.naturalHeight === 0) return;
+    if (!this.rawPreviewCanvas || !this.latestPreviewFrame) return;
 
     const displayOriginX = this.latestPreviewFrame.displayOriginX || 0;
     const displayOriginY = this.latestPreviewFrame.displayOriginY || 0;
     const dpiScaleFactor = this.latestPreviewFrame.displayScaleFactor || 1;
-    const previewScaleX = this.previewImageElement.naturalWidth / this.latestPreviewFrame.originalWidth;
-    const previewScaleY = this.previewImageElement.naturalHeight / this.latestPreviewFrame.originalHeight;
+    const previewScaleX = this.latestPreviewFrame.previewWidth / this.latestPreviewFrame.originalWidth;
+    const previewScaleY = this.latestPreviewFrame.previewHeight / this.latestPreviewFrame.originalHeight;
 
     for (const region of this.regions) {
       if (region.bounds.width <= 0 || region.bounds.height <= 0) continue;
@@ -1863,7 +1883,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(
-        this.previewImageElement,
+        this.rawPreviewCanvas,
         sourceX, sourceY, sourceWidth, sourceHeight,
         0, 0, canvas.width, canvas.height
       );

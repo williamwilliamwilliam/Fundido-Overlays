@@ -179,11 +179,13 @@ function syncPreviewRuntimeState(): void {
   let effectiveFps = userConfig.previewFps ?? 10;
   if (mode === 'capture') {
     effectiveFps = Math.min(effectiveFps, 12);
+  } else if (mode === 'regions') {
+    effectiveFps = Math.min(effectiveFps, 6);
   } else {
     effectiveFps = Math.min(effectiveFps, 8);
   }
 
-  previewService.updateRuntimeConfig(effectiveConfig, effectiveFps);
+  previewService.updateRuntimeConfig(effectiveConfig, effectiveFps, mode);
   previewService.setPaused(mode === 'inactive');
 }
 

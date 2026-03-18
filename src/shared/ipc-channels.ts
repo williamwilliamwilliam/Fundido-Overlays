@@ -74,6 +74,7 @@ export const DEBUG_SET_FILTERS = 'debug:set-filters';
 // Preview frames
 // ---------------------------------------------------------------------------
 export const CAPTURE_PREVIEW_FRAME = 'capture:preview-frame';
+export const REGIONS_PREVIEW_FRAME = 'regions:preview-frame';
 
 // ---------------------------------------------------------------------------
 // Performance metrics

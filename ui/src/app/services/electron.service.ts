@@ -1,6 +1,6 @@
 import { Injectable, NgZone } from '@angular/core';
 import { Subject } from 'rxjs';
-import type { LogEntry, PreviewFrameData } from '../models/electron-api';
+import type { LogEntry, PreviewFrameData, RegionsPreviewFrameData } from '../models/electron-api';
 
 /** Default config returned when running outside Electron (e.g. ng serve in a browser). */
 const STUB_CONFIG = {
@@ -26,12 +26,14 @@ export class ElectronService {
   private readonly debugLog$ = new Subject<LogEntry>();
   private readonly stateUpdated$ = new Subject<any>();
   private readonly previewFrame$ = new Subject<PreviewFrameData>();
+  private readonly regionsPreviewFrame$ = new Subject<RegionsPreviewFrameData>();
   private readonly perfMetrics$ = new Subject<any>();
   private readonly previewPaused$ = new Subject<boolean>();
 
   public readonly debugLogStream = this.debugLog$.asObservable();
   public readonly stateUpdateStream = this.stateUpdated$.asObservable();
   public readonly previewFrameStream = this.previewFrame$.asObservable();
+  public readonly regionsPreviewFrameStream = this.regionsPreviewFrame$.asObservable();
   public readonly perfMetricsStream = this.perfMetrics$.asObservable();
   public readonly previewPausedStream = this.previewPaused$.asObservable();
 
@@ -203,6 +205,10 @@ export class ElectronService {
       // Preview frames are the hottest IPC path in the app; keep them
       // outside Angular's zone and let subscribers batch their own UI work.
       this.previewFrame$.next(previewData);
+    });
+
+    window.fundidoApi.onRegionsPreviewFrame((previewData: RegionsPreviewFrameData) => {
+      this.regionsPreviewFrame$.next(previewData);
     });
 
     window.fundidoApi.onPerfMetrics((metrics: any) => {

@@ -31,6 +31,7 @@ const IPC = {
   CAPTURE_STATUS:              'capture:status',
   CAPTURE_LIST_DISPLAYS:       'capture:list-displays',
   CAPTURE_PREVIEW_FRAME:       'capture:preview-frame',
+  REGIONS_PREVIEW_FRAME:       'regions:preview-frame',
   STATE_UPDATED:               'state:updated',
   REGIONS_SET_WORKING:         'regions:set-working',
   GROUPS_SET_WORKING:          'groups:set-working',
@@ -142,6 +143,12 @@ const fundidoApi = {
   // -- Preview frame listener -----------------------------------------------
   onPreviewFrame: (callback: (previewData: any) => void): void => {
     ipcRenderer.on(IPC.CAPTURE_PREVIEW_FRAME, (_event, previewData) => {
+      callback(previewData);
+    });
+  },
+
+  onRegionsPreviewFrame: (callback: (previewData: any) => void): void => {
+    ipcRenderer.on(IPC.REGIONS_PREVIEW_FRAME, (_event, previewData) => {
       callback(previewData);
     });
   },
