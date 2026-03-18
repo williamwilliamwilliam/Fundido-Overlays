@@ -94,8 +94,8 @@ const fundidoApi = {
     ipcRenderer.invoke(IPC.CAPTURE_LIST_DISPLAYS),
 
   // -- Screen picker --------------------------------------------------------
-  pickRegion: (): Promise<{ x: number; y: number; width: number; height: number } | null> =>
-    ipcRenderer.invoke(IPC.PICKER_START),
+  pickRegion: (options?: { autoConfirmSingleClick?: boolean }): Promise<{ x: number; y: number; width: number; height: number } | null> =>
+    ipcRenderer.invoke(IPC.PICKER_START, options),
 
   pickColor: (): Promise<{ red: number; green: number; blue: number } | null> =>
     ipcRenderer.invoke(IPC.PICKER_COLOR),

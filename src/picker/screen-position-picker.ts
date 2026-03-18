@@ -12,6 +12,10 @@ export interface PickRegionResult {
   height: number;
 }
 
+export interface PickRegionOptions {
+  autoConfirmSingleClick?: boolean;
+}
+
 /** Callback fired each time the user adjusts the selection before confirming. */
 export type RegionUpdateCallback = (region: PickRegionResult) => void;
 
@@ -29,7 +33,8 @@ export type RegionUpdateCallback = (region: PickRegionResult) => void;
  * UI can show a live preview of the selected area.
  */
 export function pickScreenRegion(
-  onRegionUpdate: RegionUpdateCallback
+  onRegionUpdate: RegionUpdateCallback,
+  options: PickRegionOptions = {}
 ): Promise<PickRegionResult | null> {
   return new Promise((resolve) => {
     const allDisplays = screen.getAllDisplays();
@@ -97,7 +102,7 @@ export function pickScreenRegion(
         height: display.bounds.height,
       });
 
-      const pickerHtml = buildRegionPickerHtml(display.bounds.x, display.bounds.y);
+      const pickerHtml = buildRegionPickerHtml(display.bounds.x, display.bounds.y, options);
       pickerWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pickerHtml)}`);
 
       pickerWindows.push(pickerWindow);
@@ -108,7 +113,7 @@ export function pickScreenRegion(
   });
 }
 
-function buildRegionPickerHtml(displayOffsetX: number, displayOffsetY: number): string {
+function buildRegionPickerHtml(displayOffsetX: number, displayOffsetY: number, options: PickRegionOptions): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -242,6 +247,7 @@ function buildRegionPickerHtml(displayOffsetX: number, displayOffsetY: number): 
   const { ipcRenderer } = require('electron');
   const DISPLAY_OFFSET_X = ${displayOffsetX};
   const DISPLAY_OFFSET_Y = ${displayOffsetY};
+  const AUTO_CONFIRM_SINGLE_CLICK = ${options.autoConfirmSingleClick === true ? 'true' : 'false'};
 
   const selectionEl = document.getElementById('selection');
   const coordsBar = document.getElementById('coordsBar');
@@ -388,6 +394,13 @@ function buildRegionPickerHtml(displayOffsetX: number, displayOffsetY: number): 
       selH = Math.max(1, selH);
       updateSelectionElement();
       sendRegionUpdate();
+
+      const wasSingleClick = selW === 1 && selH === 1;
+      if (AUTO_CONFIRM_SINGLE_CLICK && wasSingleClick) {
+        ipcRenderer.send('picker:internal-confirm', {
+          x: selX, y: selY, width: selW, height: selH
+        });
+      }
     }
   });
 

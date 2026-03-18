@@ -141,9 +141,9 @@ export class ElectronService {
   private readonly pickerRegionUpdate$ = new Subject<{ x: number; y: number; width: number; height: number }>();
   public readonly pickerRegionUpdateStream = this.pickerRegionUpdate$.asObservable();
 
-  public async pickRegion(): Promise<{ x: number; y: number; width: number; height: number } | null> {
+  public async pickRegion(options?: { autoConfirmSingleClick?: boolean }): Promise<{ x: number; y: number; width: number; height: number } | null> {
     if (!this.isRunningInElectron) return null;
-    return window.fundidoApi.pickRegion();
+    return window.fundidoApi.pickRegion(options);
   }
 
   public async pickColor(): Promise<{ red: number; green: number; blue: number } | null> {

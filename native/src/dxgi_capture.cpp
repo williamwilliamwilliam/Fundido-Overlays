@@ -120,6 +120,8 @@ struct DisplayInfo {
     int adapterIndex;
     int outputIndex;
     std::string name;
+    int originX;
+    int originY;
     UINT width;
     UINT height;
 };
@@ -144,6 +146,8 @@ static std::vector<DisplayInfo> EnumerateDisplays() {
             info.adapterIndex = (int)adapterIdx;
             info.outputIndex  = (int)outputIdx;
             info.name         = WideToUtf8(desc.DeviceName);
+            info.originX      = desc.DesktopCoordinates.left;
+            info.originY      = desc.DesktopCoordinates.top;
             info.width        = displayWidth;
             info.height       = displayHeight;
             displays.push_back(info);
@@ -166,6 +170,8 @@ Napi::Value ListDisplays(const Napi::CallbackInfo& info) {
         displayObj.Set("adapterIndex", Napi::Number::New(env, displays[i].adapterIndex));
         displayObj.Set("outputIndex",  Napi::Number::New(env, displays[i].outputIndex));
         displayObj.Set("name",         Napi::String::New(env, displays[i].name));
+        displayObj.Set("originX",      Napi::Number::New(env, displays[i].originX));
+        displayObj.Set("originY",      Napi::Number::New(env, displays[i].originY));
         displayObj.Set("width",        Napi::Number::New(env, displays[i].width));
         displayObj.Set("height",       Napi::Number::New(env, displays[i].height));
         result.Set((uint32_t)i, displayObj);

@@ -23,8 +23,12 @@
           },
           "configurations": {
             "production": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "namedChunks": true,
               "budgets": [
-                { "type": "initial", "maximumWarning": "500kb", "maximumError": "1mb" },
+                { "type": "initial", "maximumWarning": "2mb", "maximumError": "3mb" },
                 { "type": "anyComponentStyle", "maximumWarning": "12kb", "maximumError": "20kb" }
               ],
               "outputHashing": "all"

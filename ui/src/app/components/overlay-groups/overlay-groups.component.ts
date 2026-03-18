@@ -18,7 +18,6 @@ import { ElectronService } from '../../services/electron.service';
       </p>
 
       <div class="toolbar">
-        <button class="primary" (click)="addGroup()">+ Add Group</button>
         <button (click)="saveAllGroups()" [disabled]="!hasUnsavedChanges">
           {{ hasUnsavedChanges ? 'Save (Ctrl+S)' : 'Saved' }}
         </button>
@@ -37,7 +36,7 @@ import { ElectronService } from '../../services/electron.service';
       </div>
 
       <div *ngIf="groups.length === 0" class="empty-state">
-        No overlay groups defined yet. Click "+ Add Group" to get started.
+        No overlay groups defined yet. Click the button below to get started.
       </div>
 
       <!-- ======================== GROUP CARD ======================== -->
@@ -57,7 +56,12 @@ import { ElectronService } from '../../services/electron.service';
               [ngModel]="group.enabled !== false"
               (ngModelChange)="group.enabled = $event; onFieldChanged()" />
           </label>
-          <input [(ngModel)]="group.name" (ngModelChange)="onFieldChanged()" placeholder="Group name" class="name-input" />
+          <input
+            [(ngModel)]="group.name"
+            (ngModelChange)="onFieldChanged()"
+            placeholder="Group name"
+            class="name-input"
+            [attr.data-group-name-id]="group.id" />
           <button class="danger-text" (click)="removeGroup(groupIndex)">Remove</button>
         </div>
         <ng-container *ngIf="isGroupExpanded(group.id)">
@@ -182,7 +186,12 @@ import { ElectronService } from '../../services/electron.service';
           (dragend)="onDragEnd()">
           <div class="overlay-header">
             <span class="drag-handle" title="Drag to reorder">&#x2630;</span>
-            <input [(ngModel)]="overlay.name" (ngModelChange)="onFieldChanged()" placeholder="Overlay name" class="overlay-name-input" />
+            <input
+              [(ngModel)]="overlay.name"
+              (ngModelChange)="onFieldChanged()"
+              placeholder="Overlay name"
+              class="overlay-name-input"
+              [attr.data-overlay-name-id]="overlay.id" />
             <select [(ngModel)]="overlay.contentType" (ngModelChange)="onContentTypeChanged(overlay)">
               <option value="text">Text</option><option value="image">Image</option><option value="regionMirror">Region Mirror</option>
             </select>
@@ -339,6 +348,8 @@ import { ElectronService } from '../../services/electron.service';
         <button class="add-overlay-btn" (click)="addOverlay(group)">+ Add Overlay</button>
         </ng-container>
       </div>
+
+      <button class="primary add-bottom-btn" (click)="addGroup()">+ Add Group</button>
     </div>
   `,
   styles: [`
@@ -357,6 +368,11 @@ import { ElectronService } from '../../services/electron.service';
     .empty-state {
       color: var(--color-text-secondary); font-style: italic; padding: var(--spacing-lg);
       text-align: center; border: 1px dashed var(--color-border); border-radius: var(--radius-md);
+    }
+
+    .add-bottom-btn {
+      margin-top: var(--spacing-md);
+      width: 100%;
     }
 
     .group-card {
@@ -642,15 +658,22 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     this.collapsedGroupIds.delete(newGroup.id);
     this.saveCollapsedGroupState();
     this.hasUnsavedChanges = true;
+    setTimeout(() => {
+      const input = document.querySelector(`[data-group-name-id="${newGroup.id}"]`) as HTMLInputElement | null;
+      if (!input) return;
+      input.focus();
+      input.select();
+    }, 0);
   }
 
-  removeGroup(index: number): void {
+  async removeGroup(index: number): Promise<void> {
     const [removedGroup] = this.groups.splice(index, 1);
     if (removedGroup?.id) {
       this.collapsedGroupIds.delete(removedGroup.id);
       this.saveCollapsedGroupState();
     }
     this.hasUnsavedChanges = true;
+    await this.saveAllGroups();
   }
 
   isGroupExpanded(groupId: string): boolean {
@@ -687,11 +710,12 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
 
   async pickAnchor(group: any): Promise<void> {
     this.pickingGroupId = group.id;
-    const result = await this.electronService.pickRegion();
+    const result = await this.electronService.pickRegion({ autoConfirmSingleClick: true });
     if (result !== null) {
       group.position.x = result.x;
       group.position.y = result.y;
       this.hasUnsavedChanges = true;
+      await this.saveAllGroups();
     }
     this.pickingGroupId = null;
   }
@@ -701,7 +725,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   // ---------------------------------------------------------------------------
 
   addOverlay(group: any): void {
-    group.overlays.push({
+    const newOverlay = {
       id: crypto.randomUUID(), name: 'New Overlay', contentType: 'text',
       defaultVisible: true, defaultOpacity: 1.0,
       textConfig: {
@@ -710,13 +734,21 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
         color: '#ffffff', backgroundColor: '#000000aa', padding: 4,
       },
       imageConfig: null, regionMirrorConfig: null, rules: [],
-    });
+    };
+    group.overlays.push(newOverlay);
     this.hasUnsavedChanges = true;
+    setTimeout(() => {
+      const input = document.querySelector(`[data-overlay-name-id="${newOverlay.id}"]`) as HTMLInputElement | null;
+      if (!input) return;
+      input.focus();
+      input.select();
+    }, 0);
   }
 
-  removeOverlay(group: any, index: number): void {
+  async removeOverlay(group: any, index: number): Promise<void> {
     group.overlays.splice(index, 1);
     this.hasUnsavedChanges = true;
+    await this.saveAllGroups();
   }
 
   // ---------------------------------------------------------------------------
@@ -782,7 +814,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
       overlay.imageConfig = { filePath: '', size: { scale: 1.0 } };
     }
     if (overlay.contentType === 'regionMirror' && !overlay.regionMirrorConfig) {
-      overlay.regionMirrorConfig = { monitoredRegionId: '', size: { scale: 0.5 } };
+      overlay.regionMirrorConfig = { monitoredRegionId: '', size: { scale: 1 } };
     }
     this.hasUnsavedChanges = true;
   }

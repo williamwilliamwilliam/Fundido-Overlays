@@ -808,10 +808,9 @@ function startStateEvaluationLoop(): void {
     // Convert to physical pixel coordinates
     const captureSourceString = currentConfigRef.config.gameCapture.captureSource;
     const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
-    const allDisplays = require('electron').screen.getAllDisplays();
-    const captureDisplay = allDisplays[displayIndex] || allDisplays[0];
-    const displayOriginX = captureDisplay.bounds.x;
-    const displayOriginY = captureDisplay.bounds.y;
+    const captureDisplay = captureService.getDisplayMetrics(displayIndex);
+    const displayOriginX = captureDisplay.originX;
+    const displayOriginY = captureDisplay.originY;
     const dpiScaleFactor = captureDisplay.scaleFactor || 1;
 
     captureDisplayCache.originX = displayOriginX;
@@ -888,18 +887,17 @@ function startStateEvaluationLoopFallback(): void {
 
     const captureSourceString = currentConfigRef.config.gameCapture.captureSource;
     const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
-    const allDisplays = require('electron').screen.getAllDisplays();
-    const captureDisplay = allDisplays[displayIndex] || allDisplays[0];
+    const captureDisplay = captureService.getDisplayMetrics(displayIndex);
 
-    captureDisplayCache.originX = captureDisplay.bounds.x;
-    captureDisplayCache.originY = captureDisplay.bounds.y;
+    captureDisplayCache.originX = captureDisplay.originX;
+    captureDisplayCache.originY = captureDisplay.originY;
     captureDisplayCache.scaleFactor = captureDisplay.scaleFactor || 1;
 
     const physicalBoundsRegions = monitoredRegions.map((region: any) => ({
       ...region,
       bounds: {
-        x: Math.round((region.bounds.x - captureDisplay.bounds.x) * captureDisplay.scaleFactor),
-        y: Math.round((region.bounds.y - captureDisplay.bounds.y) * captureDisplay.scaleFactor),
+        x: Math.round((region.bounds.x - captureDisplay.originX) * captureDisplay.scaleFactor),
+        y: Math.round((region.bounds.y - captureDisplay.originY) * captureDisplay.scaleFactor),
         width: Math.round(region.bounds.width * captureDisplay.scaleFactor),
         height: Math.round(region.bounds.height * captureDisplay.scaleFactor),
       },
@@ -1020,7 +1018,7 @@ app.whenReady().then(() => {
 
     const captureSourceString = captureConfig.captureSource;
     const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
-    previewService.setCaptureDisplayIndex(displayIndex);
+    previewService.setCaptureDisplayMetrics(captureService.getDisplayMetrics(displayIndex));
     previewService.start(currentConfigRef.config.preview, currentConfigRef.config.preview.previewFps ?? 10);
     syncPreviewRuntimeState();
     ocrService.start(currentConfigRef.config.ocr);

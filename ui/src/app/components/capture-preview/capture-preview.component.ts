@@ -4,6 +4,7 @@ import {
   ChangeDetectorRef,
   Component,
   ElementRef,
+  HostListener,
   NgZone,
   OnDestroy,
   OnInit,
@@ -17,8 +18,17 @@ import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
 
 type PreviewMeta = Pick<
   PreviewFrameData,
-  'originalWidth' | 'originalHeight' | 'previewWidth' | 'previewHeight'
+  'originalWidth' | 'originalHeight' | 'previewWidth' | 'previewHeight' | 'displayOriginX' | 'displayOriginY' | 'displayScaleFactor'
 >;
+
+interface CaptureRegionOverlay {
+  id: string;
+  name: string;
+  leftPercent: number;
+  topPercent: number;
+  widthPercent: number;
+  heightPercent: number;
+}
 
 @Component({
   selector: 'app-capture-preview',
@@ -33,18 +43,15 @@ type PreviewMeta = Pick<
       <div class="controls">
         <div class="control-group">
           <label class="control-label">Display</label>
-          <select [(ngModel)]="selectedDisplayIndex" class="display-select">
+          <select
+            [(ngModel)]="selectedDisplayIndex"
+            (ngModelChange)="onDisplaySelectionChanged($event)"
+            class="display-select">
             <option *ngFor="let display of availableDisplays; let i = index" [ngValue]="i">
               {{ display.name }} ({{ display.width }}x{{ display.height }})
             </option>
           </select>
         </div>
-
-        <button
-          [class.primary]="!isCapturing"
-          (click)="toggleCapture()">
-          {{ isCapturing ? 'Stop Capture' : 'Start Capture' }}
-        </button>
 
         <span class="status-indicator" [class.active]="isCapturing">
           {{ isCapturing ? 'Capturing' : 'Stopped' }}
@@ -57,12 +64,31 @@ type PreviewMeta = Pick<
       </div>
 
       <div class="preview-area">
-        <img
-          #previewImage
-          class="preview-image"
-          [class.preview-visible]="hasPreviewFrame"
-          [class.preview-dimmed]="isPreviewPaused"
-          alt="Capture preview" />
+        <div
+          #previewStage
+          class="preview-stage"
+          *ngIf="hasPreviewFrame"
+          [style.transform]="'scale(' + previewZoom + ')'"
+          [style.transform-origin]="previewTransformOrigin"
+          (wheel)="onPreviewWheel($event)">
+          <img
+            #previewImage
+            class="preview-image"
+            [class.preview-visible]="hasPreviewFrame"
+            [class.preview-dimmed]="isPreviewPaused"
+            alt="Capture preview" />
+          <div class="region-overlay-layer" *ngIf="captureRegionOverlays.length > 0">
+            <div
+              *ngFor="let overlay of captureRegionOverlays"
+              class="region-overlay-box"
+              [style.left.%]="overlay.leftPercent"
+              [style.top.%]="overlay.topPercent"
+              [style.width.%]="overlay.widthPercent"
+              [style.height.%]="overlay.heightPercent"
+              [title]="overlay.name">
+            </div>
+          </div>
+        </div>
         <div *ngIf="!hasPreviewFrame && !isCapturing" class="placeholder">
           Click "Start Capture" to begin previewing your display.
         </div>
@@ -176,6 +202,14 @@ type PreviewMeta = Pick<
       overflow: hidden;
     }
 
+    .preview-stage {
+      position: relative;
+      width: 100%;
+      display: flex;
+      transition: transform 80ms ease-out;
+      will-change: transform;
+    }
+
     .preview-image {
       width: 100%;
       height: auto;
@@ -185,6 +219,23 @@ type PreviewMeta = Pick<
 
     .preview-image.preview-visible {
       display: block;
+    }
+
+    .region-overlay-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .region-overlay-box {
+      position: absolute;
+      border: 2px solid rgba(255, 64, 64, 0.95);
+      background: rgba(255, 64, 64, 0.08);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+      pointer-events: auto;
+      box-sizing: border-box;
+      min-width: 2px;
+      min-height: 2px;
     }
 
     .placeholder {
@@ -256,6 +307,7 @@ type PreviewMeta = Pick<
   `],
 })
 export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy {
+  @ViewChild('previewStage') private previewStageRef?: ElementRef<HTMLDivElement>;
   @ViewChild('previewImage') private previewImageRef?: ElementRef<HTMLImageElement>;
 
   isCapturing = false;
@@ -265,6 +317,11 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
   metrics: PerfMetrics | null = null;
   isPreviewPaused = false;
   hasPreviewFrame = false;
+  captureRegionOverlays: CaptureRegionOverlay[] = [];
+  previewZoom = 1;
+  previewTransformOrigin = '50% 50%';
+  private monitoredRegions: any[] = [];
+  private hasInitializedDisplaySelection = false;
 
   private previewSubscription: Subscription | null = null;
   private metricsSubscription: Subscription | null = null;
@@ -280,10 +337,27 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
   async ngOnInit(): Promise<void> {
     this.electronService.setActivePage('capture');
 
+    const config = await this.electronService.loadConfig();
+    this.monitoredRegions = (config.monitoredRegions || []).filter((region: any) => region.enabled !== false);
+    this.availableDisplays = await this.electronService.listDisplays();
+
+    const configuredDisplayIndex = config.gameCapture?.captureSource === 'primary'
+      ? 0
+      : parseInt(config.gameCapture?.captureSource ?? '0', 10);
+    const hasValidConfiguredDisplay =
+      !isNaN(configuredDisplayIndex) &&
+      configuredDisplayIndex >= 0 &&
+      configuredDisplayIndex < this.availableDisplays.length;
+    this.selectedDisplayIndex = hasValidConfiguredDisplay ? configuredDisplayIndex : 0;
+
     const status = await this.electronService.getCaptureStatus();
     this.isCapturing = status.isCapturing;
+    this.hasInitializedDisplaySelection = true;
 
-    this.availableDisplays = await this.electronService.listDisplays();
+    if (this.availableDisplays.length > 0 && !this.isCapturing) {
+      await this.applySelectedDisplay(true);
+    }
+
     this.changeDetectorRef.markForCheck();
 
     this.ngZone.runOutsideAngular(() => {
@@ -309,6 +383,11 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
     }
   }
 
+  @HostListener('window:resize')
+  onWindowResize(): void {
+    this.changeDetectorRef.markForCheck();
+  }
+
   ngOnDestroy(): void {
     this.previewSubscription?.unsubscribe();
     this.metricsSubscription?.unsubscribe();
@@ -316,20 +395,13 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
     this.electronService.setActivePage('');
   }
 
-  async toggleCapture(): Promise<void> {
-    if (this.isCapturing) {
-      await this.electronService.stopCapture();
-      this.clearPreview();
-      this.metrics = null;
-    } else {
-      const config = await this.electronService.loadConfig();
-      config.gameCapture.captureSource = String(this.selectedDisplayIndex);
-      await this.electronService.saveConfig(config);
-
-      await this.electronService.startCapture();
+  async onDisplaySelectionChanged(displayIndex: number): Promise<void> {
+    this.selectedDisplayIndex = displayIndex;
+    if (!this.hasInitializedDisplaySelection) {
+      return;
     }
 
-    this.isCapturing = !this.isCapturing;
+    await this.applySelectedDisplay(false);
     this.changeDetectorRef.markForCheck();
   }
 
@@ -355,19 +427,132 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
         originalHeight: previewData.originalHeight,
         previewWidth: previewData.previewWidth,
         previewHeight: previewData.previewHeight,
+        displayOriginX: previewData.displayOriginX,
+        displayOriginY: previewData.displayOriginY,
+        displayScaleFactor: previewData.displayScaleFactor,
       };
-      this.changeDetectorRef.detectChanges();
     }
+
+    this.captureRegionOverlays = this.buildCaptureRegionOverlays();
+    this.changeDetectorRef.detectChanges();
   }
 
   private clearPreview(): void {
     this.latestPreviewSrc = null;
     this.previewMeta = null;
     this.hasPreviewFrame = false;
+    this.captureRegionOverlays = [];
+    this.previewZoom = 1;
+    this.previewTransformOrigin = '50% 50%';
 
     const previewImage = this.previewImageRef?.nativeElement;
     if (previewImage) {
       previewImage.src = '';
     }
+  }
+
+  private async applySelectedDisplay(skipRestartIfAlreadyCapturing: boolean): Promise<void> {
+    if (this.availableDisplays.length === 0) {
+      return;
+    }
+
+    const config = await this.electronService.loadConfig();
+    config.gameCapture.captureSource = String(this.selectedDisplayIndex);
+    config.gameCapture.captureEnabled = true;
+    await this.electronService.saveConfig(config);
+    this.monitoredRegions = (config.monitoredRegions || []).filter((region: any) => region.enabled !== false);
+
+    if (!this.isCapturing) {
+      await this.electronService.startCapture();
+      this.isCapturing = true;
+      return;
+    }
+
+    if (!skipRestartIfAlreadyCapturing) {
+      this.clearPreview();
+      this.metrics = null;
+      await this.electronService.restartCaptureIfRunning();
+      this.isCapturing = true;
+    }
+  }
+
+  onPreviewWheel(event: WheelEvent): void {
+    event.preventDefault();
+
+    const previewStage = this.previewStageRef?.nativeElement;
+    if (!previewStage) {
+      return;
+    }
+
+    const bounds = previewStage.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) {
+      return;
+    }
+
+    const pointerXPercent = ((event.clientX - bounds.left) / bounds.width) * 100;
+    const pointerYPercent = ((event.clientY - bounds.top) / bounds.height) * 100;
+    const clampedXPercent = Math.max(0, Math.min(100, pointerXPercent));
+    const clampedYPercent = Math.max(0, Math.min(100, pointerYPercent));
+    this.previewTransformOrigin = `${clampedXPercent}% ${clampedYPercent}%`;
+
+    const zoomDelta = event.deltaY < 0 ? 0.2 : -0.2;
+    this.previewZoom = Math.max(1, Math.min(8, Math.round((this.previewZoom + zoomDelta) * 100) / 100));
+    this.changeDetectorRef.markForCheck();
+  }
+
+  private buildCaptureRegionOverlays(): CaptureRegionOverlay[] {
+    if (!this.previewMeta) {
+      return [];
+    }
+
+    const previewScaleX = this.previewMeta.previewWidth / this.previewMeta.originalWidth;
+    const previewScaleY = this.previewMeta.previewHeight / this.previewMeta.originalHeight;
+    const displayOriginX = this.previewMeta.displayOriginX || 0;
+    const displayOriginY = this.previewMeta.displayOriginY || 0;
+    const displayScaleFactor = this.previewMeta.displayScaleFactor || 1;
+
+    const overlays: CaptureRegionOverlay[] = [];
+    for (const region of this.monitoredRegions) {
+      if (!region?.bounds || region.bounds.width <= 0 || region.bounds.height <= 0) {
+        continue;
+      }
+
+      const physicalX = (region.bounds.x - displayOriginX) * displayScaleFactor;
+      const physicalY = (region.bounds.y - displayOriginY) * displayScaleFactor;
+      const physicalWidth = region.bounds.width * displayScaleFactor;
+      const physicalHeight = region.bounds.height * displayScaleFactor;
+
+      const sourceX = physicalX * previewScaleX;
+      const sourceY = physicalY * previewScaleY;
+      const sourceWidth = physicalWidth * previewScaleX;
+      const sourceHeight = physicalHeight * previewScaleY;
+
+      const right = sourceX + sourceWidth;
+      const bottom = sourceY + sourceHeight;
+      if (right <= 0 || bottom <= 0 || sourceX >= this.previewMeta.previewWidth || sourceY >= this.previewMeta.previewHeight) {
+        continue;
+      }
+
+      const clippedLeft = Math.max(0, sourceX);
+      const clippedTop = Math.max(0, sourceY);
+      const clippedRight = Math.min(this.previewMeta.previewWidth, right);
+      const clippedBottom = Math.min(this.previewMeta.previewHeight, bottom);
+      const clippedWidth = clippedRight - clippedLeft;
+      const clippedHeight = clippedBottom - clippedTop;
+      if (clippedWidth <= 0 || clippedHeight <= 0) {
+        continue;
+      }
+
+      overlays.push({
+        id: region.id,
+        name: region.name || 'Unnamed Region',
+        leftPercent: (clippedLeft / this.previewMeta.previewWidth) * 100,
+        topPercent: (clippedTop / this.previewMeta.previewHeight) * 100,
+        widthPercent: (clippedWidth / this.previewMeta.previewWidth) * 100,
+        heightPercent: (clippedHeight / this.previewMeta.previewHeight) * 100,
+      });
+    }
+
+    return overlays;
   }
 }

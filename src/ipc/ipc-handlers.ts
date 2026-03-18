@@ -41,7 +41,7 @@ export function registerIpcHandlers(
       captureService.start(captureConfig);
       const captureSourceString = captureConfig.captureSource;
       const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
-      previewService.setCaptureDisplayIndex(displayIndex);
+      previewService.setCaptureDisplayMetrics(captureService.getDisplayMetrics(displayIndex));
       previewService.start(currentConfigRef.config.preview, currentConfigRef.config.preview.previewFps ?? 10);
       syncPreviewRuntimeState();
       ocrService.start(currentConfigRef.config.ocr);
@@ -144,7 +144,7 @@ export function registerIpcHandlers(
     // include the display origin for coordinate mapping.
     const captureSourceString = captureConfig.captureSource;
     const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
-    previewService.setCaptureDisplayIndex(displayIndex);
+    previewService.setCaptureDisplayMetrics(captureService.getDisplayMetrics(displayIndex));
     previewService.start(currentConfigRef.config.preview, currentConfigRef.config.preview.previewFps ?? 10);
     syncPreviewRuntimeState();
     ocrService.start(currentConfigRef.config.ocr);
@@ -184,7 +184,7 @@ export function registerIpcHandlers(
   // Screen Region Picker
   // -------------------------------------------------------------------------
 
-  ipcMain.handle(IpcChannels.PICKER_START, async (_event: IpcMainInvokeEvent) => {
+  ipcMain.handle(IpcChannels.PICKER_START, async (_event: IpcMainInvokeEvent, options?: { autoConfirmSingleClick?: boolean }) => {
     logger.debug(LogCategory.Ipc, 'PICKER_START invoked');
     pickerActiveRef.active = true;
     syncPreviewRuntimeState();
@@ -198,7 +198,7 @@ export function registerIpcHandlers(
       }
     };
 
-    const result = await pickScreenRegion(onRegionUpdate);
+    const result = await pickScreenRegion(onRegionUpdate, options || {});
     pickerActiveRef.active = false;
     syncPreviewRuntimeState();
     return result;

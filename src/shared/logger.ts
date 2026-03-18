@@ -116,7 +116,8 @@ class DebugLogger {
     window.webContents.on('console-message', (_event: any, level: number, message: string, line: number, sourceId: string) => {
       const levelMap: Record<number, string> = { 0: 'DEBUG', 1: 'INFO', 2: 'WARN', 3: 'ERROR' };
       const levelStr = levelMap[level] || 'LOG';
-      this.writeToFile(`[${new Date().toISOString()}][${levelStr}][Renderer] ${message} (${sourceId}:${line})`);
+      const sanitizedMessage = this.sanitizeRendererConsoleMessage(message);
+      this.writeToFile(`[${new Date().toISOString()}][${levelStr}][Renderer] ${sanitizedMessage} (${sourceId}:${line})`);
     });
   }
 
@@ -226,6 +227,13 @@ class DebugLogger {
     } catch {
       return String(data);
     }
+  }
+
+  private sanitizeRendererConsoleMessage(message: string): string {
+    return message.replace(
+      /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g,
+      '[data:image;base64 redacted]'
+    );
   }
 
   private rotateLogIfNeeded(): void {

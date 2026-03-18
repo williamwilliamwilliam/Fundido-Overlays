@@ -45,7 +45,6 @@
     "files": [
       "dist/**/*",
       "native/build/Release/**/*",
-      "!dist/**/*.map",
       "!dist/**/*.d.ts"
     ],
     "extraFiles": [

@@ -1,3 +1,4 @@
+import { screen } from 'electron';
 import * as path from 'path';
 import { GameCaptureConfig } from '../shared';
 import { logger, LogCategory } from '../shared/logger';
@@ -27,8 +28,14 @@ export interface DisplayInfo {
   adapterIndex: number;
   outputIndex: number;
   name: string;
+  originX: number;
+  originY: number;
   width: number;
   height: number;
+}
+
+export interface CaptureDisplayMetrics extends DisplayInfo {
+  scaleFactor: number;
 }
 
 /**
@@ -121,10 +128,46 @@ export class GameCaptureService {
         adapterIndex: 0,
         outputIndex: 0,
         name: 'Stub Display (native addon not loaded)',
+        originX: 0,
+        originY: 0,
         width: 1920,
         height: 1080,
       },
     ];
+  }
+
+  public getDisplayMetrics(displayIndex: number): CaptureDisplayMetrics {
+    const displays = this.listDisplays();
+    const fallbackDisplay: DisplayInfo = {
+      adapterIndex: 0,
+      outputIndex: 0,
+      name: 'Unknown Display',
+      originX: 0,
+      originY: 0,
+      width: 1920,
+      height: 1080,
+    };
+
+    const safeIndex = displayIndex >= 0 && displayIndex < displays.length ? displayIndex : 0;
+    const targetDisplay = displays[safeIndex] || displays[0] || fallbackDisplay;
+    const electronDisplays = screen.getAllDisplays();
+
+    const matchingElectronDisplay =
+      electronDisplays.find((display) =>
+        display.bounds.x === targetDisplay.originX &&
+        display.bounds.y === targetDisplay.originY
+      ) ||
+      electronDisplays.find((display) =>
+        Math.round(display.size.width * (display.scaleFactor || 1)) === targetDisplay.width &&
+        Math.round(display.size.height * (display.scaleFactor || 1)) === targetDisplay.height
+      ) ||
+      electronDisplays[safeIndex] ||
+      electronDisplays[0];
+
+    return {
+      ...targetDisplay,
+      scaleFactor: matchingElectronDisplay?.scaleFactor || 1,
+    };
   }
 
   public setFrameCapturedCallback(callback: FrameCapturedCallback): void {

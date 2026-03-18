@@ -1,7 +1,7 @@
-import { BrowserWindow, nativeImage, screen } from 'electron';
+import { BrowserWindow, nativeImage } from 'electron';
 import * as path from 'path';
 import { Worker } from 'worker_threads';
-import { CapturedFrame } from './game-capture.service';
+import { CapturedFrame, CaptureDisplayMetrics } from './game-capture.service';
 import { PreviewConfig, PreviewDownsampleMethod } from '../shared';
 import { logger, LogCategory } from '../shared/logger';
 import * as IpcChannels from '../shared/ipc-channels';
@@ -115,19 +115,10 @@ export class PreviewFrameService {
    * This lets the UI convert between screen-absolute coordinates and
    * frame-relative coordinates.
    */
-  public setCaptureDisplayIndex(displayIndex: number): void {
-    const allDisplays = screen.getAllDisplays();
-    const isValidIndex = displayIndex >= 0 && displayIndex < allDisplays.length;
-    if (isValidIndex) {
-      const display = allDisplays[displayIndex];
-      this.displayOriginX = display.bounds.x;
-      this.displayOriginY = display.bounds.y;
-      this.displayScaleFactor = display.scaleFactor || 1;
-    } else {
-      this.displayOriginX = 0;
-      this.displayOriginY = 0;
-      this.displayScaleFactor = 1;
-    }
+  public setCaptureDisplayMetrics(display: CaptureDisplayMetrics): void {
+    this.displayOriginX = display.originX;
+    this.displayOriginY = display.originY;
+    this.displayScaleFactor = display.scaleFactor || 1;
     logger.info(
       LogCategory.Capture,
       `Display origin: (${this.displayOriginX}, ${this.displayOriginY}), scaleFactor: ${this.displayScaleFactor}`

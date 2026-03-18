@@ -80,7 +80,7 @@ export interface FundidoApi {
   stopCapture(): Promise<{ success: boolean }>;
   getCaptureStatus(): Promise<{ isCapturing: boolean; isNativeAvailable: boolean }>;
   listDisplays(): Promise<DisplayInfo[]>;
-  pickRegion(): Promise<{ x: number; y: number; width: number; height: number } | null>;
+  pickRegion(options?: { autoConfirmSingleClick?: boolean }): Promise<{ x: number; y: number; width: number; height: number } | null>;
   pickColor(): Promise<{ red: number; green: number; blue: number } | null>;
   setWorkingRegions(regions: any[]): Promise<{ success: boolean }>;
   setWorkingGroups(groups: any[]): Promise<{ success: boolean }>;
