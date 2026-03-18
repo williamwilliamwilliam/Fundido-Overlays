@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
+import { PendingChangesComponent } from '../../guards/pending-changes.guard';
 import { ElectronService } from '../../services/electron.service';
 
 @Component({
@@ -34,6 +35,33 @@ import { ElectronService } from '../../services/electron.service';
         <div class="import-actions">
           <button class="primary" (click)="importGroups()">Import</button>
           <button (click)="showImportDialog = false">Cancel</button>
+        </div>
+      </div>
+
+      <div *ngIf="showUnsavedChangesDialog" class="modal-backdrop" (click)="stayOnPage()">
+        <div class="modal-dialog" (click)="$event.stopPropagation()">
+          <h3>Unsaved Changes</h3>
+          <p class="modal-description">You have unsaved changes in Overlay Groups.</p>
+          <div class="import-actions unsaved-actions">
+            <button
+              class="primary"
+              [disabled]="isResolvingUnsavedChanges"
+              (click)="saveAndContinueNavigation()">
+              Save and Continue
+            </button>
+            <button
+              class="danger-btn"
+              [disabled]="isResolvingUnsavedChanges"
+              (click)="leaveWithoutSaving()">
+              Leave without Saving
+            </button>
+            <button
+              class="tertiary-btn"
+              [disabled]="isResolvingUnsavedChanges"
+              (click)="stayOnPage()">
+              Stay Here
+            </button>
+          </div>
         </div>
       </div>
 
@@ -308,9 +336,9 @@ import { ElectronService } from '../../services/electron.service';
               <div class="rule-conditions">
                 <div class="logic-mode-row">
                   <span class="rule-keyword">When</span>
-                  <select class="logic-mode-select" [(ngModel)]="rule.logicMode" (ngModelChange)="onFieldChanged()" *ngIf="rule.conditions.length > 1">
-                    <option value="AND">ALL (AND)</option>
-                    <option value="OR">ANY (OR)</option>
+                  <select class="logic-mode-select" [(ngModel)]="rule.logicMode" (ngModelChange)="onFieldChanged()">
+                    <option value="AND">Every Condition is true</option>
+                    <option value="OR">At least one Condition is true</option>
                   </select>
                 </div>
                 <div *ngFor="let cond of rule.conditions; let condIndex = index" class="condition-row">
@@ -393,6 +421,41 @@ import { ElectronService } from '../../services/electron.service';
     .import-dialog {
       background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
       border-radius: var(--radius-md); padding: var(--spacing-md); margin-bottom: var(--spacing-lg);
+    }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: var(--spacing-lg);
+      z-index: 1000;
+    }
+    .modal-dialog {
+      width: min(520px, 100%);
+      background-color: var(--color-bg-secondary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--spacing-md);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+    }
+    .modal-description {
+      color: var(--color-text-secondary);
+      margin-bottom: var(--spacing-sm);
+    }
+    .unsaved-actions {
+      margin-top: var(--spacing-md);
+      flex-wrap: wrap;
+    }
+    .danger-btn {
+      background-color: #7f1d1d;
+      border-color: #7f1d1d;
+      color: #fff;
+    }
+    .danger-btn:hover {
+      background-color: #991b1b;
+      border-color: #991b1b;
     }
     .import-dialog textarea { width: 100%; font-family: var(--font-mono); font-size: 0.85rem; margin-bottom: var(--spacing-sm); }
     .import-actions { display: flex; gap: var(--spacing-sm); }
@@ -582,19 +645,23 @@ import { ElectronService } from '../../services/electron.service';
     }
   `],
 })
-export class OverlayGroupsComponent implements OnInit, OnDestroy {
+export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChangesComponent {
   private static readonly STORAGE_KEY_COLLAPSED_GROUPS = 'fundido:collapsedOverlayGroups';
 
   groups: any[] = [];
   monitoredRegions: any[] = [];
   showImportDialog = false;
+  showUnsavedChangesDialog = false;
   importJsonText = '';
   hasUnsavedChanges = false;
+  isResolvingUnsavedChanges = false;
   pickingGroupId: string | null = null;
   highlightId: string | null = null;
   private collapsedGroupIds = new Set<string>();
   private savedOverlaySnapshots = new Map<string, string>();
   private groupComparableSnapshots = new Map<string, string>();
+  private pendingNavigationPromise: Promise<boolean> | null = null;
+  private pendingNavigationResolve: ((allowNavigation: boolean) => void) | null = null;
 
   /** Cached cross-references: overlayId → monitored regions referenced by that overlay. Built once on load. */
   overlayCrossRefs = new Map<string, Array<{ id: string; name: string }>>();
@@ -635,10 +702,21 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     }
   }
 
+  @HostListener('window:beforeunload', ['$event'])
+  onBeforeUnload(event: BeforeUnloadEvent): void {
+    if (!this.hasUnsavedChanges) {
+      return;
+    }
+
+    event.preventDefault();
+    event.returnValue = '';
+  }
+
   async ngOnInit(): Promise<void> {
     const config = await this.electronService.loadConfig();
     this.groups = config.overlayGroups || [];
     this.normalizeGroupDefaults();
+    this.normalizeOverlayRuleLogicModes();
     this.refreshSavedOverlaySnapshots();
     this.refreshGroupComparableSnapshots();
     this.loadCollapsedGroupState();
@@ -685,6 +763,46 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stateSubscription?.unsubscribe();
+    this.resolvePendingNavigation(false);
+  }
+
+  canDeactivate(): boolean | Promise<boolean> {
+    if (!this.hasUnsavedChanges) {
+      return true;
+    }
+
+    if (this.pendingNavigationPromise) {
+      return this.pendingNavigationPromise;
+    }
+
+    this.showUnsavedChangesDialog = true;
+    this.pendingNavigationPromise = new Promise<boolean>((resolve) => {
+      this.pendingNavigationResolve = resolve;
+    });
+    return this.pendingNavigationPromise;
+  }
+
+  async saveAndContinueNavigation(): Promise<void> {
+    if (!this.pendingNavigationResolve || this.isResolvingUnsavedChanges) {
+      return;
+    }
+
+    this.isResolvingUnsavedChanges = true;
+
+    try {
+      await this.saveAllGroups();
+      this.resolvePendingNavigation(true);
+    } catch {
+      this.isResolvingUnsavedChanges = false;
+    }
+  }
+
+  leaveWithoutSaving(): void {
+    this.resolvePendingNavigation(true);
+  }
+
+  stayOnPage(): void {
+    this.resolvePendingNavigation(false);
   }
 
   onFieldChanged(): void { this.markGroupsChanged(); }
@@ -1079,12 +1197,24 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
       const config = await this.electronService.loadConfig();
       this.groups = config.overlayGroups || [];
       this.normalizeGroupDefaults();
+      this.normalizeOverlayRuleLogicModes();
       this.refreshSavedOverlaySnapshots();
       this.refreshGroupComparableSnapshots();
       this.syncCollapsedGroupState();
       this.showImportDialog = false;
       this.importJsonText = '';
     }
+  }
+
+  private resolvePendingNavigation(allowNavigation: boolean): void {
+    this.showUnsavedChangesDialog = false;
+    this.isResolvingUnsavedChanges = false;
+
+    const resolve = this.pendingNavigationResolve;
+    this.pendingNavigationResolve = null;
+    this.pendingNavigationPromise = null;
+
+    resolve?.(allowNavigation);
   }
 
   private loadCollapsedGroupState(): void {
@@ -1130,6 +1260,18 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
       }
       if (group.defaultOpacity === undefined) {
         group.defaultOpacity = 1;
+      }
+    }
+  }
+
+  private normalizeOverlayRuleLogicModes(): void {
+    for (const group of this.groups) {
+      for (const overlay of group.overlays || []) {
+        for (const rule of overlay.rules || []) {
+          if (!rule.logicMode) {
+            rule.logicMode = 'AND';
+          }
+        }
       }
     }
   }

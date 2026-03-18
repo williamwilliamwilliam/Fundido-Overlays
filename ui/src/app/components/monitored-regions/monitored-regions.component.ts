@@ -15,6 +15,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
+import { PendingChangesComponent } from '../../guards/pending-changes.guard';
 import { ElectronService } from '../../services/electron.service';
 import type { RegionsPreviewFrameData } from '../../models/electron-api';
 
@@ -113,6 +114,33 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
           <div class="import-actions">
             <button class="primary" (click)="copySharedRegionJson()">{{ shareRegionCopied ? 'Copied!' : 'Copy to Clipboard' }}</button>
             <button (click)="closeShareRegionDialog()">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <div *ngIf="showUnsavedChangesDialog" class="modal-backdrop" (click)="stayOnPage()">
+        <div class="modal-dialog" (click)="$event.stopPropagation()">
+          <h3>Unsaved Changes</h3>
+          <p class="modal-description">You have unsaved changes in Monitored Regions.</p>
+          <div class="unsaved-actions">
+            <button
+              class="primary"
+              [disabled]="isResolvingUnsavedChanges"
+              (click)="saveAndContinueNavigation()">
+              Save and Continue
+            </button>
+            <button
+              class="danger-btn"
+              [disabled]="isResolvingUnsavedChanges"
+              (click)="leaveWithoutSaving()">
+              Leave without Saving
+            </button>
+            <button
+              class="tertiary-btn"
+              [disabled]="isResolvingUnsavedChanges"
+              (click)="stayOnPage()">
+              Stay Here
+            </button>
           </div>
         </div>
       </div>
@@ -680,6 +708,22 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     .modal-description {
       color: var(--color-text-secondary);
       margin-bottom: var(--spacing-sm);
+    }
+    .unsaved-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: var(--spacing-sm);
+      margin-top: var(--spacing-md);
+      flex-wrap: wrap;
+    }
+    .danger-btn {
+      background-color: #7f1d1d;
+      border-color: #7f1d1d;
+      color: #fff;
+    }
+    .danger-btn:hover {
+      background-color: #991b1b;
+      border-color: #991b1b;
     }
     .modal-textarea {
       width: 100%;
@@ -1483,7 +1527,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     }
   `],
 })
-export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestroy {
+export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestroy, PendingChangesComponent {
   private static readonly STORAGE_KEY_COLLAPSED_REGIONS = 'fundido:collapsedRegions';
   private static readonly SHARED_REGION_EXPORT_TYPE = 'FundidoMonitoredRegion';
 
@@ -1492,11 +1536,13 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   regions: any[] = [];
   overlayGroups: any[] = [];
   showImportRegionDialog = false;
+  showUnsavedChangesDialog = false;
   importRegionJsonText = '';
   importRegionErrorMessage = '';
   importRegionConflictRegionName = '';
   shareRegionJson = '';
   shareRegionCopied = false;
+  isResolvingUnsavedChanges = false;
   pickingRegionId: string | null = null;
   pickingColorForPreprocess: any = null;
   hasPreviewFrame = false;
@@ -1512,6 +1558,8 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   private savedRegionSnapshots = new Map<string, string>();
   private regionComparableSnapshots = new Map<string, string>();
   private pendingImportedRegion: any | null = null;
+  private pendingNavigationPromise: Promise<boolean> | null = null;
+  private pendingNavigationResolve: ((allowNavigation: boolean) => void) | null = null;
 
   /** Maps regionId → { medianHex, calcResults: Map<calcId, { currentValue, confidences }> } */
   private regionStateMap = new Map<string, {
@@ -1558,6 +1606,16 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   onWindowBlur(): void {
     this.isUiUnfocused = true;
     this.changeDetectorRef.markForCheck();
+  }
+
+  @HostListener('window:beforeunload', ['$event'])
+  onBeforeUnload(event: BeforeUnloadEvent): void {
+    if (!this.hasUnsavedChanges) {
+      return;
+    }
+
+    event.preventDefault();
+    event.returnValue = '';
   }
 
   @HostListener('window:keydown', ['$event'])
@@ -1710,6 +1768,49 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.electronService.setActivePage('');
     // Clear working regions so the pipeline falls back to saved config
     this.electronService.setWorkingRegions(null as any);
+    this.resolvePendingNavigation(false);
+  }
+
+  canDeactivate(): boolean | Promise<boolean> {
+    if (!this.hasUnsavedChanges) {
+      return true;
+    }
+
+    if (this.pendingNavigationPromise) {
+      return this.pendingNavigationPromise;
+    }
+
+    this.showUnsavedChangesDialog = true;
+    this.changeDetectorRef.markForCheck();
+    this.pendingNavigationPromise = new Promise<boolean>((resolve) => {
+      this.pendingNavigationResolve = resolve;
+    });
+    return this.pendingNavigationPromise;
+  }
+
+  async saveAndContinueNavigation(): Promise<void> {
+    if (!this.pendingNavigationResolve || this.isResolvingUnsavedChanges) {
+      return;
+    }
+
+    this.isResolvingUnsavedChanges = true;
+    this.changeDetectorRef.markForCheck();
+
+    try {
+      await this.saveAllRegions();
+      this.resolvePendingNavigation(true);
+    } catch {
+      this.isResolvingUnsavedChanges = false;
+      this.changeDetectorRef.markForCheck();
+    }
+  }
+
+  leaveWithoutSaving(): void {
+    this.resolvePendingNavigation(true);
+  }
+
+  stayOnPage(): void {
+    this.resolvePendingNavigation(false);
   }
 
   // ---------------------------------------------------------------------------
@@ -2109,6 +2210,18 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
   async copyToClipboard(text: string): Promise<void> {
     await navigator.clipboard.writeText(text);
+  }
+
+  private resolvePendingNavigation(allowNavigation: boolean): void {
+    this.showUnsavedChangesDialog = false;
+    this.isResolvingUnsavedChanges = false;
+
+    const resolve = this.pendingNavigationResolve;
+    this.pendingNavigationResolve = null;
+    this.pendingNavigationPromise = null;
+
+    resolve?.(allowNavigation);
+    this.changeDetectorRef.markForCheck();
   }
 
   private processFrameState(frameState: any): void {
