@@ -61,22 +61,59 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
           {{ hasUnsavedChanges ? 'Save (Ctrl+S)' : 'Saved' }}
         </button>
         <button (click)="exportRegions()">Export</button>
-        <button (click)="showImportDialog = true">Import</button>
+        <button (click)="openImportRegionDialog()">Import a Monitored Region</button>
       </div>
       <div class="toolbar-secondary">
         <button class="tertiary-btn" (click)="expandAllRegions()"><span class="tertiary-icon">&#9662;</span>Expand All</button>
         <button class="tertiary-btn" (click)="collapseAllRegions()"><span class="tertiary-icon">&#9656;</span>Collapse All</button>
       </div>
 
-      <div *ngIf="showImportDialog" class="import-dialog">
-        <textarea
-          [(ngModel)]="importJsonText"
-          placeholder="Paste region JSON here..."
-          rows="6">
-        </textarea>
-        <div class="import-actions">
-          <button class="primary" (click)="importRegions()">Import</button>
-          <button (click)="showImportDialog = false">Cancel</button>
+      <div *ngIf="showImportRegionDialog" class="modal-backdrop" (click)="closeImportRegionDialog()">
+        <div class="modal-dialog" (click)="$event.stopPropagation()">
+          <h3>Import Monitored Region</h3>
+          <p class="modal-description">Paste a shared Monitored Region JSON export.</p>
+          <textarea
+            [(ngModel)]="importRegionJsonText"
+            placeholder="Paste Monitored Region JSON here..."
+            rows="12"
+            class="modal-textarea">
+          </textarea>
+          <div *ngIf="importRegionErrorMessage" class="modal-error">{{ importRegionErrorMessage }}</div>
+          <div *ngIf="importRegionConflictRegionName" class="modal-conflict">
+            You already have "{{ importRegionConflictRegionName }}".
+            Do you want to update that region, or create a copy?
+          </div>
+          <div class="import-actions">
+            <button
+              *ngIf="!importRegionConflictRegionName"
+              class="primary"
+              (click)="importSharedRegion()">Import</button>
+            <button
+              *ngIf="importRegionConflictRegionName"
+              class="primary"
+              (click)="resolveImportedRegionConflict('update')">Update Existing</button>
+            <button
+              *ngIf="importRegionConflictRegionName"
+              (click)="resolveImportedRegionConflict('copy')">Create Copy</button>
+            <button (click)="closeImportRegionDialog()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div *ngIf="shareRegionJson" class="modal-backdrop" (click)="closeShareRegionDialog()">
+        <div class="modal-dialog" (click)="$event.stopPropagation()">
+          <h3>Share Monitored Region</h3>
+          <p class="modal-description">Copy this JSON and share it with another user.</p>
+          <textarea
+            [ngModel]="shareRegionJson"
+            readonly
+            rows="12"
+            class="modal-textarea">
+          </textarea>
+          <div class="import-actions">
+            <button class="primary" (click)="copySharedRegionJson()">{{ shareRegionCopied ? 'Copied!' : 'Copy to Clipboard' }}</button>
+            <button (click)="closeShareRegionDialog()">Close</button>
+          </div>
         </div>
       </div>
 
@@ -103,12 +140,15 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
               [ngModel]="region.enabled !== false"
               (ngModelChange)="region.enabled = $event; onFieldChanged()" />
           </label>
-          <input
-            [(ngModel)]="region.name"
-            (ngModelChange)="onFieldChanged()"
-            placeholder="Region name"
-            class="name-input"
-            [attr.data-region-name-id]="region.id" />
+          <div class="region-name-stack">
+            <input
+              [(ngModel)]="region.name"
+              (ngModelChange)="onFieldChanged()"
+              placeholder="Region name"
+              class="name-input"
+              [attr.data-region-name-id]="region.id" />
+            <button class="share-link" (click)="openShareRegionDialog(region)">Share</button>
+          </div>
           <div class="region-perf-badges" *ngIf="getRegionPerfMetrics(region.id) as rpm">
             <span class="perf-badge"
               [class.perf-warn]="rpm.totalCalcsPerSec > 200"
@@ -619,6 +659,44 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       margin-right: 6px;
       font-size: 0.8rem;
     }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: var(--spacing-lg);
+      z-index: 1000;
+    }
+    .modal-dialog {
+      width: min(760px, 100%);
+      background-color: var(--color-bg-secondary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--spacing-md);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+    }
+    .modal-description {
+      color: var(--color-text-secondary);
+      margin-bottom: var(--spacing-sm);
+    }
+    .modal-textarea {
+      width: 100%;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      margin-bottom: var(--spacing-sm);
+    }
+    .modal-error {
+      color: var(--color-error);
+      font-size: 0.85rem;
+      margin-bottom: var(--spacing-sm);
+    }
+    .modal-conflict {
+      color: var(--color-text-secondary);
+      font-size: 0.85rem;
+      margin-bottom: var(--spacing-sm);
+    }
 
     .import-dialog {
       background-color: var(--color-bg-secondary);
@@ -687,6 +765,28 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       justify-content: space-between;
       align-items: center;
       gap: var(--spacing-sm);
+    }
+    .region-name-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      flex: 1;
+      min-width: 0;
+    }
+    .share-link {
+      background: transparent;
+      border: none;
+      padding: 0;
+      margin-left: var(--spacing-xs);
+      margin-top: -5px;
+      color: var(--color-text-secondary);
+      font-size: 0.75rem;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .share-link:hover {
+      color: var(--color-accent);
     }
 
     .enabled-toggle {
@@ -1385,13 +1485,18 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
 })
 export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestroy {
   private static readonly STORAGE_KEY_COLLAPSED_REGIONS = 'fundido:collapsedRegions';
+  private static readonly SHARED_REGION_EXPORT_TYPE = 'FundidoMonitoredRegion';
 
   @ViewChildren('previewCanvas') private previewCanvasRefs!: QueryList<ElementRef<HTMLCanvasElement>>;
 
   regions: any[] = [];
   overlayGroups: any[] = [];
-  showImportDialog = false;
-  importJsonText = '';
+  showImportRegionDialog = false;
+  importRegionJsonText = '';
+  importRegionErrorMessage = '';
+  importRegionConflictRegionName = '';
+  shareRegionJson = '';
+  shareRegionCopied = false;
   pickingRegionId: string | null = null;
   pickingColorForPreprocess: any = null;
   hasPreviewFrame = false;
@@ -1405,6 +1510,8 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   regionCrossRefs = new Map<string, Array<{ groupId: string; groupName: string; overlayId?: string; overlayName?: string; source: 'groupRule' | 'overlayRule' | 'mirror' }>>();
   private collapsedRegionIds = new Set<string>();
   private savedRegionSnapshots = new Map<string, string>();
+  private regionComparableSnapshots = new Map<string, string>();
+  private pendingImportedRegion: any | null = null;
 
   /** Maps regionId → { medianHex, calcResults: Map<calcId, { currentValue, confidences }> } */
   private regionStateMap = new Map<string, {
@@ -1483,6 +1590,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.regions = config.monitoredRegions || [];
     this.normalizeOcrMatchModes();
     this.refreshSavedRegionSnapshots();
+    this.refreshRegionComparableSnapshots();
     this.loadCollapsedRegionState();
     this.syncCollapsedRegionState();
     this.overlayGroups = config.overlayGroups || [];
@@ -1613,6 +1721,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       id: crypto.randomUUID(),
       name: 'New Region',
       enabled: true,
+      lastUpdatedAt: Date.now(),
       bounds: { x: 0, y: 0, width: 100, height: 100 },
       stateCalculations: [],
     };
@@ -1921,6 +2030,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     await this.electronService.saveConfig(config);
     this.hasUnsavedChanges = false;
     this.refreshSavedRegionSnapshots();
+    this.refreshRegionComparableSnapshots();
   }
 
   /**
@@ -1937,6 +2047,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
    * pipeline uses them immediately, without requiring a save first.
    */
   private pushWorkingRegions(): void {
+    this.updateRegionLastUpdatedTimestamps();
     this.hasUnsavedChanges = true;
     this.electronService.setWorkingRegions(this.regions);
   }
@@ -2108,6 +2219,139 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   }
 
   // ---------------------------------------------------------------------------
+  // Region sharing / import
+  // ---------------------------------------------------------------------------
+
+  openShareRegionDialog(region: any): void {
+    this.shareRegionJson = JSON.stringify(this.buildSharedRegionExport(region), null, 2);
+    this.shareRegionCopied = false;
+  }
+
+  closeShareRegionDialog(): void {
+    this.shareRegionJson = '';
+    this.shareRegionCopied = false;
+  }
+
+  async copySharedRegionJson(): Promise<void> {
+    if (!this.shareRegionJson) return;
+    await navigator.clipboard.writeText(this.shareRegionJson);
+    this.shareRegionCopied = true;
+  }
+
+  openImportRegionDialog(): void {
+    this.showImportRegionDialog = true;
+    this.importRegionJsonText = '';
+    this.importRegionErrorMessage = '';
+    this.importRegionConflictRegionName = '';
+    this.pendingImportedRegion = null;
+  }
+
+  closeImportRegionDialog(): void {
+    this.showImportRegionDialog = false;
+    this.importRegionJsonText = '';
+    this.importRegionErrorMessage = '';
+    this.importRegionConflictRegionName = '';
+    this.pendingImportedRegion = null;
+  }
+
+  importSharedRegion(): void {
+    const parsed = this.parseSharedRegionImport(this.importRegionJsonText);
+    if (!parsed.success) {
+      this.importRegionErrorMessage = parsed.message;
+      this.importRegionConflictRegionName = '';
+      this.pendingImportedRegion = null;
+      return;
+    }
+
+    const importedRegion = parsed.region;
+    const existingRegion = this.regions.find((region) => region.id === importedRegion.id);
+    if (existingRegion) {
+      this.pendingImportedRegion = importedRegion;
+      this.importRegionErrorMessage = '';
+      this.importRegionConflictRegionName = existingRegion.name || 'Unnamed Region';
+      return;
+    }
+
+    this.applyImportedRegion(importedRegion, 'copy');
+  }
+
+  resolveImportedRegionConflict(action: 'update' | 'copy'): void {
+    if (!this.pendingImportedRegion) return;
+    this.applyImportedRegion(this.pendingImportedRegion, action);
+  }
+
+  private applyImportedRegion(importedRegion: any, action: 'update' | 'copy'): void {
+    const regionToApply = action === 'copy'
+      ? this.cloneRegionWithFreshIds(importedRegion)
+      : JSON.parse(JSON.stringify(importedRegion));
+
+    this.normalizeOcrMatchModesOnRegion(regionToApply);
+
+    if (action === 'update') {
+      const existingIndex = this.regions.findIndex((region) => region.id === regionToApply.id);
+      if (existingIndex >= 0) {
+        this.regions[existingIndex] = regionToApply;
+      } else {
+        this.regions.push(regionToApply);
+      }
+    } else {
+      this.regions.push(regionToApply);
+    }
+
+    this.closeImportRegionDialog();
+    this.onFieldChanged();
+    this.focusRegionName(regionToApply.id);
+  }
+
+  private buildSharedRegionExport(region: any): any {
+    return {
+      exportType: MonitoredRegionsComponent.SHARED_REGION_EXPORT_TYPE,
+      exportSchemaVersion: 1,
+      region: JSON.parse(JSON.stringify(region)),
+    };
+  }
+
+  private parseSharedRegionImport(rawJson: string): { success: true; region: any } | { success: false; message: string } {
+    try {
+      const parsed = JSON.parse(rawJson);
+      if (!parsed || typeof parsed !== 'object') {
+        return { success: false, message: 'Invalid JSON. Expected a shared Monitored Region export object.' };
+      }
+      if (parsed.exportType !== MonitoredRegionsComponent.SHARED_REGION_EXPORT_TYPE) {
+        return { success: false, message: 'This JSON is not a Monitored Region share export.' };
+      }
+      const exportSchemaVersion = parsed.exportSchemaVersion ?? parsed.version;
+      if (exportSchemaVersion !== 1) {
+        return { success: false, message: 'This shared Monitored Region export uses an unsupported schema version.' };
+      }
+      if (!parsed.region || typeof parsed.region !== 'object') {
+        return { success: false, message: 'The shared export is missing its region payload.' };
+      }
+      if (typeof parsed.region.id !== 'string' || typeof parsed.region.name !== 'string' || !parsed.region.bounds) {
+        return { success: false, message: 'The shared export does not contain a valid Monitored Region.' };
+      }
+      return { success: true, region: JSON.parse(JSON.stringify(parsed.region)) };
+    } catch {
+      return { success: false, message: 'Invalid JSON. Check that the full shared Monitored Region export was pasted.' };
+    }
+  }
+
+  private cloneRegionWithFreshIds(region: any): any {
+    const clone = JSON.parse(JSON.stringify(region));
+    clone.id = crypto.randomUUID();
+    clone.name = this.buildCopiedRegionName(clone.name);
+    for (const calc of clone.stateCalculations || []) {
+      calc.id = crypto.randomUUID();
+    }
+    return clone;
+  }
+
+  private buildCopiedRegionName(name: string): string {
+    if (!name) return 'Copied Region';
+    return name.endsWith(' Copy') ? name : `${name} Copy`;
+  }
+
+  // ---------------------------------------------------------------------------
   // Region picker
   // ---------------------------------------------------------------------------
 
@@ -2134,19 +2378,6 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   async exportRegions(): Promise<void> {
     const json = await this.electronService.exportRegions();
     await navigator.clipboard.writeText(json);
-  }
-
-  async importRegions(): Promise<void> {
-    const result = await this.electronService.importRegions(this.importJsonText);
-    if (result.success) {
-      const config = await this.electronService.loadConfig();
-      this.regions = config.monitoredRegions || [];
-      this.normalizeOcrMatchModes();
-      this.refreshSavedRegionSnapshots();
-      this.showImportDialog = false;
-      this.importJsonText = '';
-      this.pushWorkingRegions();
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2351,11 +2582,24 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     requestAnimationFrame(focusInput);
   }
 
+  private focusRegionName(regionId: string): void {
+    setTimeout(() => {
+      const input = document.querySelector(`[data-region-name-id="${regionId}"]`) as HTMLInputElement | null;
+      if (!input) return;
+      input.focus();
+      input.select();
+    }, 0);
+  }
+
   private normalizeOcrMatchModes(): void {
     for (const region of this.regions) {
-      for (const calc of region.stateCalculations || []) {
-        this.normalizeOcrMatchModesOnCalculation(calc);
-      }
+      this.normalizeOcrMatchModesOnRegion(region);
+    }
+  }
+
+  private normalizeOcrMatchModesOnRegion(region: any): void {
+    for (const calc of region.stateCalculations || []) {
+      this.normalizeOcrMatchModesOnCalculation(calc);
     }
   }
 
@@ -2373,8 +2617,36 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     );
   }
 
+  private refreshRegionComparableSnapshots(): void {
+    this.regionComparableSnapshots = new Map(
+      this.regions.map((region) => [region.id, this.serializeRegionComparable(region)])
+    );
+  }
+
   private serializeRegion(region: any): string {
     return JSON.stringify(region);
+  }
+
+  private serializeRegionComparable(region: any): string {
+    const clone = JSON.parse(JSON.stringify(region));
+    delete clone.lastUpdatedAt;
+    return JSON.stringify(clone);
+  }
+
+  private updateRegionLastUpdatedTimestamps(): void {
+    const nextComparableSnapshots = new Map<string, string>();
+    const now = Date.now();
+
+    for (const region of this.regions) {
+      const comparable = this.serializeRegionComparable(region);
+      const previousComparable = this.regionComparableSnapshots.get(region.id);
+      if (previousComparable === undefined || previousComparable !== comparable) {
+        region.lastUpdatedAt = now;
+      }
+      nextComparableSnapshots.set(region.id, comparable);
+    }
+
+    this.regionComparableSnapshots = nextComparableSnapshots;
   }
 
   private loadCollapsedRegionState(): void {

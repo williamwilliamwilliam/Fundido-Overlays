@@ -213,6 +213,8 @@ export interface MonitoredRegion {
   name: string;
   /** Whether this region is actively evaluated. Default true. */
   enabled: boolean;
+  /** Unix epoch milliseconds when this region was last changed. */
+  lastUpdatedAt?: number;
   /** The area of the capture this region covers. */
   bounds: Rectangle;
   /** One or more calculations that derive state from this region. */
@@ -332,6 +334,8 @@ export interface OverlayGroup {
   name: string;
   /** Whether this group is active and rendered. Default true. */
   enabled: boolean;
+  /** Unix epoch milliseconds when this group was last changed. */
+  lastUpdatedAt?: number;
   /** Default group visibility when no group rule matches. */
   defaultVisibilityMode?: GroupDefaultVisibilityMode;
   /** Default group opacity (0–1) used when defaultVisibilityMode is 'opacity'. */

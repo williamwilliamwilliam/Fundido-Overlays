@@ -594,6 +594,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   highlightId: string | null = null;
   private collapsedGroupIds = new Set<string>();
   private savedOverlaySnapshots = new Map<string, string>();
+  private groupComparableSnapshots = new Map<string, string>();
 
   /** Cached cross-references: overlayId → monitored regions referenced by that overlay. Built once on load. */
   overlayCrossRefs = new Map<string, Array<{ id: string; name: string }>>();
@@ -639,6 +640,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     this.groups = config.overlayGroups || [];
     this.normalizeGroupDefaults();
     this.refreshSavedOverlaySnapshots();
+    this.refreshGroupComparableSnapshots();
     this.loadCollapsedGroupState();
     this.syncCollapsedGroupState();
     this.monitoredRegions = config.monitoredRegions || [];
@@ -685,7 +687,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     this.stateSubscription?.unsubscribe();
   }
 
-  onFieldChanged(): void { this.hasUnsavedChanges = true; }
+  onFieldChanged(): void { this.markGroupsChanged(); }
 
   isOverlayDirty(overlay: any): boolean {
     return this.savedOverlaySnapshots.get(overlay.id) !== this.serializeOverlay(overlay);
@@ -698,6 +700,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   addGroup(): void {
     const newGroup = {
       id: crypto.randomUUID(), name: 'New Group', enabled: true,
+      lastUpdatedAt: Date.now(),
       defaultVisibilityMode: 'visible',
       defaultOpacity: 1,
       position: { mode: 'absolute', x: 100, y: 100 },
@@ -706,7 +709,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     this.groups.push(newGroup);
     this.collapsedGroupIds.delete(newGroup.id);
     this.saveCollapsedGroupState();
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
     setTimeout(() => {
       const input = document.querySelector(`[data-group-name-id="${newGroup.id}"]`) as HTMLInputElement | null;
       if (!input) return;
@@ -721,7 +724,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
       this.collapsedGroupIds.delete(removedGroup.id);
       this.saveCollapsedGroupState();
     }
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
     await this.saveAllGroups();
   }
 
@@ -754,7 +757,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     } else {
       group.position = { mode: 'relativeToCursor', offsetX: group.position.offsetX || 20, offsetY: group.position.offsetY || 20 };
     }
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   onGroupDefaultVisibilityChanged(group: any): void {
@@ -764,12 +767,12 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     if (group.defaultVisibilityMode === 'opacity' && group.defaultOpacity === undefined) {
       group.defaultOpacity = 1;
     }
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   onGroupDefaultOpacityChanged(group: any, percentValue: number): void {
     group.defaultOpacity = percentValue / 100;
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   async pickAnchor(group: any): Promise<void> {
@@ -778,7 +781,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     if (result !== null) {
       group.position.x = result.x;
       group.position.y = result.y;
-      this.hasUnsavedChanges = true;
+      this.markGroupsChanged();
       await this.saveAllGroups();
     }
     this.pickingGroupId = null;
@@ -800,7 +803,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
       imageConfig: null, regionMirrorConfig: null, rules: [],
     };
     group.overlays.push(newOverlay);
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
     setTimeout(() => {
       const input = document.querySelector(`[data-overlay-name-id="${newOverlay.id}"]`) as HTMLInputElement | null;
       if (!input) return;
@@ -811,7 +814,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
 
   async removeOverlay(group: any, index: number): Promise<void> {
     group.overlays.splice(index, 1);
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
     await this.saveAllGroups();
   }
 
@@ -856,7 +859,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
 
     const movedOverlay = group.overlays.splice(sourceIndex, 1)[0];
     group.overlays.splice(dropIndex, 0, movedOverlay);
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   onDragEnd(): void {
@@ -880,19 +883,19 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     if (overlay.contentType === 'regionMirror' && !overlay.regionMirrorConfig) {
       overlay.regionMirrorConfig = { monitoredRegionId: '', size: { scale: 1 } };
     }
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   onDefaultOpacityChanged(overlay: any, percentValue: number): void {
     overlay.defaultOpacity = percentValue / 100;
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   async chooseImageFile(overlay: any): Promise<void> {
     const filePath = await this.electronService.openFileDialog();
     if (filePath && overlay.imageConfig) {
       overlay.imageConfig.filePath = filePath;
-      this.hasUnsavedChanges = true;
+      this.markGroupsChanged();
     }
   }
 
@@ -910,22 +913,22 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
       conditions: [{ monitoredRegionId: '', stateCalculationId: '', operator: 'equals', value: '', negate: false }],
       action: 'show',
     });
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   removeGroupRule(group: any, index: number): void {
     group.rules.splice(index, 1);
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   addGroupRuleCondition(rule: any): void {
     rule.conditions.push({ monitoredRegionId: '', stateCalculationId: '', operator: 'equals', value: '', negate: false });
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   removeGroupRuleCondition(rule: any, index: number): void {
     rule.conditions.splice(index, 1);
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   // -- Overlay rules --
@@ -937,33 +940,33 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
       conditions: [{ monitoredRegionId: '', stateCalculationId: '', operator: 'equals', value: '', negate: false }],
       action: 'show',
     });
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   removeRule(overlay: any, index: number): void {
     overlay.rules.splice(index, 1);
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   addCondition(rule: any): void {
     rule.conditions.push({ monitoredRegionId: '', stateCalculationId: '', operator: 'equals', value: '', negate: false });
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   removeCondition(rule: any, index: number): void {
     rule.conditions.splice(index, 1);
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   onRegionSelectedForCondition(condition: any): void {
     condition.stateCalculationId = '';
     condition.value = '';
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   onRuleOpacityChanged(rule: any, percentValue: number): void {
     rule.opacityValue = percentValue / 100;
-    this.hasUnsavedChanges = true;
+    this.markGroupsChanged();
   }
 
   getCalcsForRegion(regionId: string): any[] {
@@ -1062,6 +1065,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     await this.electronService.saveConfig(config);
     this.hasUnsavedChanges = false;
     this.refreshSavedOverlaySnapshots();
+    this.refreshGroupComparableSnapshots();
   }
 
   async exportGroups(): Promise<void> {
@@ -1076,6 +1080,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
       this.groups = config.overlayGroups || [];
       this.normalizeGroupDefaults();
       this.refreshSavedOverlaySnapshots();
+      this.refreshGroupComparableSnapshots();
       this.syncCollapsedGroupState();
       this.showImportDialog = false;
       this.importJsonText = '';
@@ -1112,6 +1117,12 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     );
   }
 
+  private refreshGroupComparableSnapshots(): void {
+    this.groupComparableSnapshots = new Map(
+      this.groups.map((group) => [group.id, this.serializeGroupComparable(group)])
+    );
+  }
+
   private normalizeGroupDefaults(): void {
     for (const group of this.groups) {
       if (!group.defaultVisibilityMode) {
@@ -1121,6 +1132,33 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
         group.defaultOpacity = 1;
       }
     }
+  }
+
+  private markGroupsChanged(): void {
+    this.updateGroupLastUpdatedTimestamps();
+    this.hasUnsavedChanges = true;
+  }
+
+  private updateGroupLastUpdatedTimestamps(): void {
+    const nextComparableSnapshots = new Map<string, string>();
+    const now = Date.now();
+
+    for (const group of this.groups) {
+      const comparable = this.serializeGroupComparable(group);
+      const previousComparable = this.groupComparableSnapshots.get(group.id);
+      if (previousComparable === undefined || previousComparable !== comparable) {
+        group.lastUpdatedAt = now;
+      }
+      nextComparableSnapshots.set(group.id, comparable);
+    }
+
+    this.groupComparableSnapshots = nextComparableSnapshots;
+  }
+
+  private serializeGroupComparable(group: any): string {
+    const clone = JSON.parse(JSON.stringify(group));
+    delete clone.lastUpdatedAt;
+    return JSON.stringify(clone);
   }
 
   private serializeOverlay(overlay: any): string {
