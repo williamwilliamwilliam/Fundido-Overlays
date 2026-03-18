@@ -404,8 +404,10 @@ export class OcrService {
 
       let isMatch = false;
 
-      if (matchMode === 'isEmpty') {
+      if (matchMode === 'isEmpty' || matchMode === 'noValueDetected') {
         isMatch = lowerText.length === 0;
+      } else if (matchMode === 'containsAnyValue') {
+        isMatch = lowerText.length > 0;
       } else if (matchMode === 'contains') {
         isMatch = substringLower.length > 0 && lowerText.includes(substringLower);
       } else if (matchMode === 'equals') {

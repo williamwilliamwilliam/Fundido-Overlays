@@ -101,7 +101,12 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
               [ngModel]="region.enabled !== false"
               (ngModelChange)="region.enabled = $event; onFieldChanged()" />
           </label>
-          <input [(ngModel)]="region.name" (ngModelChange)="onFieldChanged()" placeholder="Region name" class="name-input" />
+          <input
+            [(ngModel)]="region.name"
+            (ngModelChange)="onFieldChanged()"
+            placeholder="Region name"
+            class="name-input"
+            [attr.data-region-name-id]="region.id" />
           <div class="region-perf-badges" *ngIf="getRegionPerfMetrics(region.id) as rpm">
             <span class="perf-badge"
               [class.perf-warn]="rpm.totalCalcsPerSec > 200"
@@ -197,12 +202,43 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
             <div class="state-calcs-section">
               <div class="section-header">
                 <span class="section-label">State Calculations</span>
-                <button class="add-btn" (click)="addStateCalculation(region)">+ Add</button>
+                <div class="section-actions">
+                  <button class="add-btn" (click)="addStateCalculation(region)">+ Add</button>
+                  <button class="add-btn" (click)="openCopyStateCalculationDialog(region)">+ Copy</button>
+                </div>
+              </div>
+
+              <div *ngIf="copyStateCalculationRegionId === region.id" class="copy-calc-dialog">
+                <input
+                  [(ngModel)]="copyStateCalculationSearchText"
+                  placeholder="Search calculations"
+                  class="copy-calc-search" />
+                <div class="copy-calc-list">
+                  <button
+                    *ngFor="let option of getFilteredCopyStateCalculations()"
+                    type="button"
+                    class="copy-calc-option"
+                    (mousedown)="selectCopyStateCalculationOption($event, region, option.calc)">
+                    <span class="copy-calc-name">{{ option.calc.name }}</span>
+                    <span class="copy-calc-meta">{{ option.regionName }} · {{ option.calc.type }}</span>
+                  </button>
+                  <div *ngIf="getFilteredCopyStateCalculations().length === 0" class="copy-calc-empty">
+                    No calculations match your search.
+                  </div>
+                </div>
+                <div class="copy-calc-actions">
+                  <button (click)="closeCopyStateCalculationDialog()">Cancel</button>
+                </div>
               </div>
 
               <div *ngFor="let calc of region.stateCalculations; let calcIndex = index; trackBy: trackByCalcId" class="calc-card">
                 <div class="calc-header">
-                  <input [(ngModel)]="calc.name" (ngModelChange)="onFieldChanged()" placeholder="Calculation name" class="calc-name-input" />
+                  <input
+                    [(ngModel)]="calc.name"
+                    (ngModelChange)="onFieldChanged()"
+                    placeholder="Calculation name"
+                    class="calc-name-input"
+                    [attr.data-calc-name-id]="calc.id" />
                   <select [(ngModel)]="calc.type" (ngModelChange)="onCalcTypeChanged(calc)" class="calc-type-select">
                     <option value="MedianPixelColor">Closest to Median Color</option>
                     <option value="ColorThreshold">Color Threshold Match</option>
@@ -309,13 +345,14 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                   <div *ngFor="let mapping of calc.substringMappings; let mappingIndex = index" class="mapping-row ocr-mapping-row">
                     <select class="match-mode-select" [(ngModel)]="mapping.matchMode" (ngModelChange)="onFieldChanged()">
                       <option value="contains">Contains</option>
+                      <option value="containsAnyValue">Contains Any Value</option>
                       <option value="equals">Equals</option>
                       <option value="notEquals">Does Not Equal</option>
                       <option value="startsWith">Starts With</option>
                       <option value="endsWith">Ends With</option>
-                      <option value="isEmpty">Is Empty</option>
+                      <option value="noValueDetected">No Value Detected</option>
                     </select>
-                    <input *ngIf="mapping.matchMode !== 'isEmpty'"
+                    <input *ngIf="ocrMatchModeRequiresTextInput(mapping.matchMode)"
                       class="substring-input"
                       [(ngModel)]="mapping.substring"
                       (ngModelChange)="onFieldChanged()"
@@ -816,6 +853,11 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       margin-bottom: var(--spacing-sm);
     }
 
+    .section-actions {
+      display: flex;
+      gap: var(--spacing-xs);
+    }
+
     .section-label {
       font-size: 0.85rem;
       color: var(--color-text-secondary);
@@ -826,6 +868,62 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     .add-btn {
       font-size: 0.8rem;
       padding: 2px 10px;
+    }
+
+    .copy-calc-dialog {
+      background-color: var(--color-bg-primary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: var(--spacing-sm);
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .copy-calc-search {
+      width: 100%;
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .copy-calc-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-xs);
+      max-height: 220px;
+      overflow-y: auto;
+    }
+
+    .copy-calc-option {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      width: 100%;
+      text-align: left;
+      background-color: var(--color-bg-secondary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+    }
+
+    .copy-calc-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .copy-calc-meta {
+      font-size: 0.75rem;
+      color: var(--color-text-secondary);
+    }
+
+    .copy-calc-empty {
+      color: var(--color-text-secondary);
+      font-size: 0.8rem;
+      padding: 6px 0;
+    }
+
+    .copy-calc-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: var(--spacing-sm);
     }
 
     .calc-card {
@@ -1263,6 +1361,8 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   hasUnsavedChanges = false;
   highlightId: string | null = null;
   isUiUnfocused = false;
+  copyStateCalculationRegionId: string | null = null;
+  copyStateCalculationSearchText = '';
 
   /** Cached cross-references: regionId → overlay groups/overlays that reference it. Built once on load. */
   regionCrossRefs = new Map<string, Array<{ groupId: string; groupName: string; overlayId?: string; overlayName?: string; source: 'groupRule' | 'overlayRule' | 'mirror' }>>();
@@ -1343,6 +1443,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
     const config = await this.electronService.loadConfig();
     this.regions = config.monitoredRegions || [];
+    this.normalizeOcrMatchModes();
     this.loadCollapsedRegionState();
     this.syncCollapsedRegionState();
     this.overlayGroups = config.overlayGroups || [];
@@ -1481,6 +1582,12 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.saveCollapsedRegionState();
     this.pushWorkingRegions();
     this.changeDetectorRef.markForCheck();
+    setTimeout(() => {
+      const input = document.querySelector(`[data-region-name-id="${newRegion.id}"]`) as HTMLInputElement | null;
+      if (!input) return;
+      input.focus();
+      input.select();
+    }, 0);
   }
 
   removeRegion(index: number): void {
@@ -1537,6 +1644,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     };
     region.stateCalculations.push(newCalc);
     this.pushWorkingRegions();
+    this.focusCalculationName(newCalc.id);
   }
 
   removeStateCalculation(region: any, index: number): void {
@@ -1550,9 +1658,9 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     if (!calc.substringMappings) calc.substringMappings = [];
     if (calc.type === 'OCR' && !calc.ocrPreprocess) {
       calc.ocrPreprocess = {
-        upscaleFactor: 2,
+        upscaleFactor: 1,
         invert: false,
-        threshold: 0,
+        threshold: 100,
         colorFilterEnabled: false,
         colorFilterTarget: { red: 255, green: 255, blue: 255 },
         colorFilterTolerance: 40,
@@ -1570,6 +1678,70 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       };
     }
     this.pushWorkingRegions();
+  }
+
+  openCopyStateCalculationDialog(region: any): void {
+    this.copyStateCalculationRegionId = region.id;
+    this.copyStateCalculationSearchText = '';
+  }
+
+  closeCopyStateCalculationDialog(): void {
+    this.copyStateCalculationRegionId = null;
+    this.copyStateCalculationSearchText = '';
+  }
+
+  getFilteredCopyStateCalculations(): Array<{ regionId: string; regionName: string; calc: any }> {
+    const search = this.copyStateCalculationSearchText.trim().toLowerCase();
+    const options: Array<{ regionId: string; regionName: string; calc: any }> = [];
+
+    for (const region of this.regions) {
+      for (const calc of region.stateCalculations || []) {
+        options.push({
+          regionId: region.id,
+          regionName: region.name || 'Unnamed Region',
+          calc,
+        });
+      }
+    }
+
+    if (!search) {
+      return options;
+    }
+
+    return options.filter((option) =>
+      (option.calc.name || '').toLowerCase().includes(search) ||
+      option.regionName.toLowerCase().includes(search) ||
+      (option.calc.type || '').toLowerCase().includes(search)
+    );
+  }
+
+  copyStateCalculationToRegion(region: any, sourceCalc: any): void {
+    const copiedCalc = JSON.parse(JSON.stringify(sourceCalc));
+    copiedCalc.id = crypto.randomUUID();
+    this.normalizeOcrMatchModesOnCalculation(copiedCalc);
+    if (copiedCalc.type === 'OCR') {
+      copiedCalc.ocrPreprocess = copiedCalc.ocrPreprocess || {
+        upscaleFactor: 1,
+        invert: false,
+        threshold: 100,
+        colorFilterEnabled: false,
+        colorFilterTarget: { red: 255, green: 255, blue: 255 },
+        colorFilterTolerance: 40,
+        charWhitelist: '',
+        pageSegMode: 7,
+        maxCharacters: 10,
+      };
+    }
+
+    region.stateCalculations.push(copiedCalc);
+    this.closeCopyStateCalculationDialog();
+    this.pushWorkingRegions();
+    this.focusCalculationName(copiedCalc.id);
+  }
+
+  selectCopyStateCalculationOption(event: MouseEvent, region: any, sourceCalc: any): void {
+    event.preventDefault();
+    this.copyStateCalculationToRegion(region, sourceCalc);
   }
 
   // -- ColorThreshold mapping CRUD --------------------------------------------
@@ -1649,6 +1821,10 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     if (!calc.substringMappings) calc.substringMappings = [];
     calc.substringMappings.push({ substring: '', matchMode: 'contains', minDurationMs: 0, stateValue: '' });
     this.pushWorkingRegions();
+  }
+
+  ocrMatchModeRequiresTextInput(matchMode: string | undefined): boolean {
+    return matchMode !== 'containsAnyValue' && matchMode !== 'noValueDetected' && matchMode !== 'isEmpty';
   }
 
   removeSubstringMapping(calc: any, index: number): void {
@@ -1920,6 +2096,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     if (result.success) {
       const config = await this.electronService.loadConfig();
       this.regions = config.monitoredRegions || [];
+      this.normalizeOcrMatchModes();
       this.showImportDialog = false;
       this.importJsonText = '';
       this.pushWorkingRegions();
@@ -2104,6 +2281,44 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       this.viewRefreshScheduled = false;
       this.changeDetectorRef.detectChanges();
     });
+  }
+
+  private focusCalculationName(calcId: string): void {
+    let attemptsRemaining = 5;
+    const focusInput = () => {
+      const input = document.querySelector(`[data-calc-name-id="${calcId}"]`) as HTMLInputElement | null;
+      if (input) {
+        input.focus();
+        input.select();
+        return;
+      }
+
+      attemptsRemaining -= 1;
+      if (attemptsRemaining <= 0) {
+        return;
+      }
+
+      requestAnimationFrame(focusInput);
+    };
+
+    this.changeDetectorRef.detectChanges();
+    requestAnimationFrame(focusInput);
+  }
+
+  private normalizeOcrMatchModes(): void {
+    for (const region of this.regions) {
+      for (const calc of region.stateCalculations || []) {
+        this.normalizeOcrMatchModesOnCalculation(calc);
+      }
+    }
+  }
+
+  private normalizeOcrMatchModesOnCalculation(calc: any): void {
+    for (const mapping of calc?.substringMappings || []) {
+      if (mapping.matchMode === 'isEmpty') {
+        mapping.matchMode = 'noValueDetected';
+      }
+    }
   }
 
   private loadCollapsedRegionState(): void {

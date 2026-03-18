@@ -106,14 +106,22 @@ export interface ColorThresholdMapping {
 /**
  * How to compare OCR text against the mapping value.
  */
-export type OcrMatchMode = 'contains' | 'equals' | 'notEquals' | 'startsWith' | 'endsWith' | 'isEmpty';
+export type OcrMatchMode =
+  | 'contains'
+  | 'containsAnyValue'
+  | 'equals'
+  | 'notEquals'
+  | 'startsWith'
+  | 'endsWith'
+  | 'isEmpty'
+  | 'noValueDetected';
 
 /**
  * A text-to-state mapping used by an OCR calculation.
  * Evaluated top-down; first match wins.
  */
 export interface SubstringMapping {
-  /** The text to match against the OCR result (case-insensitive). Ignored for 'isEmpty' mode. */
+  /** The text to match against the OCR result (case-insensitive). Ignored for value-presence modes. */
   substring: string;
   /** How to compare the OCR text against the substring. Default 'contains'. */
   matchMode: OcrMatchMode;
