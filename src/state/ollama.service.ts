@@ -23,8 +23,15 @@ export class OllamaService {
   /** Latest Ollama results keyed by `regionId:calcId`. */
   private latestResults = new Map<string, StateCalculationResult>();
 
-  /** Pixel hash cache keyed by `regionId:calcId` for skip-if-unchanged. */
-  private pixelHashCache = new Map<string, number>();
+  /**
+   * Per-calculation frame tracking keyed by `regionId:calcId`.
+   * When a region changes, we allow normal inference on changing frames and then
+   * exactly one more inference on the first stable frame after the motion stops.
+   */
+  private frameTrackingCache = new Map<string, {
+    lastHash: number;
+    pendingStableFrameInference: boolean;
+  }>();
 
   /** The most recent frame to run inference on. */
   private latestFrame: CapturedFrame | null = null;
@@ -163,10 +170,24 @@ export class OllamaService {
     const shouldSkipIfUnchanged = ollamaCalcConfig.skipIfUnchanged !== false;
     if (shouldSkipIfUnchanged) {
       const currentHash = computeRegionPixelHash(frame, region.bounds);
-      const previousHash = this.pixelHashCache.get(cacheKey);
-      const regionIsUnchanged = previousHash !== undefined && previousHash === currentHash;
-      if (regionIsUnchanged) return;
-      this.pixelHashCache.set(cacheKey, currentHash);
+      const existingTracking = this.frameTrackingCache.get(cacheKey);
+
+      if (existingTracking) {
+        const regionIsUnchanged = existingTracking.lastHash === currentHash;
+        if (regionIsUnchanged && !existingTracking.pendingStableFrameInference) {
+          return;
+        }
+
+        this.frameTrackingCache.set(cacheKey, {
+          lastHash: currentHash,
+          pendingStableFrameInference: regionIsUnchanged ? false : true,
+        });
+      } else {
+        this.frameTrackingCache.set(cacheKey, {
+          lastHash: currentHash,
+          pendingStableFrameInference: false,
+        });
+      }
     }
 
     const imageBase64 = this.extractRegionAsBase64Png(frame, region.bounds);

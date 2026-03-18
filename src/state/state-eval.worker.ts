@@ -75,10 +75,7 @@ parentPort!.on('message', (request: EvalRequest) => {
       const isRateLimited = lastRun !== undefined && (nowMs - lastRun) < minCalcIntervalMs;
       if (isRateLimited) return false;
       const shouldSkip = calc.skipIfUnchanged === true && regionIsUnchanged;
-      const ollamaSkip = calc.type === 'OllamaLLM'
-        && calc.ollamaConfig?.skipIfUnchanged !== false
-        && regionIsUnchanged;
-      if (shouldSkip || ollamaSkip) return false;
+      if (shouldSkip) return false;
       return true;
     });
     return { ...region, stateCalculations: allowedCalcs };

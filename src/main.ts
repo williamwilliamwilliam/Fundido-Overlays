@@ -917,8 +917,7 @@ function startStateEvaluationLoopFallback(): void {
       const allowed = (region.stateCalculations || []).filter((calc: any) => {
         const key = `${region.id}:${calc.id}`;
         return !shouldThrottleCalc(key, nowMs, minCalcIntervalMs) &&
-          !(calc.skipIfUnchanged === true && unchanged) &&
-          !(calc.type === 'OllamaLLM' && calc.ollamaConfig?.skipIfUnchanged !== false && unchanged);
+          !(calc.skipIfUnchanged === true && unchanged);
       });
       return { ...region, stateCalculations: allowed };
     });
