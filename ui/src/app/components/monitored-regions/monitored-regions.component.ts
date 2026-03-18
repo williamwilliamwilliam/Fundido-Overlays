@@ -642,18 +642,21 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     .page { max-width: 1100px; }
 
     .cpu-warning-banner {
-      position: sticky;
-      top: 0;
-      z-index: 100;
+      position: fixed;
+      top: 44px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      z-index: 200;
       background-color: var(--color-warning);
       color: #000;
       font-weight: 600;
       font-size: 0.9rem;
       padding: var(--spacing-sm) var(--spacing-md);
       border-radius: var(--radius-sm);
-      margin-bottom: var(--spacing-md);
       text-align: center;
       line-height: 1.4;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
     }
     h2 { margin-bottom: var(--spacing-sm); }
     .description { color: var(--color-text-secondary); margin-bottom: var(--spacing-lg); }
