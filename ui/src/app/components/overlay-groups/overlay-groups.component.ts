@@ -417,7 +417,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       text-underline-offset: 2px;
     }
     .tertiary-btn:hover { color: var(--color-accent); }
-    .tertiary-icon { display: inline-block; margin-right: 6px; font-size: 0.8rem; }
+    .tertiary-icon { display: inline-block; margin-right: 6px; font-size: 1.25rem; }
 
     .import-dialog {
       background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
@@ -486,7 +486,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       width: 28px;
       height: 28px;
       padding: 0;
-      font-size: 0.95rem;
+      font-size: 1.25rem;
       line-height: 1;
       flex-shrink: 0;
     }

@@ -105,7 +105,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       <div *ngIf="shareRegionJson" class="modal-backdrop" (click)="closeShareRegionDialog()">
         <div class="modal-dialog" (click)="$event.stopPropagation()">
           <h3>Share Monitored Region</h3>
-          <p class="modal-description">Copy this JSON and share it with another user.</p>
+          <p class="modal-description">Copy this JSON and share it with another user. They will likely need to adjust the region with the "Pick Region" button.</p>
           <textarea
             [ngModel]="shareRegionJson"
             readonly
@@ -768,7 +768,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       width: 28px;
       height: 28px;
       padding: 0;
-      font-size: 0.95rem;
+      font-size: 1.25rem;
       line-height: 1;
       flex-shrink: 0;
     }
