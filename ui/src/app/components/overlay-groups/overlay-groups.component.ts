@@ -21,10 +21,12 @@ import { ElectronService } from '../../services/electron.service';
         <button (click)="saveAllGroups()" [disabled]="!hasUnsavedChanges">
           {{ hasUnsavedChanges ? 'Save (Ctrl+S)' : 'Saved' }}
         </button>
-        <button (click)="expandAllGroups()">Expand All</button>
-        <button (click)="collapseAllGroups()">Collapse All</button>
         <button (click)="exportGroups()">Export</button>
         <button (click)="showImportDialog = true">Import</button>
+      </div>
+      <div class="toolbar-secondary">
+        <button class="tertiary-btn" (click)="expandAllGroups()"><span class="tertiary-icon">&#9662;</span>Expand All</button>
+        <button class="tertiary-btn" (click)="collapseAllGroups()"><span class="tertiary-icon">&#9656;</span>Collapse All</button>
       </div>
 
       <div *ngIf="showImportDialog" class="import-dialog">
@@ -67,6 +69,19 @@ import { ElectronService } from '../../services/electron.service';
         <ng-container *ngIf="isGroupExpanded(group.id)">
 
         <div class="group-settings">
+          <label>Default
+            <select [(ngModel)]="group.defaultVisibilityMode" (ngModelChange)="onGroupDefaultVisibilityChanged(group)">
+              <option value="visible">Visible</option>
+              <option value="hidden">Hidden</option>
+              <option value="opacity">Opacity</option>
+            </select>
+          </label>
+          <label *ngIf="group.defaultVisibilityMode === 'opacity'">Opacity
+            <input type="range" min="0" max="100" step="1"
+              [ngModel]="(group.defaultOpacity ?? 1) * 100"
+              (ngModelChange)="onGroupDefaultOpacityChanged(group, $event)" />
+            <span class="opacity-value">{{ ((group.defaultOpacity ?? 1) * 100) | number:'1.0-0' }}%</span>
+          </label>
           <label>Position
             <select [(ngModel)]="group.position.mode" (ngModelChange)="onPositionModeChanged(group)">
               <option value="absolute">Absolute</option>
@@ -101,7 +116,7 @@ import { ElectronService } from '../../services/electron.service';
         <!-- ======================== GROUP RULES ======================== -->
         <div class="section-header">
           <span class="section-label">Group Rules</span>
-          <span class="section-hint">Override all individual overlay rules when a group rule matches</span>
+          <span class="section-hint">These rules apply overall visibility changes for the entire group (Visible, Hidden, Opacity)</span>
           <button class="add-btn" (click)="addGroupRule(group)">+ Add Rule</button>
         </div>
 
@@ -123,20 +138,9 @@ import { ElectronService } from '../../services/electron.service';
           <div class="rule-line">
             <span class="rule-keyword">When</span>
             <select [(ngModel)]="rule.logicMode" (ngModelChange)="onFieldChanged()">
-              <option value="AND">ALL conditions</option>
-              <option value="OR">ANY condition</option>
+              <option value="AND">Every Condition is true</option>
+              <option value="OR">At least one Condition is true</option>
             </select>
-            <span class="rule-keyword">Then</span>
-            <select [(ngModel)]="rule.action" (ngModelChange)="onFieldChanged()">
-              <option value="show">Show All</option>
-              <option value="hide">Hide All</option>
-              <option value="opacity">Set Opacity</option>
-            </select>
-            <input *ngIf="rule.action === 'opacity'" type="range" min="0" max="100" step="1"
-              [ngModel]="(rule.opacityValue ?? 1) * 100"
-              (ngModelChange)="rule.opacityValue = $event / 100; onFieldChanged()"
-              class="opacity-slider" />
-            <span *ngIf="rule.action === 'opacity'" class="opacity-value">{{ ((rule.opacityValue ?? 1) * 100) | number:'1.0-0' }}%</span>
             <button class="danger-text small" (click)="removeGroupRule(group, ruleIndex)">Remove</button>
           </div>
           <div class="conditions-list">
@@ -165,6 +169,19 @@ import { ElectronService } from '../../services/electron.service';
               <button class="danger-text small" (click)="removeGroupRuleCondition(rule, condIndex)">×</button>
             </div>
             <button class="add-btn small" (click)="addGroupRuleCondition(rule)">+ Condition</button>
+          </div>
+          <div class="rule-line group-rule-action-row">
+            <span class="rule-keyword">Then</span>
+            <select [(ngModel)]="rule.action" (ngModelChange)="onFieldChanged()">
+              <option value="show">Show All</option>
+              <option value="hide">Hide All</option>
+              <option value="opacity">Set Opacity</option>
+            </select>
+            <input *ngIf="rule.action === 'opacity'" type="range" min="0" max="100" step="1"
+                   [ngModel]="(rule.opacityValue ?? 1) * 100"
+                   (ngModelChange)="rule.opacityValue = $event / 100; onFieldChanged()"
+                   class="opacity-slider" />
+            <span *ngIf="rule.action === 'opacity'" class="opacity-value">{{ ((rule.opacityValue ?? 1) * 100) | number:'1.0-0' }}%</span>
           </div>
         </div>
 
@@ -343,6 +360,9 @@ import { ElectronService } from '../../services/electron.service';
               </div>
             </div>
           </div>
+          <div class="overlay-save-row" *ngIf="hasUnsavedChanges && isOverlayDirty(overlay)">
+            <button class="primary" (click)="saveAllGroups()">Save (Ctrl+S)</button>
+          </div>
         </div>
 
         <button class="add-overlay-btn" (click)="addOverlay(group)">+ Add Overlay</button>
@@ -356,7 +376,19 @@ import { ElectronService } from '../../services/electron.service';
     .page { max-width: 1100px; }
     h2 { margin-bottom: var(--spacing-sm); }
     .description { color: var(--color-text-secondary); margin-bottom: var(--spacing-lg); }
-    .toolbar { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-lg); flex-wrap: wrap; }
+    .toolbar { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-sm); flex-wrap: wrap; }
+    .toolbar-secondary { display: flex; gap: var(--spacing-md); margin-bottom: var(--spacing-sm); margin-top: var(--spacing-lg); flex-wrap: wrap; }
+    .tertiary-btn {
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: var(--color-text-secondary);
+      font-size: 0.85rem;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .tertiary-btn:hover { color: var(--color-accent); }
+    .tertiary-icon { display: inline-block; margin-right: 6px; font-size: 0.8rem; }
 
     .import-dialog {
       background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
@@ -443,6 +475,13 @@ import { ElectronService } from '../../services/electron.service';
       border-radius: var(--radius-sm); padding: var(--spacing-sm); margin-bottom: var(--spacing-sm);
       transition: border-color 0.1s ease;
     }
+    .overlay-save-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: var(--spacing-md);
+      padding-top: var(--spacing-sm);
+      border-top: 1px solid var(--color-border);
+    }
     .overlay-card.drag-over {
       border-color: var(--color-accent);
       border-style: dashed;
@@ -481,6 +520,7 @@ import { ElectronService } from '../../services/electron.service';
     .rules-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-xs); }
     .rules-label { font-size: 0.75rem; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.3px; }
     .rules-empty { font-size: 0.8rem; color: var(--color-text-secondary); font-style: italic; padding: 4px 0; }
+    .group-rule-action-row { margin-top: 6px; }
 
     .section-hint { font-size: 0.7rem; color: var(--color-text-secondary); font-style: italic; flex: 1; margin-left: var(--spacing-sm); }
 
@@ -495,7 +535,7 @@ import { ElectronService } from '../../services/electron.service';
       margin-bottom: 4px;
     }
     .group-rule-row .conditions-list {
-      padding-left: var(--spacing-sm);
+      padding-left: 50px;
     }
 
     .rule-row {
@@ -553,6 +593,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   pickingGroupId: string | null = null;
   highlightId: string | null = null;
   private collapsedGroupIds = new Set<string>();
+  private savedOverlaySnapshots = new Map<string, string>();
 
   /** Cached cross-references: overlayId → monitored regions referenced by that overlay. Built once on load. */
   overlayCrossRefs = new Map<string, Array<{ id: string; name: string }>>();
@@ -596,6 +637,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   async ngOnInit(): Promise<void> {
     const config = await this.electronService.loadConfig();
     this.groups = config.overlayGroups || [];
+    this.normalizeGroupDefaults();
+    this.refreshSavedOverlaySnapshots();
     this.loadCollapsedGroupState();
     this.syncCollapsedGroupState();
     this.monitoredRegions = config.monitoredRegions || [];
@@ -644,6 +687,10 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
 
   onFieldChanged(): void { this.hasUnsavedChanges = true; }
 
+  isOverlayDirty(overlay: any): boolean {
+    return this.savedOverlaySnapshots.get(overlay.id) !== this.serializeOverlay(overlay);
+  }
+
   // ---------------------------------------------------------------------------
   // Group CRUD
   // ---------------------------------------------------------------------------
@@ -651,6 +698,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
   addGroup(): void {
     const newGroup = {
       id: crypto.randomUUID(), name: 'New Group', enabled: true,
+      defaultVisibilityMode: 'visible',
+      defaultOpacity: 1,
       position: { mode: 'absolute', x: 100, y: 100 },
       growDirection: 'right', alignment: 'start', gap: 0, overlays: [],
     };
@@ -705,6 +754,21 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     } else {
       group.position = { mode: 'relativeToCursor', offsetX: group.position.offsetX || 20, offsetY: group.position.offsetY || 20 };
     }
+    this.hasUnsavedChanges = true;
+  }
+
+  onGroupDefaultVisibilityChanged(group: any): void {
+    if (!group.defaultVisibilityMode) {
+      group.defaultVisibilityMode = 'visible';
+    }
+    if (group.defaultVisibilityMode === 'opacity' && group.defaultOpacity === undefined) {
+      group.defaultOpacity = 1;
+    }
+    this.hasUnsavedChanges = true;
+  }
+
+  onGroupDefaultOpacityChanged(group: any, percentValue: number): void {
+    group.defaultOpacity = percentValue / 100;
     this.hasUnsavedChanges = true;
   }
 
@@ -997,6 +1061,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     config.overlayGroups = JSON.parse(JSON.stringify(this.groups));
     await this.electronService.saveConfig(config);
     this.hasUnsavedChanges = false;
+    this.refreshSavedOverlaySnapshots();
   }
 
   async exportGroups(): Promise<void> {
@@ -1009,6 +1074,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
     if (result.success) {
       const config = await this.electronService.loadConfig();
       this.groups = config.overlayGroups || [];
+      this.normalizeGroupDefaults();
+      this.refreshSavedOverlaySnapshots();
       this.syncCollapsedGroupState();
       this.showImportDialog = false;
       this.importJsonText = '';
@@ -1035,6 +1102,29 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy {
       Array.from(this.collapsedGroupIds).filter((groupId) => validIds.has(groupId))
     );
     this.saveCollapsedGroupState();
+  }
+
+  private refreshSavedOverlaySnapshots(): void {
+    this.savedOverlaySnapshots = new Map(
+      this.groups.flatMap((group) =>
+        (group.overlays || []).map((overlay: any) => [overlay.id, this.serializeOverlay(overlay)] as [string, string])
+      )
+    );
+  }
+
+  private normalizeGroupDefaults(): void {
+    for (const group of this.groups) {
+      if (!group.defaultVisibilityMode) {
+        group.defaultVisibilityMode = 'visible';
+      }
+      if (group.defaultOpacity === undefined) {
+        group.defaultOpacity = 1;
+      }
+    }
+  }
+
+  private serializeOverlay(overlay: any): string {
+    return JSON.stringify(overlay);
   }
 
   private saveCollapsedGroupState(): void {

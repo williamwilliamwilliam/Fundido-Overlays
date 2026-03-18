@@ -15,6 +15,7 @@ export type MonitoredRegionId = string & { readonly __brand: 'MonitoredRegionId'
 export type StateCalculationId = string & { readonly __brand: 'StateCalculationId' };
 export type OverlayGroupId = string & { readonly __brand: 'OverlayGroupId' };
 export type OverlayId = string & { readonly __brand: 'OverlayId' };
+export type GroupDefaultVisibilityMode = 'visible' | 'hidden' | 'opacity';
 
 // ---------------------------------------------------------------------------
 // Geometry
@@ -331,6 +332,10 @@ export interface OverlayGroup {
   name: string;
   /** Whether this group is active and rendered. Default true. */
   enabled: boolean;
+  /** Default group visibility when no group rule matches. */
+  defaultVisibilityMode?: GroupDefaultVisibilityMode;
+  /** Default group opacity (0–1) used when defaultVisibilityMode is 'opacity'. */
+  defaultOpacity?: number;
   position: OverlayPosition;
   growDirection: GrowDirection;
   alignment: Alignment;
@@ -339,8 +344,8 @@ export interface OverlayGroup {
   overlays: Overlay[];
   /**
    * Group-level rules evaluated top-down, first match wins.
-   * When a group rule fires, its action overrides ALL individual overlay rules.
-   * If no group rules match, individual overlay rules are evaluated as normal.
+   * Hide suppresses the entire group immediately.
+   * Show/opacity apply to the group container while individual overlay rules still run.
    */
   rules?: OverlayRule[];
 }

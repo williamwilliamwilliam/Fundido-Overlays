@@ -60,10 +60,12 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
         <button (click)="saveAllRegions()" [disabled]="!hasUnsavedChanges">
           {{ hasUnsavedChanges ? 'Save (Ctrl+S)' : 'Saved' }}
         </button>
-        <button (click)="expandAllRegions()">Expand All</button>
-        <button (click)="collapseAllRegions()">Collapse All</button>
         <button (click)="exportRegions()">Export</button>
         <button (click)="showImportDialog = true">Import</button>
+      </div>
+      <div class="toolbar-secondary">
+        <button class="tertiary-btn" (click)="expandAllRegions()"><span class="tertiary-icon">&#9662;</span>Expand All</button>
+        <button class="tertiary-btn" (click)="collapseAllRegions()"><span class="tertiary-icon">&#9656;</span>Collapse All</button>
       </div>
 
       <div *ngIf="showImportDialog" class="import-dialog">
@@ -558,6 +560,9 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
             </div>
           </div>
         </div>
+        <div class="region-save-row" *ngIf="hasUnsavedChanges && isRegionDirty(region)">
+          <button class="primary" (click)="saveAllRegions()">Save (Ctrl+S)</button>
+        </div>
         </ng-container>
       </div>
 
@@ -587,8 +592,32 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
     .toolbar {
       display: flex;
       gap: var(--spacing-sm);
-      margin-bottom: var(--spacing-lg);
+      margin-bottom: var(--spacing-sm);
       flex-wrap: wrap;
+    }
+    .toolbar-secondary {
+      display: flex;
+      gap: var(--spacing-md);
+      margin-bottom: var(--spacing-sm); 
+      margin-top: var(--spacing-lg);
+      flex-wrap: wrap;
+    }
+    .tertiary-btn {
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: var(--color-text-secondary);
+      font-size: 0.85rem;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .tertiary-btn:hover {
+      color: var(--color-accent);
+    }
+    .tertiary-icon {
+      display: inline-block;
+      margin-right: 6px;
+      font-size: 0.8rem;
     }
 
     .import-dialog {
@@ -794,6 +823,14 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       display: flex;
       margin-top: var(--spacing-md);
       gap: var(--spacing-lg);
+    }
+
+    .region-save-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: var(--spacing-md);
+      padding-top: var(--spacing-sm);
+      border-top: 1px solid var(--color-border);
     }
 
     .region-left {
@@ -1367,6 +1404,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   /** Cached cross-references: regionId → overlay groups/overlays that reference it. Built once on load. */
   regionCrossRefs = new Map<string, Array<{ groupId: string; groupName: string; overlayId?: string; overlayName?: string; source: 'groupRule' | 'overlayRule' | 'mirror' }>>();
   private collapsedRegionIds = new Set<string>();
+  private savedRegionSnapshots = new Map<string, string>();
 
   /** Maps regionId → { medianHex, calcResults: Map<calcId, { currentValue, confidences }> } */
   private regionStateMap = new Map<string, {
@@ -1444,6 +1482,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     const config = await this.electronService.loadConfig();
     this.regions = config.monitoredRegions || [];
     this.normalizeOcrMatchModes();
+    this.refreshSavedRegionSnapshots();
     this.loadCollapsedRegionState();
     this.syncCollapsedRegionState();
     this.overlayGroups = config.overlayGroups || [];
@@ -1590,7 +1629,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     }, 0);
   }
 
-  removeRegion(index: number): void {
+  async removeRegion(index: number): Promise<void> {
     const [removedRegion] = this.regions.splice(index, 1);
     if (removedRegion?.id) {
       this.collapsedRegionIds.delete(removedRegion.id);
@@ -1598,6 +1637,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     }
     this.pushWorkingRegions();
     this.changeDetectorRef.markForCheck();
+    await this.saveAllRegions();
   }
 
   isRegionExpanded(regionId: string): boolean {
@@ -1827,6 +1867,10 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     return matchMode !== 'containsAnyValue' && matchMode !== 'noValueDetected' && matchMode !== 'isEmpty';
   }
 
+  isRegionDirty(region: any): boolean {
+    return this.savedRegionSnapshots.get(region.id) !== this.serializeRegion(region);
+  }
+
   removeSubstringMapping(calc: any, index: number): void {
     calc.substringMappings.splice(index, 1);
     this.pushWorkingRegions();
@@ -1876,6 +1920,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     config.monitoredRegions = JSON.parse(JSON.stringify(this.regions));
     await this.electronService.saveConfig(config);
     this.hasUnsavedChanges = false;
+    this.refreshSavedRegionSnapshots();
   }
 
   /**
@@ -2097,6 +2142,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       const config = await this.electronService.loadConfig();
       this.regions = config.monitoredRegions || [];
       this.normalizeOcrMatchModes();
+      this.refreshSavedRegionSnapshots();
       this.showImportDialog = false;
       this.importJsonText = '';
       this.pushWorkingRegions();
@@ -2319,6 +2365,16 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
         mapping.matchMode = 'noValueDetected';
       }
     }
+  }
+
+  private refreshSavedRegionSnapshots(): void {
+    this.savedRegionSnapshots = new Map(
+      this.regions.map((region) => [region.id, this.serializeRegion(region)])
+    );
+  }
+
+  private serializeRegion(region: any): string {
+    return JSON.stringify(region);
   }
 
   private loadCollapsedRegionState(): void {
