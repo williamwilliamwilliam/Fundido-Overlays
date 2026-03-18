@@ -141,6 +141,21 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
               [height]="getCollapsedPreviewCanvasHeight(region)">
             </canvas>
           </div>
+          <div
+            class="collapsed-state-summary"
+            *ngIf="!isRegionExpanded(region.id)"
+            [title]="getCollapsedStateCalculationName(region) || ''">
+            <div
+              class="collapsed-state-label"
+              [title]="getCollapsedStateCalculationName(region) || ''">
+              {{ getCollapsedStateCalculationName(region) || '' }}
+            </div>
+            <div
+              class="collapsed-state-value"
+              [title]="getCollapsedStateValue(region) || ''">
+              {{ getCollapsedStateValue(region) || '' }}
+            </div>
+          </div>
           <button class="danger-text" (click)="removeRegion(regionIndex)">Remove</button>
         </div>
         <ng-container *ngIf="isRegionExpanded(region.id)">
@@ -703,8 +718,44 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       flex-shrink: 0;
     }
 
+    .collapsed-state-summary {
+      width: 100px;
+      min-width: 100px;
+      max-width: 100px;
+      max-height: 56px;
+      padding: 0 8px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .collapsed-state-label {
+      color: var(--color-text-secondary);
+      font-size: 0.68rem;
+      line-height: 1.1;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .collapsed-state-value {
+      display: flex;
+      align-items: center;
+      color: var(--color-text-secondary);
+      font-size: .8rem;
+      font-weight: 500;
+      line-height: 1.2;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
     .region-content-row {
       display: flex;
+      margin-top: var(--spacing-md);
       gap: var(--spacing-lg);
     }
 
@@ -1681,6 +1732,38 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     const regionState = this.regionStateMap.get(regionId);
     if (!regionState) return null;
     return regionState.calcResults.get(calcId)?.currentValue || null;
+  }
+
+  getCollapsedStateValue(region: any): string | null {
+    if (!region?.stateCalculations?.length) {
+      return null;
+    }
+
+    for (let index = region.stateCalculations.length - 1; index >= 0; index -= 1) {
+      const calc = region.stateCalculations[index];
+      const value = this.getCurrentStateValue(region.id, calc.id);
+      if (value) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  getCollapsedStateCalculationName(region: any): string | null {
+    if (!region?.stateCalculations?.length) {
+      return null;
+    }
+
+    for (let index = region.stateCalculations.length - 1; index >= 0; index -= 1) {
+      const calc = region.stateCalculations[index];
+      const value = this.getCurrentStateValue(region.id, calc.id);
+      if (value) {
+        return calc.name || null;
+      }
+    }
+
+    return null;
   }
 
   getConfidenceForMapping(regionId: string, calcId: string, stateValue: string): number | null {
