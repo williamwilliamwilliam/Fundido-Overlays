@@ -37,6 +37,7 @@ export const CAPTURE_LIST_DISPLAYS = 'capture:list-displays';
 export const STATE_UPDATED = 'state:updated';
 export const REGIONS_SET_WORKING = 'regions:set-working';
 export const GROUPS_SET_WORKING = 'groups:set-working';
+export const REGIONS_SET_DIRTY_OVERLAYS = 'regions:set-dirty-overlays';
 
 // ---------------------------------------------------------------------------
 // Ollama

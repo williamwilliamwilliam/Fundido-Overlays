@@ -5,6 +5,7 @@ import { ConfigPersistenceService } from '../persistence/config-persistence.serv
 import { GameCaptureService } from '../capture/game-capture.service';
 import { PreviewFrameService } from '../capture/preview-frame.service';
 import { OverlayWindowManager } from '../overlay/overlay-window-manager';
+import { DirtyRegionOverlayManager } from '../overlay/dirty-region-overlay-manager';
 import { OcrService } from '../state/ocr.service';
 import { OllamaService } from '../state/ollama.service';
 import { logger, LogCategory } from '../shared/logger';
@@ -17,6 +18,7 @@ export function registerIpcHandlers(
   captureService: GameCaptureService,
   previewService: PreviewFrameService,
   overlayWindowManager: OverlayWindowManager,
+  dirtyRegionOverlayManager: DirtyRegionOverlayManager,
   ocrService: OcrService,
   ollamaService: OllamaService,
   currentConfigRef: { config: FundidoConfig },
@@ -221,6 +223,11 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IpcChannels.REGIONS_SET_WORKING, (_event: IpcMainInvokeEvent, regions: any[] | null) => {
     workingRegionsRef.regions = regions;
+    return { success: true };
+  });
+
+  ipcMain.handle(IpcChannels.REGIONS_SET_DIRTY_OVERLAYS, (_event: IpcMainInvokeEvent, regions: any[] | null) => {
+    dirtyRegionOverlayManager.showRegions(Array.isArray(regions) ? regions : []);
     return { success: true };
   });
 

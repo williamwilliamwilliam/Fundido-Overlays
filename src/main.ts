@@ -6,6 +6,7 @@ import { ConfigPersistenceService } from './persistence/config-persistence.servi
 import { GameCaptureService, CapturedFrame } from './capture/game-capture.service';
 import { PreviewFrameService } from './capture/preview-frame.service';
 import { OverlayWindowManager } from './overlay/overlay-window-manager';
+import { DirtyRegionOverlayManager } from './overlay/dirty-region-overlay-manager';
 import { evaluateFrameState } from './state/state-calculation.service';
 import { OcrService } from './state/ocr.service';
 import { OllamaService } from './state/ollama.service';
@@ -90,6 +91,7 @@ const configService = new ConfigPersistenceService();
 const captureService = new GameCaptureService();
 const previewService = new PreviewFrameService();
 const overlayWindowManager = new OverlayWindowManager();
+const dirtyRegionOverlayManager = new DirtyRegionOverlayManager();
 const ocrService = new OcrService();
 const ollamaService = new OllamaService();
 
@@ -397,6 +399,7 @@ function createMainWindow(): void {
     ocrService.shutdown();
     ollamaService.stop();
     overlayWindowManager.closeAll();
+    dirtyRegionOverlayManager.closeAll();
   });
 
   mainWindow.on('minimize', () => {
@@ -1015,6 +1018,7 @@ app.whenReady().then(() => {
     captureService,
     previewService,
     overlayWindowManager,
+    dirtyRegionOverlayManager,
     ocrService,
     ollamaService,
     currentConfigRef,
@@ -1070,6 +1074,7 @@ app.on('window-all-closed', () => {
   ocrService.shutdown();
   ollamaService.stop();
   overlayWindowManager.closeAll();
+  dirtyRegionOverlayManager.closeAll();
   app.quit();
 });
 

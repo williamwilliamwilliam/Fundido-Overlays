@@ -83,6 +83,7 @@ export interface FundidoApi {
   pickRegion(options?: { autoConfirmSingleClick?: boolean }): Promise<{ x: number; y: number; width: number; height: number } | null>;
   pickColor(): Promise<{ red: number; green: number; blue: number } | null>;
   setWorkingRegions(regions: any[]): Promise<{ success: boolean }>;
+  setDirtyRegionOverlays(regions: Array<{ id: string; name: string; bounds: { x: number; y: number; width: number; height: number } }>): Promise<{ success: boolean }>;
   setWorkingGroups(groups: any[]): Promise<{ success: boolean }>;
   openFileDialog(options?: any): Promise<string | null>;
   ollamaListModels(): Promise<Array<{ name: string; size: number }>>;

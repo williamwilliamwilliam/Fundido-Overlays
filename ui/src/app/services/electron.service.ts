@@ -160,6 +160,11 @@ export class ElectronService {
     await window.fundidoApi.setWorkingRegions(regions);
   }
 
+  public async setDirtyRegionOverlays(regions: Array<{ id: string; name: string; bounds: { x: number; y: number; width: number; height: number } }>): Promise<void> {
+    if (!this.isRunningInElectron) return;
+    await window.fundidoApi.setDirtyRegionOverlays(regions);
+  }
+
   public async setWorkingGroups(groups: any[]): Promise<void> {
     if (!this.isRunningInElectron) return;
     await window.fundidoApi.setWorkingGroups(groups);

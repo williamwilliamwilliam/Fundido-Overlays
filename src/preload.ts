@@ -35,6 +35,7 @@ const IPC = {
   STATE_UPDATED:               'state:updated',
   REGIONS_SET_WORKING:         'regions:set-working',
   GROUPS_SET_WORKING:          'groups:set-working',
+  REGIONS_SET_DIRTY_OVERLAYS:  'regions:set-dirty-overlays',
   DEBUG_LOG:                   'debug:log',
   PICKER_START:                'picker:start',
   PICKER_COLOR:                'picker:color',
@@ -105,6 +106,9 @@ const fundidoApi = {
   // -- Working regions/groups (live evaluation without saving) ---------------
   setWorkingRegions: (regions: any[]): Promise<{ success: boolean }> =>
     ipcRenderer.invoke(IPC.REGIONS_SET_WORKING, regions),
+
+  setDirtyRegionOverlays: (regions: Array<{ id: string; name: string; bounds: { x: number; y: number; width: number; height: number } }>): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC.REGIONS_SET_DIRTY_OVERLAYS, regions),
 
   setWorkingGroups: (groups: any[]): Promise<{ success: boolean }> =>
     ipcRenderer.invoke(IPC.GROUPS_SET_WORKING, groups),

@@ -1655,6 +1655,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.buildRegionCrossRefs();
     // Push to backend for live evaluation, but don't mark as dirty since nothing changed
     this.electronService.setWorkingRegions(this.regions);
+    this.electronService.setDirtyRegionOverlays([]);
     this.changeDetectorRef.markForCheck();
 
     this.ngZone.runOutsideAngular(() => {
@@ -1769,6 +1770,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.electronService.setActivePage('');
     // Clear working regions so the pipeline falls back to saved config
     this.electronService.setWorkingRegions(null as any);
+    this.electronService.setDirtyRegionOverlays([]);
     this.resolvePendingNavigation(false);
   }
 
@@ -2082,6 +2084,25 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     return this.savedRegionSnapshots.get(region.id) !== this.serializeRegion(region);
   }
 
+  private getDirtyRegionOverlayItems(): Array<{ id: string; name: string; bounds: { x: number; y: number; width: number; height: number } }> {
+    return this.regions
+      .filter((region) => this.isRegionDirty(region) && this.hasValidBounds(region))
+      .map((region) => ({
+        id: region.id,
+        name: region.name || 'Unnamed Region',
+        bounds: {
+          x: region.bounds.x,
+          y: region.bounds.y,
+          width: region.bounds.width,
+          height: region.bounds.height,
+        },
+      }));
+  }
+
+  private async syncDirtyRegionOverlays(): Promise<void> {
+    await this.electronService.setDirtyRegionOverlays(this.getDirtyRegionOverlayItems());
+  }
+
   removeSubstringMapping(calc: any, index: number): void {
     calc.substringMappings.splice(index, 1);
     this.pushWorkingRegions();
@@ -2133,6 +2154,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.hasUnsavedChanges = false;
     this.refreshSavedRegionSnapshots();
     this.refreshRegionComparableSnapshots();
+    await this.syncDirtyRegionOverlays();
   }
 
   /**
@@ -2152,6 +2174,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.updateRegionLastUpdatedTimestamps();
     this.hasUnsavedChanges = true;
     this.electronService.setWorkingRegions(this.regions);
+    this.electronService.setDirtyRegionOverlays(this.getDirtyRegionOverlayItems());
   }
 
   // ---------------------------------------------------------------------------
