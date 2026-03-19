@@ -3,6 +3,7 @@ import { BrowserWindow, screen } from 'electron';
 export interface DirtyRegionOverlayItem {
   id: string;
   name: string;
+  showLabel?: boolean;
   bounds: {
     x: number;
     y: number;
@@ -192,13 +193,14 @@ export class DirtyRegionOverlayManager {
         box.style.width = (intersectRight - intersectLeft + (overlayPadding * 2)) + 'px';
         box.style.height = (intersectBottom - intersectTop + (overlayPadding * 2)) + 'px';
 
-        const label = document.createElement('div');
-        label.className = 'region-label';
-        label.textContent = region.name || 'Unnamed Region';
-        const availableWidth = intersectRight - intersectLeft;
-        label.style.maxWidth = '580px';
-
-        box.appendChild(label);
+        if (region.showLabel !== false) {
+          const label = document.createElement('div');
+          label.className = 'region-label';
+          label.textContent = region.name || 'Unnamed Region';
+          const availableWidth = intersectRight - intersectLeft;
+          label.style.maxWidth = '580px';
+          box.appendChild(label);
+        }
         root.appendChild(box);
       }
     });

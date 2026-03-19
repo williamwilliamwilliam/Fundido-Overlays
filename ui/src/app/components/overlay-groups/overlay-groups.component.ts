@@ -368,6 +368,12 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                   <select [(ngModel)]="cond.operator" (ngModelChange)="onFieldChanged()">
                     <option value="equals">=</option>
                     <option value="notEquals">≠</option>
+                    <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsAtLeastOnceAcrossRepeatedRegions">
+                      At least once across Repeated Regions
+                    </option>
+                    <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsInEveryRepeatedRegion">
+                      In every Repeated Region
+                    </option>
                   </select>
                   <select *ngIf="getCalcType(cond.monitoredRegionId, cond.stateCalculationId) !== 'OllamaLLM'"
                     [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()">
@@ -1086,6 +1092,11 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   }
 
   onRegionSelectedForCondition(condition: any): void {
+    if (!this.isRepeatingRegion(condition.monitoredRegionId) &&
+      (condition.operator === 'equalsAtLeastOnceAcrossRepeatedRegions' ||
+        condition.operator === 'equalsInEveryRepeatedRegion')) {
+      condition.operator = 'equals';
+    }
     condition.stateCalculationId = '';
     condition.value = '';
     this.markGroupsChanged();
@@ -1099,6 +1110,17 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   getCalcsForRegion(regionId: string): any[] {
     const region = this.monitoredRegions.find((r: any) => r.id === regionId);
     return region?.stateCalculations || [];
+  }
+
+  isRepeatingRegion(regionId: string): boolean {
+    const region = this.monitoredRegions.find((r: any) => r.id === regionId);
+    if (!region?.repeat?.enabled) {
+      return false;
+    }
+
+    const repeatsInX = region.repeat.x?.enabled === true && (region.repeat.x?.count ?? 1) > 1;
+    const repeatsInY = region.repeat.y?.enabled === true && (region.repeat.y?.count ?? 1) > 1;
+    return repeatsInX || repeatsInY;
   }
 
   /**

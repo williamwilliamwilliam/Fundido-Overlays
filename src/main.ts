@@ -13,7 +13,7 @@ import { OllamaService } from './state/ollama.service';
 import { registerIpcHandlers } from './ipc/ipc-handlers';
 import { logger, LogCategory, WorkerLogMessage } from './shared/logger';
 import { computeRegionPixelHash } from './shared/pixel-hash';
-import { FundidoConfig, PreviewConfig } from './shared';
+import { FundidoConfig, PreviewConfig, getRuntimeMonitoredRegions } from './shared';
 import * as IpcChannels from './shared/ipc-channels';
 
 // ---------------------------------------------------------------------------
@@ -235,7 +235,8 @@ function startPerfMetricsReporting(): void {
 
     // Second pass: sum time-in-calc across all calcs belonging to each region
     for (const [calcKey, _window] of calcTimeWindow) {
-      const regionId = calcKey.split(':')[0];
+      const runtimeRegionId = calcKey.split(':')[0];
+      const regionId = latestRuntimeRegionIdToSourceRegionId.get(runtimeRegionId) || runtimeRegionId;
       const timeMs = getCalcTimeInWindowMs(calcKey, reportNowMs);
       if (!regionMetrics[regionId]) {
         regionMetrics[regionId] = { medianColorPerSec: 0, colorThresholdPerSec: 0, ocrPerSec: 0, ollamaPerSec: 0, totalCalcsPerSec: 0, timeInCalcMs: 0 };
@@ -700,6 +701,8 @@ function setupCaptureToOverlayPipeline(): void {
  */
 let stateEvalWorker: Worker | null = null;
 let workerBusy = false;
+let latestEvaluatedRuntimeRegions: any[] = [];
+const latestRuntimeRegionIdToSourceRegionId = new Map<string, string>();
 
 function fallbackFromWorkerFailure(error: unknown): void {
   workerBusy = false;
@@ -750,23 +753,24 @@ function startStateEvaluationLoop(): void {
     const metrics = result.metrics;
 
     // Cache fresh results and merge cached results for throttled calcs
-    for (const regionState of frameState.regionStates) {
+    const instanceStates = frameState.regionInstanceStates || frameState.regionStates;
+    for (const regionState of instanceStates as any[]) {
+      const runtimeRegionId = regionState.runtimeMonitoredRegionId || regionState.monitoredRegionId;
       for (const calcResult of regionState.calculationResults) {
-        const calcKey = `${regionState.monitoredRegionId}:${calcResult.stateCalculationId}`;
+        const calcKey = `${runtimeRegionId}:${calcResult.stateCalculationId}`;
         lastCalcResults.set(calcKey, calcResult);
       }
 
       // Inject cached results for calcs the worker throttled
       const evaluatedCalcIds = new Set(
-        (result.throttledCalcIdsByRegion[regionState.monitoredRegionId] || [])
+        (result.throttledCalcIdsByRegion[runtimeRegionId] || [])
       );
-      const allMonitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions;
-      const originalRegion = allMonitoredRegions.find((r: any) => r.id === regionState.monitoredRegionId);
-      if (originalRegion) {
-        for (const calc of (originalRegion.stateCalculations || [])) {
+      const runtimeRegion = latestEvaluatedRuntimeRegions.find((r: any) => r.id === runtimeRegionId);
+      if (runtimeRegion) {
+        for (const calc of (runtimeRegion.stateCalculations || [])) {
           const calcWasThrottled = !evaluatedCalcIds.has(calc.id);
           if (calcWasThrottled) {
-            const calcKey = `${regionState.monitoredRegionId}:${calc.id}`;
+            const calcKey = `${runtimeRegionId}:${calc.id}`;
             const cachedResult = lastCalcResults.get(calcKey);
             if (cachedResult) {
               regionState.calculationResults.push(cachedResult);
@@ -839,7 +843,15 @@ function startStateEvaluationLoop(): void {
 
     if (monitoredRegions.length === 0) return;
 
-    perfCounters.activeRegionCount = monitoredRegions.length;
+    const runtimeRegions = getRuntimeMonitoredRegions(monitoredRegions);
+    if (runtimeRegions.length === 0) return;
+    latestEvaluatedRuntimeRegions = runtimeRegions;
+    latestRuntimeRegionIdToSourceRegionId.clear();
+    for (const runtimeRegion of runtimeRegions) {
+      latestRuntimeRegionIdToSourceRegionId.set(runtimeRegion.id, runtimeRegion.sourceMonitoredRegionId);
+    }
+
+    perfCounters.activeRegionCount = runtimeRegions.length;
     const enabledOverlayGroups = (currentConfigRef.config.overlayGroups || []).filter((g: any) => g.enabled !== false);
     perfCounters.activeOverlayGroupCount = enabledOverlayGroups.length;
 
@@ -855,7 +867,7 @@ function startStateEvaluationLoop(): void {
     captureDisplayCache.originY = displayOriginY;
     captureDisplayCache.scaleFactor = dpiScaleFactor;
 
-    const physicalBoundsRegions = monitoredRegions.map((region: any) => ({
+    const physicalBoundsRegions = runtimeRegions.map((region: any) => ({
       ...region,
       bounds: {
         x: Math.round((region.bounds.x - displayOriginX) * dpiScaleFactor),
@@ -880,7 +892,7 @@ function startStateEvaluationLoop(): void {
       frameHeight: frame.height,
       frameCapturedAt: frame.capturedAt,
       physicalBoundsRegions,
-      monitoredRegions,
+      monitoredRegions: runtimeRegions,
       throttleConfig: {
         maxCalcFrequency: currentConfigRef.config.maxCalcFrequency ?? 10,
         lastCalcTimestamps: {},
@@ -919,6 +931,14 @@ function startStateEvaluationLoopFallback(): void {
 
     if (monitoredRegions.length === 0) return;
 
+    const runtimeRegions = getRuntimeMonitoredRegions(monitoredRegions);
+    if (runtimeRegions.length === 0) return;
+    latestEvaluatedRuntimeRegions = runtimeRegions;
+    latestRuntimeRegionIdToSourceRegionId.clear();
+    for (const runtimeRegion of runtimeRegions) {
+      latestRuntimeRegionIdToSourceRegionId.set(runtimeRegion.id, runtimeRegion.sourceMonitoredRegionId);
+    }
+
     const maxCalcFrequency = currentConfigRef.config.maxCalcFrequency ?? 10;
     const minCalcIntervalMs = Math.round(1000 / maxCalcFrequency);
     const nowMs = Date.now();
@@ -931,7 +951,7 @@ function startStateEvaluationLoopFallback(): void {
     captureDisplayCache.originY = captureDisplay.originY;
     captureDisplayCache.scaleFactor = captureDisplay.scaleFactor || 1;
 
-    const physicalBoundsRegions = monitoredRegions.map((region: any) => ({
+    const physicalBoundsRegions = runtimeRegions.map((region: any) => ({
       ...region,
       bounds: {
         x: Math.round((region.bounds.x - captureDisplay.originX) * captureDisplay.scaleFactor),
@@ -967,15 +987,17 @@ function startStateEvaluationLoopFallback(): void {
 
     const frameState = evaluateFrameState(frame, throttledRegions, ocrService.getAllResults(), ollamaService.getAllResults());
 
-    for (const rs of frameState.regionStates) {
-      for (const cr of rs.calculationResults) lastCalcResults.set(`${rs.monitoredRegionId}:${cr.stateCalculationId}`, cr);
-      const orig = monitoredRegions.find((r: any) => r.id === rs.monitoredRegionId);
-      const throt = throttledRegions.find((r: any) => r.id === rs.monitoredRegionId);
+    const instanceStates = frameState.regionInstanceStates || frameState.regionStates;
+    for (const rs of instanceStates as any[]) {
+      const runtimeRegionId = rs.runtimeMonitoredRegionId || rs.monitoredRegionId;
+      for (const cr of rs.calculationResults) lastCalcResults.set(`${runtimeRegionId}:${cr.stateCalculationId}`, cr);
+      const orig = runtimeRegions.find((r: any) => r.id === runtimeRegionId);
+      const throt = throttledRegions.find((r: any) => r.id === runtimeRegionId);
       if (orig && throt) {
         const evalIds = new Set((throt.stateCalculations || []).map((c: any) => c.id));
         for (const calc of (orig.stateCalculations || [])) {
           if (!evalIds.has(calc.id)) {
-            const cached = lastCalcResults.get(`${rs.monitoredRegionId}:${calc.id}`);
+            const cached = lastCalcResults.get(`${runtimeRegionId}:${calc.id}`);
             if (cached) rs.calculationResults.push(cached);
           }
         }

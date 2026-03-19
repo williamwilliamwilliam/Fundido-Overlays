@@ -115,7 +115,12 @@ parentPort!.on('message', (request: EvalRequest) => {
       else if (calc.type === 'OCR') { ocrCalcCount++; ro++; }
       else if (calc.type === 'OllamaLLM') { ollamaCalcCount++; rl++; }
     }
-    regionCalcCounts[region.id] = { medianColor: rm, colorThreshold: rt, ocr: ro, ollama: rl };
+    regionCalcCounts[region.sourceMonitoredRegionId || region.id] = {
+      medianColor: (regionCalcCounts[region.sourceMonitoredRegionId || region.id]?.medianColor || 0) + rm,
+      colorThreshold: (regionCalcCounts[region.sourceMonitoredRegionId || region.id]?.colorThreshold || 0) + rt,
+      ocr: (regionCalcCounts[region.sourceMonitoredRegionId || region.id]?.ocr || 0) + ro,
+      ollama: (regionCalcCounts[region.sourceMonitoredRegionId || region.id]?.ollama || 0) + rl,
+    };
   }
 
   parentPort!.postMessage({

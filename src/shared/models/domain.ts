@@ -215,10 +215,36 @@ export interface MonitoredRegion {
   enabled: boolean;
   /** Unix epoch milliseconds when this region was last changed. */
   lastUpdatedAt?: number;
+  /** Optional repeat configuration that expands this region into multiple runtime instances. */
+  repeat?: MonitoredRegionRepeatConfig;
   /** The area of the capture this region covers. */
   bounds: Rectangle;
   /** One or more calculations that derive state from this region. */
   stateCalculations: StateCalculation[];
+}
+
+export interface MonitoredRegionRepeatAxisConfig {
+  enabled: boolean;
+  /** Pixel offset applied per repeat step. Can be negative. */
+  every: number;
+  /** Total number of instances along this axis, including the original. */
+  count: number;
+}
+
+export interface MonitoredRegionRepeatConfig {
+  enabled: boolean;
+  x: MonitoredRegionRepeatAxisConfig;
+  y: MonitoredRegionRepeatAxisConfig;
+}
+
+export type RuntimeMonitoredRegionId = string;
+
+export interface RuntimeMonitoredRegion extends Omit<MonitoredRegion, 'id'> {
+  id: RuntimeMonitoredRegionId;
+  sourceMonitoredRegionId: MonitoredRegionId;
+  instanceIndex: number;
+  repeatIndexX: number;
+  repeatIndexY: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +311,11 @@ export interface OverlayRegionMirrorConfig {
 
 // -- Rules engine --
 
-export type RuleOperator = 'equals' | 'notEquals';
+export type RuleOperator =
+  | 'equals'
+  | 'notEquals'
+  | 'equalsAtLeastOnceAcrossRepeatedRegions'
+  | 'equalsInEveryRepeatedRegion';
 export type RuleLogicMode = 'AND' | 'OR';
 
 export interface RuleCondition {
@@ -426,8 +456,17 @@ export interface MonitoredRegionState {
   calculationResults: StateCalculationResult[];
 }
 
+export interface MonitoredRegionInstanceState extends MonitoredRegionState {
+  runtimeMonitoredRegionId: RuntimeMonitoredRegionId;
+  bounds: Rectangle;
+  instanceIndex: number;
+  repeatIndexX: number;
+  repeatIndexY: number;
+}
+
 /** The full set of computed state for the current frame. */
 export interface FrameState {
   timestamp: number;
   regionStates: MonitoredRegionState[];
+  regionInstanceStates?: MonitoredRegionInstanceState[];
 }

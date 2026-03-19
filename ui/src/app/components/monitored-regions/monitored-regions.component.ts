@@ -268,6 +268,68 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                 {{ pickingRegionId === region.id ? 'Picking...' : 'Pick Region' }}
               </button>
             </div>
+            <div class="repeat-section">
+              <div class="section-header repeat-header">
+                <span class="section-label">Repeat?</span>
+                <label class="checkbox-label repeat-toggle">
+                  <input
+                    type="checkbox"
+                    [ngModel]="region.repeat?.enabled === true"
+                    (ngModelChange)="onRegionRepeatEnabledChanged(region, $event)" />
+                </label>
+              </div>
+              <div *ngIf="region.repeat?.enabled" class="region-repeat">
+                <div class="repeat-settings">
+                <div class="repeat-axis-row">
+                  <label class="checkbox-label">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="region.repeat.x.enabled"
+                      (ngModelChange)="onFieldChanged()" />
+                    Repeat X
+                  </label>
+                  <label *ngIf="region.repeat.x.enabled">Every X
+                    <input
+                      type="number"
+                      [(ngModel)]="region.repeat.x.every"
+                      (ngModelChange)="onFieldChanged()" />
+                  </label>
+                  <label *ngIf="region.repeat.x.enabled">Times
+                    <input
+                      type="number"
+                      min="1"
+                      [(ngModel)]="region.repeat.x.count"
+                      (ngModelChange)="onFieldChanged()" />
+                  </label>
+                </div>
+                <div class="repeat-axis-row">
+                  <label class="checkbox-label">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="region.repeat.y.enabled"
+                      (ngModelChange)="onFieldChanged()" />
+                    Repeat Y
+                  </label>
+                  <label *ngIf="region.repeat.y.enabled">Every Y
+                    <input
+                      type="number"
+                      [(ngModel)]="region.repeat.y.every"
+                      (ngModelChange)="onFieldChanged()" />
+                  </label>
+                  <label *ngIf="region.repeat.y.enabled">Times
+                    <input
+                      type="number"
+                      min="1"
+                      [(ngModel)]="region.repeat.y.count"
+                      (ngModelChange)="onFieldChanged()" />
+                  </label>
+                </div>
+                <div class="repeat-summary">
+                  Total Regions: {{ getRepeatInstanceCount(region) }}
+                </div>
+              </div>
+            </div>
+            </div>
 
             <!-- State Calculations -->
             <div class="state-calcs-section">
@@ -629,6 +691,24 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
               <div class="current-state-row" *ngIf="getCurrentStateValue(region.id, calc.id)">
                 <span class="info-label">{{ calc.name }} State</span>
                 <span class="current-state-value">{{ getCurrentStateValue(region.id, calc.id) }}</span>
+              </div>
+
+              <div class="repeat-instance-list" *ngIf="getRegionInstanceStates(region.id).length > 1">
+                <div class="repeat-instance-header">
+                  <span>Base/Coordinate</span>
+                  <span>Median Color</span>
+                  <span>State Value</span>
+                </div>
+                <div class="repeat-instance-row" *ngFor="let instanceState of getRegionInstanceStates(region.id); trackBy: trackByRegionInstanceStateId">
+                  <span class="repeat-instance-label">{{ getRegionInstanceLabel(instanceState) }}</span>
+                  <span class="repeat-instance-median">{{ instanceState.medianHex || '(n/a)' }}</span>
+                  <span class="repeat-instance-value">
+                    <ng-container *ngIf="getRegionInstanceDisplayParts(instanceState, calc) as parts">
+                      <span>{{ parts.primary }}</span>
+                      <span *ngIf="parts.secondary" class="repeat-instance-secondary">{{ parts.secondary }}</span>
+                    </ng-container>
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -1017,6 +1097,48 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
 
     .region-bounds input[type="number"] { width: 70px; }
 
+    .repeat-section {
+      margin-bottom: var(--spacing-md);
+    }
+
+    .repeat-header {
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .repeat-toggle {
+      margin-left: auto;
+    }
+
+    .region-repeat {
+      padding: var(--spacing-sm);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background-color: var(--color-bg-primary);
+    }
+
+    .repeat-settings {
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-sm);
+      margin-top: var(--spacing-sm);
+    }
+
+    .repeat-axis-row {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+      flex-wrap: wrap;
+    }
+
+    .repeat-axis-row input[type="number"] {
+      width: 90px;
+    }
+
+    .repeat-summary {
+      color: var(--color-text-secondary);
+      font-size: 0.8rem;
+    }
+
     .pick-btn {
       font-size: 0.8rem;
       padding: 4px 12px;
@@ -1389,6 +1511,53 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       gap: 6px;
     }
 
+    .repeat-instance-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: var(--spacing-sm);
+      padding-top: var(--spacing-sm);
+      border-top: 1px dashed var(--color-border);
+    }
+
+    .repeat-instance-header,
+    .repeat-instance-row {
+      display: grid;
+      grid-template-columns: minmax(90px, 1.1fr) minmax(90px, 1fr) minmax(100px, 1.2fr);
+      gap: var(--spacing-sm);
+      font-size: 0.78rem;
+      align-items: center;
+    }
+
+    .repeat-instance-header {
+      color: var(--color-text-secondary);
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .repeat-instance-label {
+      color: var(--color-text-secondary);
+      white-space: nowrap;
+      text-align: left;
+    }
+
+    .repeat-instance-median {
+      font-family: var(--font-mono);
+      text-align: left;
+    }
+
+    .repeat-instance-value {
+      text-align: left;
+      word-break: break-word;
+    }
+
+    .repeat-instance-secondary {
+      opacity: 0.7;
+      margin-left: 4px;
+    }
+
     .ollama-response-value {
       font-family: var(--font-mono);
       font-size: 0.85rem;
@@ -1574,6 +1743,20 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     medianHex: string;
     calcResults: Map<string, { currentValue: string; confidenceByMapping: Record<string, number> }>;
   }>();
+  private regionInstanceStateMap = new Map<string, Array<{
+    runtimeMonitoredRegionId: string;
+    repeatIndexX: number;
+    repeatIndexY: number;
+    medianHex: string;
+    calcResults: Map<string, {
+      currentValue: string;
+      confidenceByMapping: Record<string, number>;
+      ocrText?: string;
+      ollamaResponse?: string;
+      ollamaResponseTimeMs?: number;
+    }>;
+  }>>();
+  private regionStateDisplaySnapshot = '';
 
   private previewSubscription: Subscription | null = null;
   private pickerUpdateSubscription: Subscription | null = null;
@@ -1646,6 +1829,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
     const config = await this.electronService.loadConfig();
     this.regions = config.monitoredRegions || [];
+    this.normalizeRepeatConfigs();
     this.normalizeOcrMatchModes();
     this.refreshSavedRegionSnapshots();
     this.refreshRegionComparableSnapshots();
@@ -1679,8 +1863,9 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
     this.ngZone.runOutsideAngular(() => {
       this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
-        this.processFrameState(frameState);
-        this.scheduleViewRefresh();
+        if (this.processFrameState(frameState)) {
+          this.scheduleViewRefresh();
+        }
       });
     });
 
@@ -1826,6 +2011,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       name: 'New Region',
       enabled: true,
       lastUpdatedAt: Date.now(),
+      repeat: this.createDefaultRepeatConfig(),
       bounds: { x: 0, y: 0, width: 100, height: 100 },
       stateCalculations: [],
     };
@@ -1881,6 +2067,86 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
   hasValidBounds(region: any): boolean {
     return region.bounds.width > 0 && region.bounds.height > 0;
+  }
+
+  onRegionRepeatEnabledChanged(region: any, enabled: boolean): void {
+    this.ensureRepeatConfig(region);
+    region.repeat.enabled = enabled === true;
+    this.onFieldChanged();
+  }
+
+  getRepeatInstanceCount(region: any): number {
+    this.ensureRepeatConfig(region);
+    if (!region.repeat.enabled) {
+      return 1;
+    }
+
+    const xCount = region.repeat.x.enabled ? this.normalizeRepeatCount(region.repeat.x.count) : 1;
+    const yCount = region.repeat.y.enabled ? this.normalizeRepeatCount(region.repeat.y.count) : 1;
+    return xCount * yCount;
+  }
+
+  getRegionInstanceStates(regionId: string): Array<{
+    runtimeMonitoredRegionId: string;
+    repeatIndexX: number;
+    repeatIndexY: number;
+    medianHex: string;
+    calcResults: Map<string, {
+      currentValue: string;
+      confidenceByMapping: Record<string, number>;
+      ocrText?: string;
+      ollamaResponse?: string;
+      ollamaResponseTimeMs?: number;
+    }>;
+  }> {
+    return this.regionInstanceStateMap.get(regionId) || [];
+  }
+
+  getRegionInstanceLabel(instanceState: { repeatIndexX: number; repeatIndexY: number }): string {
+    const isBaseInstance = instanceState.repeatIndexX === 0 && instanceState.repeatIndexY === 0;
+    if (isBaseInstance) {
+      return 'Base';
+    }
+
+    return `X${instanceState.repeatIndexX + 1}, Y${instanceState.repeatIndexY + 1}`;
+  }
+
+  trackByRegionInstanceStateId(_index: number, instanceState: { runtimeMonitoredRegionId: string }): string {
+    return instanceState.runtimeMonitoredRegionId;
+  }
+
+  getRegionInstanceDisplayParts(instanceState: {
+    calcResults: Map<string, {
+      currentValue: string;
+      confidenceByMapping: Record<string, number>;
+      ocrText?: string;
+      ollamaResponse?: string;
+    }>;
+  }, calc: any): { primary: string; secondary?: string } {
+    const calcResult = instanceState.calcResults.get(calc.id);
+    if (!calcResult) {
+      return { primary: '(empty)' };
+    }
+
+    if (calc.type === 'OCR') {
+      return { primary: calcResult.ocrText ?? calcResult.currentValue ?? '(empty)' };
+    }
+
+    if (calc.type === 'OllamaLLM') {
+      return { primary: calcResult.ollamaResponse ?? calcResult.currentValue ?? 'Waiting...' };
+    }
+
+    if (calc.type === 'ColorThreshold' && calcResult.currentValue) {
+      const confidence = calcResult.confidenceByMapping?.[calcResult.currentValue];
+      if (confidence !== undefined) {
+        return {
+          primary: calcResult.currentValue,
+          secondary: `(${confidence.toFixed(1)}%)`,
+        };
+      }
+    }
+
+    return { primary: calcResult.currentValue || '(empty)' };
   }
 
   // ---------------------------------------------------------------------------
@@ -2084,23 +2350,98 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     return this.savedRegionSnapshots.get(region.id) !== this.serializeRegion(region);
   }
 
-  private getDirtyRegionOverlayItems(): Array<{ id: string; name: string; bounds: { x: number; y: number; width: number; height: number } }> {
-    return this.regions
-      .filter((region) => this.isRegionDirty(region) && this.hasValidBounds(region))
-      .map((region) => ({
-        id: region.id,
-        name: region.name || 'Unnamed Region',
-        bounds: {
-          x: region.bounds.x,
-          y: region.bounds.y,
-          width: region.bounds.width,
-          height: region.bounds.height,
-        },
-      }));
+  private getDirtyRegionOverlayItems(): Array<{ id: string; name: string; showLabel?: boolean; bounds: { x: number; y: number; width: number; height: number } }> {
+    return this.regions.flatMap((region) =>
+      this.isRegionDirty(region) && this.hasValidBounds(region)
+        ? this.expandRegionInstances(region).map((instance, index) => ({
+            id: `${region.id}:${index}`,
+            name: region.name || 'Unnamed Region',
+            showLabel: index === 0,
+            bounds: instance.bounds,
+          }))
+        : []
+    );
   }
 
   private async syncDirtyRegionOverlays(): Promise<void> {
     await this.electronService.setDirtyRegionOverlays(this.getDirtyRegionOverlayItems());
+  }
+
+  private createDefaultRepeatConfig(): any {
+    return {
+      enabled: false,
+      x: {
+        enabled: false,
+        every: 0,
+        count: 1,
+      },
+      y: {
+        enabled: false,
+        every: 0,
+        count: 1,
+      },
+    };
+  }
+
+  private normalizeRepeatCount(value: any): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return 1;
+    }
+    return Math.max(1, Math.floor(parsed));
+  }
+
+  private ensureRepeatConfig(region: any): void {
+    const defaults = this.createDefaultRepeatConfig();
+    const repeat = region.repeat || {};
+    region.repeat = {
+      enabled: repeat.enabled === true,
+      x: {
+        enabled: repeat.x?.enabled === true,
+        every: Number.isFinite(repeat.x?.every) ? repeat.x.every : defaults.x.every,
+        count: this.normalizeRepeatCount(repeat.x?.count),
+      },
+      y: {
+        enabled: repeat.y?.enabled === true,
+        every: Number.isFinite(repeat.y?.every) ? repeat.y.every : defaults.y.every,
+        count: this.normalizeRepeatCount(repeat.y?.count),
+      },
+    };
+  }
+
+  private normalizeRepeatConfigs(): void {
+    for (const region of this.regions) {
+      this.ensureRepeatConfig(region);
+    }
+  }
+
+  private expandRegionInstances(region: any): Array<{ bounds: { x: number; y: number; width: number; height: number }; repeatIndexX: number; repeatIndexY: number }> {
+    this.ensureRepeatConfig(region);
+
+    const xCount = region.repeat.enabled && region.repeat.x.enabled
+      ? this.normalizeRepeatCount(region.repeat.x.count)
+      : 1;
+    const yCount = region.repeat.enabled && region.repeat.y.enabled
+      ? this.normalizeRepeatCount(region.repeat.y.count)
+      : 1;
+
+    const instances: Array<{ bounds: { x: number; y: number; width: number; height: number }; repeatIndexX: number; repeatIndexY: number }> = [];
+    for (let repeatIndexY = 0; repeatIndexY < yCount; repeatIndexY += 1) {
+      for (let repeatIndexX = 0; repeatIndexX < xCount; repeatIndexX += 1) {
+        instances.push({
+          repeatIndexX,
+          repeatIndexY,
+          bounds: {
+            x: region.bounds.x + (region.repeat.enabled && region.repeat.x.enabled ? region.repeat.x.every * repeatIndexX : 0),
+            y: region.bounds.y + (region.repeat.enabled && region.repeat.y.enabled ? region.repeat.y.every * repeatIndexY : 0),
+            width: region.bounds.width,
+            height: region.bounds.height,
+          },
+        });
+      }
+    }
+
+    return instances;
   }
 
   removeSubstringMapping(calc: any, index: number): void {
@@ -2264,9 +2605,32 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.changeDetectorRef.markForCheck();
   }
 
-  private processFrameState(frameState: any): void {
-    if (!frameState || !frameState.regionStates) return;
+  private processFrameState(frameState: any): boolean {
+    if (!frameState || !frameState.regionStates) return false;
 
+    const nextRegionStateMap = new Map<string, {
+      medianHex: string;
+      calcResults: Map<string, {
+        currentValue: string;
+        confidenceByMapping: Record<string, number>;
+        ocrText?: string;
+        ollamaResponse?: string;
+        ollamaResponseTimeMs?: number;
+      }>;
+    }>();
+    const nextRegionInstanceStateMap = new Map<string, Array<{
+      runtimeMonitoredRegionId: string;
+      repeatIndexX: number;
+      repeatIndexY: number;
+      medianHex: string;
+      calcResults: Map<string, {
+        currentValue: string;
+        confidenceByMapping: Record<string, number>;
+        ocrText?: string;
+        ollamaResponse?: string;
+        ollamaResponseTimeMs?: number;
+      }>;
+    }>>();
     for (const regionState of frameState.regionStates) {
       const calcResults = new Map<string, {
         currentValue: string;
@@ -2292,8 +2656,66 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
         medianHex = rgbToHex(mc.red, mc.green, mc.blue);
       }
 
-      this.regionStateMap.set(regionState.monitoredRegionId, { medianHex, calcResults });
+      nextRegionStateMap.set(regionState.monitoredRegionId, { medianHex, calcResults });
     }
+
+    const instanceStates = frameState.regionInstanceStates || frameState.regionStates;
+    for (const regionState of instanceStates) {
+      const calcResults = new Map<string, {
+        currentValue: string;
+        confidenceByMapping: Record<string, number>;
+        ocrText?: string;
+        ollamaResponse?: string;
+        ollamaResponseTimeMs?: number;
+      }>();
+
+      for (const calcResult of regionState.calculationResults) {
+        calcResults.set(calcResult.stateCalculationId, {
+          currentValue: calcResult.currentValue,
+          confidenceByMapping: calcResult.confidenceByMapping,
+          ocrText: calcResult.ocrText,
+          ollamaResponse: calcResult.ollamaResponse,
+          ollamaResponseTimeMs: calcResult.ollamaResponseTimeMs,
+        });
+      }
+
+      let medianHex = '';
+      if (regionState.medianColor) {
+        const mc = regionState.medianColor;
+        medianHex = rgbToHex(mc.red, mc.green, mc.blue);
+      }
+
+      const sourceRegionId = regionState.monitoredRegionId;
+      const entries = nextRegionInstanceStateMap.get(sourceRegionId) || [];
+      entries.push({
+        runtimeMonitoredRegionId: regionState.runtimeMonitoredRegionId || regionState.monitoredRegionId,
+        repeatIndexX: regionState.repeatIndexX ?? 0,
+        repeatIndexY: regionState.repeatIndexY ?? 0,
+        medianHex,
+        calcResults,
+      });
+      nextRegionInstanceStateMap.set(sourceRegionId, entries);
+    }
+
+    for (const [regionId, entries] of nextRegionInstanceStateMap) {
+      entries.sort((a, b) => {
+        if (a.repeatIndexY !== b.repeatIndexY) {
+          return a.repeatIndexY - b.repeatIndexY;
+        }
+        return a.repeatIndexX - b.repeatIndexX;
+      });
+      nextRegionInstanceStateMap.set(regionId, entries);
+    }
+
+    const nextDisplaySnapshot = this.serializeRegionStateDisplaySnapshot(nextRegionStateMap, nextRegionInstanceStateMap);
+    if (nextDisplaySnapshot === this.regionStateDisplaySnapshot) {
+      return false;
+    }
+
+    this.regionStateDisplaySnapshot = nextDisplaySnapshot;
+    this.regionStateMap = nextRegionStateMap;
+    this.regionInstanceStateMap = nextRegionInstanceStateMap;
+    return true;
   }
 
   getOllamaResponse(regionId: string, calcId: string): string | null {
@@ -2439,6 +2861,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       : JSON.parse(JSON.stringify(importedRegion));
 
     this.normalizeOcrMatchModesOnRegion(regionToApply);
+    this.ensureRepeatConfig(regionToApply);
 
     if (action === 'update') {
       const existingIndex = this.regions.findIndex((region) => region.id === regionToApply.id);
@@ -2822,6 +3245,84 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       Array.from(this.collapsedRegionIds).filter((regionId) => validIds.has(regionId))
     );
     this.saveCollapsedRegionState();
+  }
+
+  private serializeRegionStateDisplaySnapshot(
+    regionStateMap: Map<string, {
+      medianHex: string;
+      calcResults: Map<string, {
+        currentValue: string;
+        confidenceByMapping: Record<string, number>;
+        ocrText?: string;
+        ollamaResponse?: string;
+        ollamaResponseTimeMs?: number;
+      }>;
+    }>,
+    regionInstanceStateMap: Map<string, Array<{
+      runtimeMonitoredRegionId: string;
+      repeatIndexX: number;
+      repeatIndexY: number;
+      medianHex: string;
+      calcResults: Map<string, {
+        currentValue: string;
+        confidenceByMapping: Record<string, number>;
+        ocrText?: string;
+        ollamaResponse?: string;
+        ollamaResponseTimeMs?: number;
+      }>;
+    }>>,
+  ): string {
+    const regionEntries = Array.from(regionStateMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([regionId, regionState]) => ({
+        regionId,
+        medianHex: regionState.medianHex,
+        calcResults: Array.from(regionState.calcResults.entries())
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([calcId, calcResult]) => ({
+            calcId,
+            currentValue: calcResult.currentValue,
+            ocrText: calcResult.ocrText ?? '',
+            ollamaResponse: calcResult.ollamaResponse ?? '',
+            ollamaResponseTimeMs: calcResult.ollamaResponseTimeMs ?? 0,
+            confidenceByMapping: this.roundConfidenceMap(calcResult.confidenceByMapping),
+          })),
+      }));
+
+    const instanceEntries = Array.from(regionInstanceStateMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([regionId, instanceStates]) => ({
+        regionId,
+        instances: instanceStates.map((instanceState) => ({
+          runtimeMonitoredRegionId: instanceState.runtimeMonitoredRegionId,
+          repeatIndexX: instanceState.repeatIndexX,
+          repeatIndexY: instanceState.repeatIndexY,
+          medianHex: instanceState.medianHex,
+          calcResults: Array.from(instanceState.calcResults.entries())
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([calcId, calcResult]) => ({
+              calcId,
+              currentValue: calcResult.currentValue,
+              ocrText: calcResult.ocrText ?? '',
+              ollamaResponse: calcResult.ollamaResponse ?? '',
+              ollamaResponseTimeMs: calcResult.ollamaResponseTimeMs ?? 0,
+              confidenceByMapping: this.roundConfidenceMap(calcResult.confidenceByMapping),
+            })),
+        })),
+      }));
+
+    return JSON.stringify({
+      regions: regionEntries,
+      instances: instanceEntries,
+    });
+  }
+
+  private roundConfidenceMap(confidenceByMapping: Record<string, number>): Record<string, number> {
+    const rounded: Record<string, number> = {};
+    for (const [stateValue, confidence] of Object.entries(confidenceByMapping || {})) {
+      rounded[stateValue] = Math.round(confidence * 10) / 10;
+    }
+    return rounded;
   }
 
   private saveCollapsedRegionState(): void {

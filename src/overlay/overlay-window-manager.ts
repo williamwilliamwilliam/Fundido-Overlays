@@ -174,9 +174,7 @@ export class OverlayWindowManager {
         continue;
       }
 
-      let result = true;
-      if (cond.operator === 'equals') result = calcResult.currentValue === cond.value;
-      else if (cond.operator === 'notEquals') result = calcResult.currentValue !== cond.value;
+      let result = this.evaluateConditionOperator(cond, calcResult, frameState);
       if (cond.negate) result = !result;
 
       if (logicMode === 'OR' && result) return true;
@@ -184,6 +182,41 @@ export class OverlayWindowManager {
     }
 
     return logicMode === 'AND';
+  }
+
+  private evaluateConditionOperator(cond: any, calcResult: any, frameState: FrameState): boolean {
+    if (cond.operator === 'equals') {
+      return calcResult.currentValue === cond.value;
+    }
+
+    if (cond.operator === 'notEquals') {
+      return calcResult.currentValue !== cond.value;
+    }
+
+    const instanceStates = (frameState as any).regionInstanceStates || [];
+    const matchingInstances = instanceStates.filter(
+      (instanceState: any) => instanceState.monitoredRegionId === cond.monitoredRegionId
+    );
+
+    if (matchingInstances.length === 0) {
+      return false;
+    }
+
+    const matchingValues = matchingInstances.map((instanceState: any) =>
+      instanceState.calculationResults.find(
+        (instanceCalcResult: any) => instanceCalcResult.stateCalculationId === cond.stateCalculationId
+      )?.currentValue
+    );
+
+    if (cond.operator === 'equalsAtLeastOnceAcrossRepeatedRegions') {
+      return matchingValues.some((value: string | undefined) => value === cond.value);
+    }
+
+    if (cond.operator === 'equalsInEveryRepeatedRegion') {
+      return matchingValues.every((value: string | undefined) => value === cond.value);
+    }
+
+    return true;
   }
 
   /**
@@ -670,11 +703,34 @@ function buildOverlayRendererHtml(): string {
     if (!rs) return false;
     const cr = rs.calculationResults.find(r => r.stateCalculationId === c.stateCalculationId);
     if (!cr) return false;
-    let result = true;
-    if (c.operator === 'equals') result = cr.currentValue === c.value;
-    else if (c.operator === 'notEquals') result = cr.currentValue !== c.value;
+    let result = evalConditionOperator(c, cr, fs);
     if (c.negate) result = !result;
     return result;
+  }
+
+  function evalConditionOperator(c, cr, fs) {
+    if (c.operator === 'equals') return cr.currentValue === c.value;
+    if (c.operator === 'notEquals') return cr.currentValue !== c.value;
+
+    const instanceStates = fs.regionInstanceStates || [];
+    const matchingInstances = instanceStates.filter((instanceState) =>
+      instanceState.monitoredRegionId === c.monitoredRegionId
+    );
+    if (matchingInstances.length === 0) return false;
+
+    const matchingValues = matchingInstances.map((instanceState) => {
+      const instanceCalcResult = instanceState.calculationResults.find((r) => r.stateCalculationId === c.stateCalculationId);
+      return instanceCalcResult ? instanceCalcResult.currentValue : undefined;
+    });
+
+    if (c.operator === 'equalsAtLeastOnceAcrossRepeatedRegions') {
+      return matchingValues.some((value) => value === c.value);
+    }
+    if (c.operator === 'equalsInEveryRepeatedRegion') {
+      return matchingValues.every((value) => value === c.value);
+    }
+
+    return true;
   }
 
   function evalConds(conds, logicMode, fs) {

@@ -1,6 +1,6 @@
 import { CapturedFrame } from '../capture/game-capture.service';
 import {
-  MonitoredRegion,
+  RuntimeMonitoredRegion,
   StateCalculation,
   StateCalculationResult,
   Rectangle,
@@ -53,7 +53,7 @@ export class OcrService {
   private latestFrame: CapturedFrame | null = null;
 
   /** Regions to evaluate. Updated from working or saved config. */
-  private regions: MonitoredRegion[] = [];
+  private regions: RuntimeMonitoredRegion[] = [];
 
   private ocrConfig: OcrConfig = { ocrIntervalMs: 200, maxCharacters: 10 };
 
@@ -101,7 +101,7 @@ export class OcrService {
   /**
    * Update the set of regions to evaluate.
    */
-  public setRegions(regions: MonitoredRegion[]): void {
+  public setRegions(regions: RuntimeMonitoredRegion[]): void {
     this.regions = regions;
   }
 
@@ -192,8 +192,8 @@ export class OcrService {
     this.isProcessing = false;
   }
 
-  private collectOcrCalculations(): Array<{ region: MonitoredRegion; calculation: StateCalculation }> {
-    const results: Array<{ region: MonitoredRegion; calculation: StateCalculation }> = [];
+  private collectOcrCalculations(): Array<{ region: RuntimeMonitoredRegion; calculation: StateCalculation }> {
+    const results: Array<{ region: RuntimeMonitoredRegion; calculation: StateCalculation }> = [];
     for (const region of this.regions) {
       for (const calc of region.stateCalculations) {
         if (calc.type === 'OCR') {

@@ -1,6 +1,6 @@
 import { CapturedFrame } from '../capture/game-capture.service';
 import {
-  MonitoredRegion,
+  RuntimeMonitoredRegion,
   StateCalculation,
   StateCalculationResult,
   Rectangle,
@@ -37,7 +37,7 @@ export class OllamaService {
   private latestFrame: CapturedFrame | null = null;
 
   /** Regions to evaluate. Updated from working or saved config. */
-  private regions: MonitoredRegion[] = [];
+  private regions: RuntimeMonitoredRegion[] = [];
 
   private config: OllamaConfig = {
     baseUrl: 'http://localhost:11434',
@@ -70,7 +70,7 @@ export class OllamaService {
     this.latestFrame = frame;
   }
 
-  public setRegions(regions: MonitoredRegion[]): void {
+  public setRegions(regions: RuntimeMonitoredRegion[]): void {
     this.regions = regions;
   }
 
@@ -127,7 +127,7 @@ export class OllamaService {
     try {
       // Group calcs by calculation ID so that multiple regions sharing the
       // same calc run serially, but different calcs run in parallel.
-      const calcGroups = new Map<string, Array<{ region: MonitoredRegion; calculation: StateCalculation }>>();
+      const calcGroups = new Map<string, Array<{ region: RuntimeMonitoredRegion; calculation: StateCalculation }>>();
       for (const entry of ollamaCalcs) {
         const calcId = entry.calculation.id;
         const existingGroup = calcGroups.get(calcId);
@@ -159,7 +159,7 @@ export class OllamaService {
 
   private async runSingleInference(
     frame: CapturedFrame,
-    region: MonitoredRegion,
+    region: RuntimeMonitoredRegion,
     calculation: StateCalculation,
   ): Promise<void> {
     const ollamaCalcConfig = calculation.ollamaConfig;
@@ -213,8 +213,8 @@ export class OllamaService {
     });
   }
 
-  private collectOllamaCalculations(): Array<{ region: MonitoredRegion; calculation: StateCalculation }> {
-    const results: Array<{ region: MonitoredRegion; calculation: StateCalculation }> = [];
+  private collectOllamaCalculations(): Array<{ region: RuntimeMonitoredRegion; calculation: StateCalculation }> {
+    const results: Array<{ region: RuntimeMonitoredRegion; calculation: StateCalculation }> = [];
     for (const region of this.regions) {
       for (const calc of region.stateCalculations) {
         if (calc.type === 'OllamaLLM') {

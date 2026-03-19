@@ -107,7 +107,7 @@ const fundidoApi = {
   setWorkingRegions: (regions: any[]): Promise<{ success: boolean }> =>
     ipcRenderer.invoke(IPC.REGIONS_SET_WORKING, regions),
 
-  setDirtyRegionOverlays: (regions: Array<{ id: string; name: string; bounds: { x: number; y: number; width: number; height: number } }>): Promise<{ success: boolean }> =>
+  setDirtyRegionOverlays: (regions: Array<{ id: string; name: string; showLabel?: boolean; bounds: { x: number; y: number; width: number; height: number } }>): Promise<{ success: boolean }> =>
     ipcRenderer.invoke(IPC.REGIONS_SET_DIRTY_OVERLAYS, regions),
 
   setWorkingGroups: (groups: any[]): Promise<{ success: boolean }> =>

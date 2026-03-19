@@ -1,9 +1,10 @@
 import {
-    MonitoredRegion,
+    RuntimeMonitoredRegion,
     RgbColor,
     StateCalculation,
     StateCalculationResult,
     MonitoredRegionState,
+    MonitoredRegionInstanceState,
     FrameState,
     Rectangle,
 } from '../shared';
@@ -186,12 +187,12 @@ function evaluateColorThresholdCalculation(
  */
 export function evaluateFrameState(
     frame: CapturedFrame,
-    monitoredRegions: MonitoredRegion[],
+    monitoredRegions: RuntimeMonitoredRegion[],
     ocrResults?: Map<string, StateCalculationResult>,
     ollamaResults?: Map<string, StateCalculationResult>
 ): FrameState {
     const enabledRegions = monitoredRegions.filter((region) => region.enabled !== false);
-    const regionStates: MonitoredRegionState[] = enabledRegions.map((region) => {
+    const regionInstanceStates: MonitoredRegionInstanceState[] = enabledRegions.map((region) => {
         const medianColor = computeMedianColorForRegion(frame, region.bounds);
 
         const calculationResults: StateCalculationResult[] = [];
@@ -243,14 +244,31 @@ export function evaluateFrameState(
         }
 
         return {
-            monitoredRegionId: region.id,
+            runtimeMonitoredRegionId: region.id,
+            monitoredRegionId: region.sourceMonitoredRegionId,
+            bounds: region.bounds,
             medianColor,
             calculationResults,
+            instanceIndex: region.instanceIndex,
+            repeatIndexX: region.repeatIndexX,
+            repeatIndexY: region.repeatIndexY,
         };
     });
 
+    const regionStatesBySourceId = new Map<string, MonitoredRegionState>();
+    for (const instanceState of regionInstanceStates) {
+      if (!regionStatesBySourceId.has(instanceState.monitoredRegionId)) {
+        regionStatesBySourceId.set(instanceState.monitoredRegionId, {
+          monitoredRegionId: instanceState.monitoredRegionId,
+          medianColor: instanceState.medianColor,
+          calculationResults: instanceState.calculationResults,
+        });
+      }
+    }
+
     return {
         timestamp: frame.capturedAt,
-        regionStates,
+        regionStates: Array.from(regionStatesBySourceId.values()),
+        regionInstanceStates,
     };
 }
