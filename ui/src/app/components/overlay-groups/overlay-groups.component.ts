@@ -98,6 +98,15 @@ import { PendingChangesService } from '../../services/pending-changes.service';
         <ng-container *ngIf="isGroupExpanded(group.id)">
 
         <div class="group-settings">
+          <label>Scale
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              [ngModel]="group.scale ?? 1"
+              (ngModelChange)="onGroupScaleChanged(group, $event)"
+              style="width:70px" />
+          </label>
           <label>Default
             <select [(ngModel)]="group.defaultVisibilityMode" (ngModelChange)="onGroupDefaultVisibilityChanged(group)">
               <option value="visible">Visible</option>
@@ -813,6 +822,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     const newGroup = {
       id: crypto.randomUUID(), name: 'New Group', enabled: true,
       lastUpdatedAt: Date.now(),
+      scale: 1,
       defaultVisibilityMode: 'visible',
       defaultOpacity: 1,
       position: { mode: 'absolute', x: 100, y: 100 },
@@ -879,6 +889,11 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     if (group.defaultVisibilityMode === 'opacity' && group.defaultOpacity === undefined) {
       group.defaultOpacity = 1;
     }
+    this.markGroupsChanged();
+  }
+
+  onGroupScaleChanged(group: any, scaleValue: number): void {
+    group.scale = scaleValue > 0 ? scaleValue : 0;
     this.markGroupsChanged();
   }
 
@@ -1249,6 +1264,9 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
 
   private normalizeGroupDefaults(): void {
     for (const group of this.groups) {
+      if (group.scale === undefined) {
+        group.scale = 1;
+      }
       if (!group.defaultVisibilityMode) {
         group.defaultVisibilityMode = 'visible';
       }

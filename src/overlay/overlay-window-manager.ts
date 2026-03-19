@@ -425,31 +425,38 @@ function buildOverlayRendererHtml(): string {
   // We apply it directly via GPU-composited transform — no lerp, no rAF delay.
   ipcRenderer.on('overlay:cursor-position', (_event, cursor) => {
     if (!overlayGroup) return;
-    const p = overlayGroup.position;
-    if (p.mode === 'relativeToCursor') {
-      const x = cursor.x + (p.offsetX || 0);
-      const y = cursor.y + (p.offsetY || 0);
-      const c = document.getElementById('overlay-container');
-      c.style.transform = 'translate(' + x + 'px, ' + y + 'px)';
+    if (overlayGroup.position.mode === 'relativeToCursor') {
+      updateContainerTransform(overlayGroup, cursor.x, cursor.y);
     }
   });
+
+  function getGroupScale(group) {
+    return group && group.scale !== undefined ? group.scale : 1;
+  }
+
+  function updateContainerTransform(group, cursorX, cursorY) {
+    const c = document.getElementById('overlay-container');
+    if (!c || !group) return;
+
+    const scale = getGroupScale(group);
+    const p = group.position;
+    const x = p.mode === 'relativeToCursor' ? cursorX + (p.offsetX || 0) : (p.x || 0);
+    const y = p.mode === 'relativeToCursor' ? cursorY + (p.offsetY || 0) : (p.y || 0);
+    c.style.transformOrigin = 'top left';
+    c.style.transform = 'translate(' + x + 'px, ' + y + 'px) scale(' + scale + ')';
+  }
 
   function applyGroupLayout(group) {
     const c = document.getElementById('overlay-container');
     const p = group.position;
-    if (p.mode === 'absolute') {
-      c.style.left = p.x + 'px';
-      c.style.top = p.y + 'px';
-    } else if (p.mode === 'relativeToCursor') {
-      // Position is set by the renderer's requestAnimationFrame cursor loop via transform
-      c.style.left = '0px';
-      c.style.top = '0px';
-    }
+    c.style.left = '0px';
+    c.style.top = '0px';
     const dirMap = { right: 'row', left: 'row-reverse', down: 'column', up: 'column-reverse' };
     c.style.flexDirection = dirMap[group.growDirection] || 'row';
     const alMap = { start: 'flex-start', center: 'center', end: 'flex-end' };
     c.style.alignItems = alMap[group.alignment] || 'flex-start';
     c.style.gap = (group.gap !== undefined && group.gap !== null ? group.gap : 0) + 'px';
+    updateContainerTransform(group, 0, 0);
   }
 
   function renderOverlayElements(group) {

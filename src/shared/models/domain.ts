@@ -336,6 +336,8 @@ export interface OverlayGroup {
   enabled: boolean;
   /** Unix epoch milliseconds when this group was last changed. */
   lastUpdatedAt?: number;
+  /** Scale multiplier applied to the whole group. Multiplies with individual overlay scales. */
+  scale?: number;
   /** Default group visibility when no group rule matches. */
   defaultVisibilityMode?: GroupDefaultVisibilityMode;
   /** Default group opacity (0–1) used when defaultVisibilityMode is 'opacity'. */

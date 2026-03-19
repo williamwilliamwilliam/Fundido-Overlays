@@ -344,6 +344,8 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                       class="hex-input"
                       [ngModel]="rgbToHex(mapping.color.red, mapping.color.green, mapping.color.blue)"
                       (ngModelChange)="onMappingColorChanged(mapping, $event)"
+                      (focus)="selectAllInputText($event)"
+                      (mouseup)="preserveSelectedInputText($event)"
                       placeholder="#000000" />
                     <span class="mapping-arrow">&rarr;</span>
                     <input
@@ -377,6 +379,8 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                       class="hex-input"
                       [ngModel]="rgbToHex(mapping.color.red, mapping.color.green, mapping.color.blue)"
                       (ngModelChange)="onMappingColorChanged(mapping, $event)"
+                      (focus)="selectAllInputText($event)"
+                      (mouseup)="preserveSelectedInputText($event)"
                       placeholder="#000000" />
                     <span class="mapping-label threshold-label">≥</span>
                     <input
@@ -547,7 +551,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                   </div>
                   <div class="config-row">
                     <label>Max Tokens
-                      <input type="range" min="1" max="100" step="1"
+                      <input type="range" min="1" max="5000" step="1"
                         [(ngModel)]="calc.ollamaConfig.numPredict"
                         (ngModelChange)="onFieldChanged()" />
                       <span class="slider-value">{{ calc.ollamaConfig.numPredict }}</span>
@@ -2207,6 +2211,22 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
   async copyToClipboard(text: string): Promise<void> {
     await navigator.clipboard.writeText(text);
+  }
+
+  selectAllInputText(event: FocusEvent): void {
+    const input = event.target as HTMLInputElement | null;
+    input?.select();
+  }
+
+  preserveSelectedInputText(event: MouseEvent): void {
+    const input = event.target as HTMLInputElement | null;
+    if (!input) {
+      return;
+    }
+
+    if (input.selectionStart === 0 && input.selectionEnd === input.value.length) {
+      event.preventDefault();
+    }
   }
 
   private resolvePendingNavigation(allowNavigation: boolean): void {
