@@ -90,8 +90,11 @@ export class OverlayWindowManager {
 
     for (const [_groupId, groupConfig] of this.overlayGroupConfigs) {
       // Evaluate group-level rules first
-      let groupOverrideAction: string | null = null;
-      let groupOverrideOpacity: number = 1;
+      const defaultMode = (groupConfig as any).defaultVisibilityMode || 'visible';
+      let groupOverrideAction: string | null = defaultMode === 'hidden' ? 'hide' : 'show';
+      let groupOverrideOpacity: number = defaultMode === 'opacity'
+        ? ((groupConfig as any).defaultOpacity ?? 1)
+        : 1;
       const groupRules = (groupConfig as any).rules || [];
       for (const rule of groupRules) {
         const conditionsMatch = this.evaluateConditions(
@@ -102,7 +105,6 @@ export class OverlayWindowManager {
         if (conditionsMatch) {
           groupOverrideAction = rule.action;
           groupOverrideOpacity = rule.opacityValue ?? 1;
-          break;
         }
       }
 
@@ -641,38 +643,33 @@ function buildOverlayRendererHtml(): string {
 
   function evaluateRules(group, frameState) {
     // --- Group-level rules: evaluated first and applied to the group container ---
-    var groupOverride = null; // null = no group rule matched
+    const groupDefaultMode = group.defaultVisibilityMode || 'visible';
+    const groupDefaultOpacity = group.defaultOpacity !== undefined ? group.defaultOpacity : 1;
+    let groupOverride = {
+      action: groupDefaultMode === 'hidden' ? 'hide' : (groupDefaultMode === 'opacity' ? 'opacity' : 'show'),
+      opacityValue: groupDefaultMode === 'opacity' ? groupDefaultOpacity : 1,
+    };
     var groupRules = group.rules || [];
     for (var gi = 0; gi < groupRules.length; gi++) {
       var groupRule = groupRules[gi];
       if (evalConds(groupRule.conditions, groupRule.logicMode || 'AND', frameState)) {
         groupOverride = groupRule;
-        break; // First matching group rule wins
       }
     }
 
     const container = document.getElementById('overlay-container');
     if (container) {
-      const groupDefaultMode = group.defaultVisibilityMode || 'visible';
-      const groupDefaultOpacity = group.defaultOpacity !== undefined ? group.defaultOpacity : 1;
-
-      if (groupOverride !== null && groupOverride.action === 'hide') {
+      if (groupOverride.action === 'hide') {
         container.style.display = 'none';
         return;
       }
 
-      if (groupOverride !== null && groupOverride.action === 'opacity') {
+      if (groupOverride.action === 'opacity') {
         container.style.display = '';
         container.style.opacity = String(groupOverride.opacityValue !== undefined ? groupOverride.opacityValue : 1);
-      } else if (groupOverride !== null && groupOverride.action === 'show') {
+      } else if (groupOverride.action === 'show') {
         container.style.display = '';
         container.style.opacity = '1';
-      } else {
-        container.style.display = groupDefaultMode === 'hidden' ? 'none' : '';
-        if (groupDefaultMode === 'hidden') {
-          return;
-        }
-        container.style.opacity = groupDefaultMode === 'opacity' ? String(groupDefaultOpacity) : '1';
       }
     }
 

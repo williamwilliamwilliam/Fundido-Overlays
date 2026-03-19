@@ -155,6 +155,9 @@ import { PendingChangesService } from '../../services/pending-changes.service';
         <div class="section-header">
           <span class="section-label">Group Rules</span>
           <span class="section-hint">These rules apply overall visibility changes for the entire group (Visible, Hidden, Opacity)</span>
+        </div>
+        <div class="rules-header group-rules-header">
+          <span class="rules-label">Rules (processed top-down)</span>
           <button class="add-btn" (click)="addGroupRule(group)">+ Add Rule</button>
         </div>
 
@@ -172,14 +175,27 @@ import { PendingChangesService } from '../../services/pending-changes.service';
           No group rules — individual overlay rules apply normally.
         </div>
 
-        <div *ngFor="let rule of group.rules; let ruleIndex = index" class="rule-row group-rule-row">
-          <div class="rule-line">
-            <span class="rule-keyword">When</span>
-            <select [(ngModel)]="rule.logicMode" (ngModelChange)="onFieldChanged()">
-              <option value="AND">Every Condition is true</option>
-              <option value="OR">At least one Condition is true</option>
-            </select>
-            <button class="danger-text small" (click)="removeGroupRule(group, ruleIndex)">Remove</button>
+        <div
+          *ngFor="let rule of group.rules; let ruleIndex = index"
+          class="rule-row group-rule-row"
+          [class.rule-drag-over]="groupRuleDragOverIndex === ruleIndex && groupRuleDragOverGroupId === group.id"
+          (dragover)="onGroupRuleDragOver($event, group, ruleIndex)"
+          (dragleave)="onGroupRuleDragLeave($event)"
+          (drop)="onGroupRuleDrop($event, group, ruleIndex)">
+          <div class="rule-line group-rule-top-row">
+            <div class="logic-mode-row">
+              <span
+                class="rule-drag-handle"
+                title="Drag to reorder rule"
+                draggable="true"
+                (dragstart)="onGroupRuleDragStart($event, group, ruleIndex)"
+                (dragend)="onGroupRuleDragEnd($event)">&#x2630;</span>
+              <span class="rule-keyword">When</span>
+              <select [(ngModel)]="rule.logicMode" (ngModelChange)="onFieldChanged()">
+                <option value="AND">Every Condition is true</option>
+                <option value="OR">At least one Condition is true</option>
+              </select>
+            </div>
           </div>
           <div class="conditions-list">
             <div *ngFor="let cond of rule.conditions; let condIndex = index" class="condition-row">
@@ -204,7 +220,13 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                 <option value="">Select Value</option>
                 <option *ngFor="let v of getStateValuesForCalc(cond.monitoredRegionId, cond.stateCalculationId)" [value]="v">{{ v }}</option>
               </select>
-              <button class="danger-text small" (click)="removeGroupRuleCondition(rule, condIndex)">×</button>
+              <span
+                class="condition-debug-status"
+                [class.condition-debug-status-true]="isOverlayConditionTrue(cond)"
+                [class.condition-debug-status-false]="!isOverlayConditionTrue(cond)">
+                Condition = {{ isOverlayConditionTrue(cond) ? 'TRUE' : 'FALSE' }}
+              </span>
+              <button class="danger-text small condition-remove-btn" (click)="removeGroupRuleCondition(rule, condIndex)">× Remove Condition</button>
             </div>
             <button class="add-btn small" (click)="addGroupRuleCondition(rule)">+ Condition</button>
           </div>
@@ -220,9 +242,18 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                    (ngModelChange)="rule.opacityValue = $event / 100; onFieldChanged()"
                    class="opacity-slider" />
             <span *ngIf="rule.action === 'opacity'" class="opacity-value">{{ ((rule.opacityValue ?? 1) * 100) | number:'1.0-0' }}%</span>
+            <span
+              class="rule-debug-status"
+              [class.rule-debug-status-true]="isOverlayRuleConditionTrue(rule)"
+              [class.rule-debug-status-false]="!isOverlayRuleConditionTrue(rule)">
+              {{ getRuleLogicSummaryLabel(rule) }} = {{ isOverlayRuleConditionTrue(rule) ? 'TRUE' : 'FALSE' }}
+            </span>
+            <button class="danger-text small rule-remove-btn" (click)="removeGroupRule(group, ruleIndex)">× Delete Rule</button>
+          </div>
+          <div class="rules-result-summary">
+            {{ getGroupVisibilitySummaryAfterRule(group, ruleIndex) }}
           </div>
         </div>
-
         <!-- ======================== OVERLAYS ======================== -->
         <div class="section-header">
           <span class="section-label">Overlays</span>
@@ -430,7 +461,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                   class="rule-debug-status"
                   [class.rule-debug-status-true]="isOverlayRuleConditionTrue(rule)"
                   [class.rule-debug-status-false]="!isOverlayRuleConditionTrue(rule)">
-                  Overall Rule Condition = {{ isOverlayRuleConditionTrue(rule) ? 'TRUE' : 'FALSE' }}
+                  {{ getRuleLogicSummaryLabel(rule) }} = {{ isOverlayRuleConditionTrue(rule) ? 'TRUE' : 'FALSE' }}
                 </span>
                 <button class="danger-text small rule-remove-btn" (click)="removeRule(overlay, ruleIndex)">× Delete Rule</button>
               </div>
@@ -638,9 +669,13 @@ import { PendingChangesService } from '../../services/pending-changes.service';
     .group-rule-action-row { margin-top: 6px; }
 
     .section-hint { font-size: 0.7rem; color: var(--color-text-secondary); font-style: italic; flex: 1; margin-left: var(--spacing-sm); }
+    .group-rules-header { margin-bottom: var(--spacing-xs); }
 
     .group-rule-row {
       border-left: 3px solid var(--color-accent);
+    }
+    .group-rule-top-row {
+      justify-content: space-between;
     }
     .group-rule-row .rule-line {
       display: flex;
@@ -756,10 +791,14 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   // Drag-and-drop reorder state
   dragOverIndex: number | null = null;
   dragOverGroupId: string | null = null;
+  groupRuleDragOverIndex: number | null = null;
+  groupRuleDragOverGroupId: string | null = null;
   ruleDragOverIndex: number | null = null;
   ruleDragOverOverlayId: string | null = null;
   private dragSourceGroupId: string | null = null;
   private dragSourceIndex: number | null = null;
+  private dragSourceGroupRuleGroupId: string | null = null;
+  private dragSourceGroupRuleIndex: number | null = null;
   private dragSourceRuleOverlayId: string | null = null;
   private dragSourceRuleIndex: number | null = null;
 
@@ -1199,6 +1238,61 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.markGroupsChanged();
   }
 
+  onGroupRuleDragStart(event: DragEvent, group: any, index: number): void {
+    event.stopPropagation();
+    this.dragSourceGroupRuleGroupId = group.id;
+    this.dragSourceGroupRuleIndex = index;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(index));
+    }
+  }
+
+  onGroupRuleDragOver(event: DragEvent, group: any, index: number): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    this.groupRuleDragOverIndex = index;
+    this.groupRuleDragOverGroupId = group.id;
+  }
+
+  onGroupRuleDragLeave(event: DragEvent): void {
+    event.stopPropagation();
+    this.groupRuleDragOverIndex = null;
+    this.groupRuleDragOverGroupId = null;
+  }
+
+  onGroupRuleDrop(event: DragEvent, group: any, dropIndex: number): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.groupRuleDragOverIndex = null;
+    this.groupRuleDragOverGroupId = null;
+
+    const isSameGroup = this.dragSourceGroupRuleGroupId === group.id;
+    if (!isSameGroup || this.dragSourceGroupRuleIndex === null) {
+      return;
+    }
+
+    const sourceIndex = this.dragSourceGroupRuleIndex;
+    if (sourceIndex === dropIndex) {
+      return;
+    }
+
+    const movedRule = group.rules.splice(sourceIndex, 1)[0];
+    group.rules.splice(dropIndex, 0, movedRule);
+    this.markGroupsChanged();
+  }
+
+  onGroupRuleDragEnd(event: DragEvent): void {
+    event.stopPropagation();
+    this.dragSourceGroupRuleGroupId = null;
+    this.dragSourceGroupRuleIndex = null;
+    this.groupRuleDragOverIndex = null;
+    this.groupRuleDragOverGroupId = null;
+  }
+
   // -- Overlay rules --
 
   addRule(overlay: any): void {
@@ -1262,6 +1356,12 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     return this.evaluateConditions(rule?.conditions || [], rule?.logicMode || 'AND', this.currentFrameState);
   }
 
+  getRuleLogicSummaryLabel(rule: any): string {
+    return (rule?.logicMode || 'AND') === 'OR'
+      ? 'At least one Condition is true'
+      : 'Every Condition is true';
+  }
+
   getOverlayVisibilitySummaryAfterRule(overlay: any, ruleIndex: number): string {
     const rule = overlay?.rules?.[ruleIndex];
     if (!this.isOverlayRuleConditionTrue(rule)) {
@@ -1272,7 +1372,20 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   }
 
   getFinalOverlayVisibilitySummary(overlay: any): string {
-    return `Final Visibility: ${this.formatOverlayVisibilitySummary(this.evaluateOverlayVisibility(overlay))}`;
+    return `Visibility after Final Rule: ${this.formatOverlayVisibilitySummary(this.evaluateOverlayVisibility(overlay))}`;
+  }
+
+  getGroupVisibilitySummaryAfterRule(group: any, ruleIndex: number): string {
+    const rule = group?.rules?.[ruleIndex];
+    if (!this.isOverlayRuleConditionTrue(rule)) {
+      return 'Rule did not apply visibility changes.';
+    }
+
+    return `Visibility after this Rule applied: ${this.formatGroupVisibilitySummary(this.evaluateGroupVisibility(group, ruleIndex + 1))}`;
+  }
+
+  getFinalGroupVisibilitySummary(group: any): string {
+    return `Visibility after Final Rule: ${this.formatGroupVisibilitySummary(this.evaluateGroupVisibility(group))}`;
   }
 
   isOverlayConditionTrue(condition: any): boolean {
@@ -1516,7 +1629,46 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     return { visible, opacity };
   }
 
+  private evaluateGroupVisibility(group: any, rulesToProcess?: number): { visible: boolean; opacity: number } {
+    const defaultMode = group?.defaultVisibilityMode || 'visible';
+    let visible = defaultMode !== 'hidden';
+    let opacity = defaultMode === 'opacity'
+      ? (group?.defaultOpacity !== undefined ? group.defaultOpacity : 1)
+      : 1;
+
+    const rules = rulesToProcess === undefined
+      ? (group?.rules || [])
+      : (group?.rules || []).slice(0, rulesToProcess);
+
+    for (const rule of rules) {
+      if (!this.evaluateConditions(rule.conditions || [], rule.logicMode || 'AND', this.currentFrameState)) {
+        continue;
+      }
+
+      if (rule.action === 'show') {
+        visible = true;
+        opacity = 1;
+      } else if (rule.action === 'hide') {
+        visible = false;
+      } else if (rule.action === 'opacity') {
+        visible = true;
+        opacity = rule.opacityValue !== undefined ? rule.opacityValue : 1;
+      }
+    }
+
+    return { visible, opacity };
+  }
+
   private formatOverlayVisibilitySummary(evaluatedState: { visible: boolean; opacity: number }): string {
+    if (!evaluatedState.visible) {
+      return 'Hidden';
+    }
+
+    const opacityPercent = Math.round(evaluatedState.opacity * 100);
+    return `Showing at ${opacityPercent}% opacity`;
+  }
+
+  private formatGroupVisibilitySummary(evaluatedState: { visible: boolean; opacity: number }): string {
     if (!evaluatedState.visible) {
       return 'Hidden';
     }
