@@ -513,46 +513,109 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
 
     const overlays: CaptureRegionOverlay[] = [];
     for (const region of this.monitoredRegions) {
-      if (!region?.bounds || region.bounds.width <= 0 || region.bounds.height <= 0) {
-        continue;
+      for (const instanceBounds of this.expandRegionOverlayBounds(region)) {
+        const physicalX = (instanceBounds.x - displayOriginX) * displayScaleFactor;
+        const physicalY = (instanceBounds.y - displayOriginY) * displayScaleFactor;
+        const physicalWidth = instanceBounds.width * displayScaleFactor;
+        const physicalHeight = instanceBounds.height * displayScaleFactor;
+
+        const sourceX = physicalX * previewScaleX;
+        const sourceY = physicalY * previewScaleY;
+        const sourceWidth = physicalWidth * previewScaleX;
+        const sourceHeight = physicalHeight * previewScaleY;
+
+        const right = sourceX + sourceWidth;
+        const bottom = sourceY + sourceHeight;
+        if (right <= 0 || bottom <= 0 || sourceX >= this.previewMeta.previewWidth || sourceY >= this.previewMeta.previewHeight) {
+          continue;
+        }
+
+        const clippedLeft = Math.max(0, sourceX);
+        const clippedTop = Math.max(0, sourceY);
+        const clippedRight = Math.min(this.previewMeta.previewWidth, right);
+        const clippedBottom = Math.min(this.previewMeta.previewHeight, bottom);
+        const clippedWidth = clippedRight - clippedLeft;
+        const clippedHeight = clippedBottom - clippedTop;
+        if (clippedWidth <= 0 || clippedHeight <= 0) {
+          continue;
+        }
+
+        overlays.push({
+          id: `${region.id}:${instanceBounds.repeatIndexX}:${instanceBounds.repeatIndexY}`,
+          name: region.name || 'Unnamed Region',
+          leftPercent: (clippedLeft / this.previewMeta.previewWidth) * 100,
+          topPercent: (clippedTop / this.previewMeta.previewHeight) * 100,
+          widthPercent: (clippedWidth / this.previewMeta.previewWidth) * 100,
+          heightPercent: (clippedHeight / this.previewMeta.previewHeight) * 100,
+        });
       }
-
-      const physicalX = (region.bounds.x - displayOriginX) * displayScaleFactor;
-      const physicalY = (region.bounds.y - displayOriginY) * displayScaleFactor;
-      const physicalWidth = region.bounds.width * displayScaleFactor;
-      const physicalHeight = region.bounds.height * displayScaleFactor;
-
-      const sourceX = physicalX * previewScaleX;
-      const sourceY = physicalY * previewScaleY;
-      const sourceWidth = physicalWidth * previewScaleX;
-      const sourceHeight = physicalHeight * previewScaleY;
-
-      const right = sourceX + sourceWidth;
-      const bottom = sourceY + sourceHeight;
-      if (right <= 0 || bottom <= 0 || sourceX >= this.previewMeta.previewWidth || sourceY >= this.previewMeta.previewHeight) {
-        continue;
-      }
-
-      const clippedLeft = Math.max(0, sourceX);
-      const clippedTop = Math.max(0, sourceY);
-      const clippedRight = Math.min(this.previewMeta.previewWidth, right);
-      const clippedBottom = Math.min(this.previewMeta.previewHeight, bottom);
-      const clippedWidth = clippedRight - clippedLeft;
-      const clippedHeight = clippedBottom - clippedTop;
-      if (clippedWidth <= 0 || clippedHeight <= 0) {
-        continue;
-      }
-
-      overlays.push({
-        id: region.id,
-        name: region.name || 'Unnamed Region',
-        leftPercent: (clippedLeft / this.previewMeta.previewWidth) * 100,
-        topPercent: (clippedTop / this.previewMeta.previewHeight) * 100,
-        widthPercent: (clippedWidth / this.previewMeta.previewWidth) * 100,
-        heightPercent: (clippedHeight / this.previewMeta.previewHeight) * 100,
-      });
     }
 
     return overlays;
+  }
+
+  private expandRegionOverlayBounds(region: any): Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    repeatIndexX: number;
+    repeatIndexY: number;
+  }> {
+    if (!region?.bounds || region.bounds.width <= 0 || region.bounds.height <= 0) {
+      return [];
+    }
+
+    const repeat = this.normalizeRepeatConfig(region.repeat);
+    const xCount = repeat.enabled && repeat.x.enabled ? this.normalizeRepeatCount(repeat.x.count) : 1;
+    const yCount = repeat.enabled && repeat.y.enabled ? this.normalizeRepeatCount(repeat.y.count) : 1;
+    const overlays: Array<{
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      repeatIndexX: number;
+      repeatIndexY: number;
+    }> = [];
+
+    for (let repeatIndexY = 0; repeatIndexY < yCount; repeatIndexY += 1) {
+      for (let repeatIndexX = 0; repeatIndexX < xCount; repeatIndexX += 1) {
+        overlays.push({
+          x: region.bounds.x + (repeat.enabled && repeat.x.enabled ? repeat.x.every * repeatIndexX : 0),
+          y: region.bounds.y + (repeat.enabled && repeat.y.enabled ? repeat.y.every * repeatIndexY : 0),
+          width: region.bounds.width,
+          height: region.bounds.height,
+          repeatIndexX,
+          repeatIndexY,
+        });
+      }
+    }
+
+    return overlays;
+  }
+
+  private normalizeRepeatConfig(repeat: any): any {
+    return {
+      enabled: repeat?.enabled === true,
+      x: {
+        enabled: repeat?.x?.enabled === true,
+        every: Number.isFinite(repeat?.x?.every) ? repeat.x.every : 0,
+        count: this.normalizeRepeatCount(repeat?.x?.count),
+      },
+      y: {
+        enabled: repeat?.y?.enabled === true,
+        every: Number.isFinite(repeat?.y?.every) ? repeat.y.every : 0,
+        count: this.normalizeRepeatCount(repeat?.y?.count),
+      },
+    };
+  }
+
+  private normalizeRepeatCount(value: any): number {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return 1;
+    }
+
+    return Math.max(1, Math.floor(numericValue));
   }
 }
