@@ -638,6 +638,26 @@ function refreshCaptureDisplayCache(): void {
   captureDisplayCache.scaleFactor = captureDisplay.scaleFactor || 1;
 }
 
+function getDirtyMonitoredRegionIds(workingRegions: any[] | null, savedRegions: any[] | undefined): Set<string> {
+  if (!workingRegions || !savedRegions) {
+    return new Set<string>();
+  }
+
+  const savedById = new Map<string, string>(
+    savedRegions.map((region: any) => [region.id, JSON.stringify(region)])
+  );
+  const dirtyIds = new Set<string>();
+
+  for (const region of workingRegions) {
+    const savedSnapshot = savedById.get(region.id);
+    if (savedSnapshot === undefined || savedSnapshot !== JSON.stringify(region)) {
+      dirtyIds.add(region.id);
+    }
+  }
+
+  return dirtyIds;
+}
+
 /** Timestamp when performance diagnostic logging should stop. 0 = inactive. */
 let perfDiagEndTime = 0;
 const PERF_DIAG_DURATION_MS = 10_000;
@@ -845,6 +865,10 @@ function startStateEvaluationLoop(): void {
 
     const runtimeRegions = getRuntimeMonitoredRegions(monitoredRegions);
     if (runtimeRegions.length === 0) return;
+    const dirtyRegionIds = getDirtyMonitoredRegionIds(
+      workingRegionsRef.regions,
+      currentConfigRef.config.monitoredRegions,
+    );
     latestEvaluatedRuntimeRegions = runtimeRegions;
     latestRuntimeRegionIdToSourceRegionId.clear();
     for (const runtimeRegion of runtimeRegions) {
@@ -869,6 +893,7 @@ function startStateEvaluationLoop(): void {
 
     const physicalBoundsRegions = runtimeRegions.map((region: any) => ({
       ...region,
+      alwaysEvaluate: dirtyRegionIds.has(region.sourceMonitoredRegionId ?? region.id),
       bounds: {
         x: Math.round((region.bounds.x - displayOriginX) * dpiScaleFactor),
         y: Math.round((region.bounds.y - displayOriginY) * dpiScaleFactor),
@@ -933,6 +958,10 @@ function startStateEvaluationLoopFallback(): void {
 
     const runtimeRegions = getRuntimeMonitoredRegions(monitoredRegions);
     if (runtimeRegions.length === 0) return;
+    const dirtyRegionIds = getDirtyMonitoredRegionIds(
+      workingRegionsRef.regions,
+      currentConfigRef.config.monitoredRegions,
+    );
     latestEvaluatedRuntimeRegions = runtimeRegions;
     latestRuntimeRegionIdToSourceRegionId.clear();
     for (const runtimeRegion of runtimeRegions) {
@@ -953,6 +982,7 @@ function startStateEvaluationLoopFallback(): void {
 
     const physicalBoundsRegions = runtimeRegions.map((region: any) => ({
       ...region,
+      alwaysEvaluate: dirtyRegionIds.has(region.sourceMonitoredRegionId ?? region.id),
       bounds: {
         x: Math.round((region.bounds.x - captureDisplay.originX) * captureDisplay.scaleFactor),
         y: Math.round((region.bounds.y - captureDisplay.originY) * captureDisplay.scaleFactor),
@@ -972,8 +1002,9 @@ function startStateEvaluationLoopFallback(): void {
       const unchanged = prev !== undefined && prev === curr;
       const allowed = (region.stateCalculations || []).filter((calc: any) => {
         const key = `${region.id}:${calc.id}`;
+        const shouldSkipIfUnchanged = calc.skipIfUnchanged !== false;
         return !shouldThrottleCalc(key, nowMs, minCalcIntervalMs) &&
-          !(calc.skipIfUnchanged === true && unchanged);
+          !(shouldSkipIfUnchanged && unchanged && region.alwaysEvaluate !== true);
       });
       return { ...region, stateCalculations: allowed };
     });

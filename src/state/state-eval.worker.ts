@@ -74,7 +74,7 @@ parentPort!.on('message', (request: EvalRequest) => {
       const lastRun = lastCalcTimestamps.get(calcKey);
       const isRateLimited = lastRun !== undefined && (nowMs - lastRun) < minCalcIntervalMs;
       if (isRateLimited) return false;
-      const shouldSkip = calc.skipIfUnchanged === true && regionIsUnchanged;
+      const shouldSkip = calc.skipIfUnchanged !== false && regionIsUnchanged && region.alwaysEvaluate !== true;
       if (shouldSkip) return false;
       return true;
     });

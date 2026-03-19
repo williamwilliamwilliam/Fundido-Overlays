@@ -167,7 +167,7 @@ export class OllamaService {
 
     const cacheKey = `${region.id}:${calculation.id}`;
 
-    const shouldSkipIfUnchanged = ollamaCalcConfig.skipIfUnchanged !== false;
+    const shouldSkipIfUnchanged = ollamaCalcConfig.skipIfUnchanged !== false && (region as any).alwaysEvaluate !== true;
     if (shouldSkipIfUnchanged) {
       const currentHash = computeRegionPixelHash(frame, region.bounds);
       const existingTracking = this.frameTrackingCache.get(cacheKey);

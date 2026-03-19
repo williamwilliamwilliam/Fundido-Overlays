@@ -378,11 +378,11 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                     <option value="OCR">OCR (Text Recognition)</option>
                     <option value="OllamaLLM">Ollama LLM Prompt</option>
                   </select>
-                  <label class="checkbox-label skip-unchanged-label" title="Skip this calculation if the region's pixels have not changed since the last evaluation. Saves CPU when monitoring static content.">
+                  <label class="checkbox-label skip-unchanged-label" title="Only evaluate this calculation when the region's pixels have changed since the last evaluation. Saves CPU when monitoring static content.">
                     <input type="checkbox"
                       [(ngModel)]="calc.skipIfUnchanged"
                       (ngModelChange)="onFieldChanged()" />
-                    Skip if unchanged
+                    Only Evaluate on Changes
                   </label>
                   <label class="default-state-label" title="Fallback value used when the calculation cannot resolve a state (no mapping matches). Leave empty for no default.">
                     Default:
@@ -628,7 +628,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                       <input type="checkbox"
                         [(ngModel)]="calc.ollamaConfig.skipIfUnchanged"
                         (ngModelChange)="onFieldChanged()" />
-                      Skip if unchanged
+                      Only Evaluate on Changes
                     </label>
                   </div>
                 </div>
@@ -1831,6 +1831,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.regions = config.monitoredRegions || [];
     this.normalizeRepeatConfigs();
     this.normalizeOcrMatchModes();
+    this.normalizeCalculationEvaluationDefaults();
     this.refreshSavedRegionSnapshots();
     this.refreshRegionComparableSnapshots();
     this.loadCollapsedRegionState();
@@ -2158,6 +2159,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       id: crypto.randomUUID(),
       name: 'New Calculation',
       type: 'MedianPixelColor',
+      skipIfUnchanged: true,
       colorStateMappings: [],
       substringMappings: [],
     };
@@ -2172,6 +2174,9 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   }
 
   onCalcTypeChanged(calc: any): void {
+    if (calc.skipIfUnchanged === undefined) {
+      calc.skipIfUnchanged = true;
+    }
     if (!calc.colorStateMappings) calc.colorStateMappings = [];
     if (!calc.colorThresholdMappings) calc.colorThresholdMappings = [];
     if (!calc.substringMappings) calc.substringMappings = [];
@@ -2238,6 +2243,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     const copiedCalc = JSON.parse(JSON.stringify(sourceCalc));
     copiedCalc.id = crypto.randomUUID();
     this.normalizeOcrMatchModesOnCalculation(copiedCalc);
+    this.normalizeCalculationEvaluationDefaultsOnRegion({ stateCalculations: [copiedCalc] });
     if (copiedCalc.type === 'OCR') {
       copiedCalc.ocrPreprocess = copiedCalc.ocrPreprocess || {
         upscaleFactor: 1,
@@ -2861,6 +2867,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       : JSON.parse(JSON.stringify(importedRegion));
 
     this.normalizeOcrMatchModesOnRegion(regionToApply);
+    this.normalizeCalculationEvaluationDefaultsOnRegion(regionToApply);
     this.ensureRepeatConfig(regionToApply);
 
     if (action === 'update') {
@@ -3176,6 +3183,21 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   private normalizeOcrMatchModesOnRegion(region: any): void {
     for (const calc of region.stateCalculations || []) {
       this.normalizeOcrMatchModesOnCalculation(calc);
+    }
+  }
+
+  private normalizeCalculationEvaluationDefaults(): void {
+    for (const region of this.regions) {
+      this.normalizeCalculationEvaluationDefaultsOnRegion(region);
+    }
+  }
+
+  private normalizeCalculationEvaluationDefaultsOnRegion(region: any): void {
+    for (const calc of region.stateCalculations || []) {
+      calc.skipIfUnchanged = calc.skipIfUnchanged !== false;
+      if (calc.ollamaConfig) {
+        calc.ollamaConfig.skipIfUnchanged = calc.ollamaConfig.skipIfUnchanged !== false;
+      }
     }
   }
 
