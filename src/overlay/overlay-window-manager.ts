@@ -136,7 +136,6 @@ export class OverlayWindowManager {
               const opacityIsEffectivelyHidden = (rule.opacityValue ?? 1) <= 0;
               isVisible = !opacityIsEffectivelyHidden;
             }
-            break;
           }
         }
 
@@ -690,7 +689,6 @@ function buildOverlayRendererHtml(): string {
           if (rule.action === 'show') { vis = true; op = 1; }
           else if (rule.action === 'hide') { vis = false; }
           else if (rule.action === 'opacity') { vis = true; op = rule.opacityValue !== undefined ? rule.opacityValue : 1; }
-          break;
         }
       }
       el.style.display = vis ? '' : 'none';

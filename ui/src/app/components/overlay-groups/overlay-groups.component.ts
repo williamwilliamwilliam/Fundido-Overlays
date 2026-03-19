@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
+import { ChangeDetectorRef, Component, HostListener, NgZone, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
@@ -336,20 +336,40 @@ import { PendingChangesService } from '../../services/pending-changes.service';
           <!-- ===== RULES ENGINE ===== -->
           <div class="rules-section">
             <div class="rules-header">
-              <span class="rules-label">Rules (top-down, first match wins)</span>
-              <button class="add-btn" (click)="addRule(overlay)">+ Add Rule</button>
+              <span class="rules-label">Rules (processed top-down)</span>
+              <div class="rules-header-actions">
+                <button class="tertiary-btn" *ngIf="copiedOverlayRule" (click)="pasteRule(overlay)">+ Paste Rule</button>
+                <button class="add-btn" (click)="addRule(overlay)">+ Add Rule</button>
+              </div>
             </div>
             <div *ngIf="overlay.rules.length === 0" class="rules-empty">
               No rules — defaults apply.
             </div>
-            <div *ngFor="let rule of overlay.rules; let ruleIndex = index" class="rule-row">
+            <div
+              *ngFor="let rule of overlay.rules; let ruleIndex = index"
+              class="rule-row"
+              [class.rule-drag-over]="ruleDragOverIndex === ruleIndex && ruleDragOverOverlayId === overlay.id"
+              (dragover)="onRuleDragOver($event, overlay, ruleIndex)"
+              (dragleave)="onRuleDragLeave($event)"
+              (drop)="onRuleDrop($event, overlay, ruleIndex)">
               <div class="rule-conditions">
-                <div class="logic-mode-row">
-                  <span class="rule-keyword">When</span>
-                  <select class="logic-mode-select" [(ngModel)]="rule.logicMode" (ngModelChange)="onFieldChanged()">
-                    <option value="AND">Every Condition is true</option>
-                    <option value="OR">At least one Condition is true</option>
-                  </select>
+                <div class="rule-card-top">
+                  <div class="logic-mode-row">
+                    <span
+                      class="rule-drag-handle"
+                      title="Drag to reorder rule"
+                      draggable="true"
+                      (dragstart)="onRuleDragStart($event, overlay, ruleIndex)"
+                      (dragend)="onRuleDragEnd($event)">&#x2630;</span>
+                    <span class="rule-keyword">When</span>
+                    <select class="logic-mode-select" [(ngModel)]="rule.logicMode" (ngModelChange)="onFieldChanged()">
+                      <option value="AND">Every Condition is true</option>
+                      <option value="OR">At least one Condition is true</option>
+                    </select>
+                  </div>
+                  <button class="tertiary-btn rule-copy-btn" (click)="copyRule(rule)">
+                    {{ copiedOverlayRuleId === rule.id ? 'Copied!' : 'Copy Rule' }}
+                  </button>
                 </div>
                 <div *ngFor="let cond of rule.conditions; let condIndex = index" class="condition-row">
                   <span class="rule-keyword condition-joiner" *ngIf="condIndex > 0">{{ rule.logicMode || 'AND' }}</span>
@@ -383,7 +403,13 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                   <input *ngIf="getCalcType(cond.monitoredRegionId, cond.stateCalculationId) === 'OllamaLLM'"
                     [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()"
                     placeholder="Expected response" class="condition-value-input" />
-                  <button class="danger-text small" (click)="removeCondition(rule, condIndex)">×</button>
+                  <span
+                    class="condition-debug-status"
+                    [class.condition-debug-status-true]="isOverlayConditionTrue(cond)"
+                    [class.condition-debug-status-false]="!isOverlayConditionTrue(cond)">
+                    Condition = {{ isOverlayConditionTrue(cond) ? 'TRUE' : 'FALSE' }}
+                  </span>
+                  <button class="danger-text small condition-remove-btn" (click)="removeCondition(rule, condIndex)">× Remove Condition</button>
                 </div>
                 <button class="add-condition-btn" (click)="addCondition(rule)">+ Add Condition</button>
               </div>
@@ -400,7 +426,16 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                     (ngModelChange)="onRuleOpacityChanged(rule, $event)" />
                   <span class="opacity-value">{{ ((rule.opacityValue ?? 1) * 100) | number:'1.0-0' }}%</span>
                 </ng-container>
-                <button class="danger-text small" (click)="removeRule(overlay, ruleIndex)">Remove</button>
+                <span
+                  class="rule-debug-status"
+                  [class.rule-debug-status-true]="isOverlayRuleConditionTrue(rule)"
+                  [class.rule-debug-status-false]="!isOverlayRuleConditionTrue(rule)">
+                  Overall Rule Condition = {{ isOverlayRuleConditionTrue(rule) ? 'TRUE' : 'FALSE' }}
+                </span>
+                <button class="danger-text small rule-remove-btn" (click)="removeRule(overlay, ruleIndex)">× Delete Rule</button>
+              </div>
+              <div class="rules-result-summary">
+                {{ getOverlayVisibilitySummaryAfterRule(overlay, ruleIndex) }}
               </div>
             </div>
           </div>
@@ -597,6 +632,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
     /* Rules */
     .rules-section { border-top: 1px solid var(--color-border); padding-top: var(--spacing-sm); margin-top: var(--spacing-sm); }
     .rules-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-xs); }
+    .rules-header-actions { display: flex; align-items: center; gap: var(--spacing-sm); }
     .rules-label { font-size: 0.75rem; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.3px; }
     .rules-empty { font-size: 0.8rem; color: var(--color-text-secondary); font-style: italic; padding: 4px 0; }
     .group-rule-action-row { margin-top: 6px; }
@@ -621,19 +657,47 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
       border-radius: var(--radius-sm); padding: var(--spacing-xs) var(--spacing-sm); margin-bottom: 4px;
     }
+    .rule-row.rule-drag-over {
+      border-color: var(--color-accent);
+      box-shadow: inset 0 0 0 1px var(--color-accent);
+    }
     .rule-conditions { margin-bottom: 4px; }
+    .rule-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--spacing-sm); }
     .condition-row { display: flex; align-items: center; gap: var(--spacing-xs); margin-bottom: 2px; flex-wrap: wrap; }
     .condition-row select { font-size: 0.8rem; max-width: 150px; }
+    .condition-debug-status { font-size: 0.72rem; font-weight: 600; }
+    .condition-debug-status-true { color: var(--color-success); }
+    .condition-debug-status-false { color: var(--color-error); }
+    .condition-remove-btn { margin-left: auto; }
     .rule-keyword { font-size: 0.75rem; font-weight: 600; color: var(--color-accent); text-transform: uppercase; min-width: 40px; }
     .condition-joiner { min-width: 30px; text-align: center; }
     .logic-mode-row { display: flex; align-items: center; gap: var(--spacing-sm); margin-bottom: 4px; }
     .logic-mode-select { font-size: 0.75rem; }
+    .rule-drag-handle {
+      cursor: grab;
+      color: var(--color-text-secondary);
+      font-size: 0.9rem;
+      line-height: 1;
+      user-select: none;
+    }
+    .rule-drag-handle:active { cursor: grabbing; }
+    .rule-copy-btn { font-size: 0.75rem; flex-shrink: 0; }
     .not-checkbox { display: flex; align-items: center; gap: 2px; font-size: 0.7rem; font-weight: 600; color: var(--color-text-secondary); cursor: pointer; white-space: nowrap; }
     .not-checkbox input[type="checkbox"] { margin: 0; }
     .add-condition-btn { font-size: 0.7rem; background: transparent; border: 1px dashed var(--color-border); padding: 1px 8px; }
     .rule-action { display: flex; align-items: center; gap: var(--spacing-sm); flex-wrap: wrap; }
     .rule-action select { font-size: 0.8rem; }
     .rule-action input[type="range"] { width: 100px; accent-color: var(--color-accent); }
+    .rule-debug-status { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.02em; }
+    .rule-debug-status-true { color: var(--color-success); }
+    .rule-debug-status-false { color: var(--color-error); }
+    .rule-remove-btn { margin-left: auto; }
+    .rules-result-summary {
+      margin-top: var(--spacing-xs);
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+    }
 
     .add-overlay-btn {
       font-size: 0.85rem; background: transparent; border: 1px dashed var(--color-border);
@@ -673,6 +737,10 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   isResolvingUnsavedChanges = false;
   pickingGroupId: string | null = null;
   highlightId: string | null = null;
+  copiedOverlayRule: any | null = null;
+  copiedOverlayRuleId: string | null = null;
+  private currentFrameState: any | null = null;
+  private viewRefreshScheduled = false;
   private collapsedGroupIds = new Set<string>();
   private savedOverlaySnapshots = new Map<string, string>();
   private groupComparableSnapshots = new Map<string, string>();
@@ -688,8 +756,12 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   // Drag-and-drop reorder state
   dragOverIndex: number | null = null;
   dragOverGroupId: string | null = null;
+  ruleDragOverIndex: number | null = null;
+  ruleDragOverOverlayId: string | null = null;
   private dragSourceGroupId: string | null = null;
   private dragSourceIndex: number | null = null;
+  private dragSourceRuleOverlayId: string | null = null;
+  private dragSourceRuleIndex: number | null = null;
 
   private stateSubscription: Subscription | null = null;
 
@@ -698,6 +770,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     private readonly pendingChangesService: PendingChangesService,
     private readonly router: Router,
     private readonly route: ActivatedRoute,
+    private readonly changeDetectorRef: ChangeDetectorRef,
+    private readonly ngZone: NgZone,
   ) {}
 
   @HostListener('window:keydown', ['$event'])
@@ -731,6 +805,12 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.syncCollapsedGroupState();
     this.monitoredRegions = config.monitoredRegions || [];
     this.buildOverlayCrossRefs();
+    this.ngZone.runOutsideAngular(() => {
+      this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
+        this.currentFrameState = frameState;
+        this.scheduleViewRefresh();
+      });
+    });
 
     // Scroll to and highlight an element if navigated here with ?highlight=id
     this.route.queryParams.subscribe((params) => {
@@ -1002,6 +1082,61 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.dragOverGroupId = null;
   }
 
+  onRuleDragStart(event: DragEvent, overlay: any, index: number): void {
+    event.stopPropagation();
+    this.dragSourceRuleOverlayId = overlay.id;
+    this.dragSourceRuleIndex = index;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(index));
+    }
+  }
+
+  onRuleDragOver(event: DragEvent, overlay: any, index: number): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    this.ruleDragOverIndex = index;
+    this.ruleDragOverOverlayId = overlay.id;
+  }
+
+  onRuleDragLeave(event: DragEvent): void {
+    event.stopPropagation();
+    this.ruleDragOverIndex = null;
+    this.ruleDragOverOverlayId = null;
+  }
+
+  onRuleDrop(event: DragEvent, overlay: any, dropIndex: number): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.ruleDragOverIndex = null;
+    this.ruleDragOverOverlayId = null;
+
+    const isSameOverlay = this.dragSourceRuleOverlayId === overlay.id;
+    if (!isSameOverlay || this.dragSourceRuleIndex === null) {
+      return;
+    }
+
+    const sourceIndex = this.dragSourceRuleIndex;
+    if (sourceIndex === dropIndex) {
+      return;
+    }
+
+    const movedRule = overlay.rules.splice(sourceIndex, 1)[0];
+    overlay.rules.splice(dropIndex, 0, movedRule);
+    this.markGroupsChanged();
+  }
+
+  onRuleDragEnd(event: DragEvent): void {
+    event.stopPropagation();
+    this.dragSourceRuleOverlayId = null;
+    this.dragSourceRuleIndex = null;
+    this.ruleDragOverIndex = null;
+    this.ruleDragOverOverlayId = null;
+  }
+
   onContentTypeChanged(overlay: any): void {
     if (overlay.contentType === 'text' && !overlay.textConfig) {
       overlay.textConfig = {
@@ -1076,6 +1211,22 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.markGroupsChanged();
   }
 
+  copyRule(rule: any): void {
+    this.copiedOverlayRule = JSON.parse(JSON.stringify(rule));
+    this.copiedOverlayRuleId = rule.id;
+  }
+
+  pasteRule(overlay: any): void {
+    if (!this.copiedOverlayRule) {
+      return;
+    }
+
+    const clonedRule = JSON.parse(JSON.stringify(this.copiedOverlayRule));
+    clonedRule.id = crypto.randomUUID();
+    overlay.rules.push(clonedRule);
+    this.markGroupsChanged();
+  }
+
   removeRule(overlay: any, index: number): void {
     overlay.rules.splice(index, 1);
     this.markGroupsChanged();
@@ -1105,6 +1256,50 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   onRuleOpacityChanged(rule: any, percentValue: number): void {
     rule.opacityValue = percentValue / 100;
     this.markGroupsChanged();
+  }
+
+  isOverlayRuleConditionTrue(rule: any): boolean {
+    return this.evaluateConditions(rule?.conditions || [], rule?.logicMode || 'AND', this.currentFrameState);
+  }
+
+  getOverlayVisibilitySummaryAfterRule(overlay: any, ruleIndex: number): string {
+    const rule = overlay?.rules?.[ruleIndex];
+    if (!this.isOverlayRuleConditionTrue(rule)) {
+      return 'Rule did not apply visibility changes.';
+    }
+
+    return `Visibility after this Rule applied: ${this.formatOverlayVisibilitySummary(this.evaluateOverlayVisibility(overlay, ruleIndex + 1))}`;
+  }
+
+  getFinalOverlayVisibilitySummary(overlay: any): string {
+    return `Final Visibility: ${this.formatOverlayVisibilitySummary(this.evaluateOverlayVisibility(overlay))}`;
+  }
+
+  isOverlayConditionTrue(condition: any): boolean {
+    if (!this.currentFrameState?.regionStates) {
+      return false;
+    }
+
+    const regionState = this.currentFrameState.regionStates.find(
+      (state: any) => state.monitoredRegionId === condition.monitoredRegionId,
+    );
+    if (!regionState) {
+      return false;
+    }
+
+    const calcResult = regionState.calculationResults.find(
+      (result: any) => result.stateCalculationId === condition.stateCalculationId,
+    );
+    if (!calcResult) {
+      return false;
+    }
+
+    let conditionResult = this.evaluateConditionOperator(condition, calcResult, this.currentFrameState);
+    if (condition.negate) {
+      conditionResult = !conditionResult;
+    }
+
+    return conditionResult;
   }
 
   getCalcsForRegion(regionId: string): any[] {
@@ -1246,6 +1441,134 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.pendingNavigationPromise = null;
 
     resolve?.(allowNavigation);
+  }
+
+  private evaluateConditions(conditions: any[], logicMode: string, frameState: any): boolean {
+    if (!conditions || conditions.length === 0) {
+      return true;
+    }
+
+    if (!frameState?.regionStates) {
+      return false;
+    }
+
+    for (const condition of conditions) {
+      const regionState = frameState.regionStates.find(
+        (state: any) => state.monitoredRegionId === condition.monitoredRegionId,
+      );
+      if (!regionState) {
+        if (logicMode === 'AND') {
+          return false;
+        }
+        continue;
+      }
+
+      const calcResult = regionState.calculationResults.find(
+        (result: any) => result.stateCalculationId === condition.stateCalculationId,
+      );
+      if (!calcResult) {
+        if (logicMode === 'AND') {
+          return false;
+        }
+        continue;
+      }
+
+      let conditionResult = this.evaluateConditionOperator(condition, calcResult, frameState);
+      if (condition.negate) {
+        conditionResult = !conditionResult;
+      }
+
+      if (logicMode === 'OR' && conditionResult) {
+        return true;
+      }
+      if (logicMode === 'AND' && !conditionResult) {
+        return false;
+      }
+    }
+
+    return logicMode === 'AND';
+  }
+
+  private evaluateOverlayVisibility(overlay: any, rulesToProcess?: number): { visible: boolean; opacity: number } {
+    let visible = overlay?.defaultVisible !== false;
+    let opacity = overlay?.defaultOpacity !== undefined ? overlay.defaultOpacity : 1;
+
+    const rules = rulesToProcess === undefined
+      ? (overlay?.rules || [])
+      : (overlay?.rules || []).slice(0, rulesToProcess);
+
+    for (const rule of rules) {
+      if (!this.evaluateConditions(rule.conditions || [], rule.logicMode || 'AND', this.currentFrameState)) {
+        continue;
+      }
+
+      if (rule.action === 'show') {
+        visible = true;
+        opacity = 1;
+      } else if (rule.action === 'hide') {
+        visible = false;
+      } else if (rule.action === 'opacity') {
+        visible = true;
+        opacity = rule.opacityValue !== undefined ? rule.opacityValue : 1;
+      }
+    }
+
+    return { visible, opacity };
+  }
+
+  private formatOverlayVisibilitySummary(evaluatedState: { visible: boolean; opacity: number }): string {
+    if (!evaluatedState.visible) {
+      return 'Hidden';
+    }
+
+    const opacityPercent = Math.round(evaluatedState.opacity * 100);
+    return `Showing at ${opacityPercent}% opacity`;
+  }
+
+  private evaluateConditionOperator(condition: any, calcResult: any, frameState: any): boolean {
+    if (condition.operator === 'equals') {
+      return calcResult.currentValue === condition.value;
+    }
+
+    if (condition.operator === 'notEquals') {
+      return calcResult.currentValue !== condition.value;
+    }
+
+    const instanceStates = frameState?.regionInstanceStates || [];
+    const matchingInstances = instanceStates.filter(
+      (instanceState: any) => instanceState.monitoredRegionId === condition.monitoredRegionId,
+    );
+    if (matchingInstances.length === 0) {
+      return false;
+    }
+
+    const matchingValues = matchingInstances.map((instanceState: any) =>
+      instanceState.calculationResults.find(
+        (instanceCalcResult: any) => instanceCalcResult.stateCalculationId === condition.stateCalculationId,
+      )?.currentValue,
+    );
+
+    if (condition.operator === 'equalsAtLeastOnceAcrossRepeatedRegions') {
+      return matchingValues.some((value: string | undefined) => value === condition.value);
+    }
+
+    if (condition.operator === 'equalsInEveryRepeatedRegion') {
+      return matchingValues.every((value: string | undefined) => value === condition.value);
+    }
+
+    return true;
+  }
+
+  private scheduleViewRefresh(): void {
+    if (this.viewRefreshScheduled) {
+      return;
+    }
+
+    this.viewRefreshScheduled = true;
+    requestAnimationFrame(() => {
+      this.viewRefreshScheduled = false;
+      this.changeDetectorRef.detectChanges();
+    });
   }
 
   private loadCollapsedGroupState(): void {
