@@ -384,14 +384,34 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                       (ngModelChange)="onFieldChanged()" />
                     Only Evaluate on Changes
                   </label>
-                  <label class="default-state-label" title="Fallback value used when the calculation cannot resolve a state (no mapping matches). Leave empty for no default.">
-                    Default:
-                    <input type="text"
+                  <div class="default-state-label" title="Choose what happens when this calculation cannot resolve a state value.">
+                    <span class="default-state-title">Default</span>
+                    <label class="default-mode-option">
+                      <input
+                        type="radio"
+                        [name]="'default-value-mode-' + calc.id"
+                        value="defaultValue"
+                        [(ngModel)]="calc.defaultValueMode"
+                        (ngModelChange)="onFieldChanged()" />
+                      Default Value
+                    </label>
+                    <label class="default-mode-option">
+                      <input
+                        type="radio"
+                        [name]="'default-value-mode-' + calc.id"
+                        value="lastKnownValue"
+                        [(ngModel)]="calc.defaultValueMode"
+                        (ngModelChange)="onFieldChanged()" />
+                      Last Known Value
+                    </label>
+                    <input
+                      *ngIf="calc.defaultValueMode !== 'lastKnownValue'"
+                      type="text"
                       class="default-state-input"
                       [placeholder]="'(none)'"
                       [(ngModel)]="calc.defaultStateValue"
                       (ngModelChange)="onFieldChanged()" />
-                  </label>
+                  </div>
                   <button class="danger-text small" (click)="removeStateCalculation(region, calcIndex)">Remove</button>
                 </div>
 
@@ -1280,12 +1300,20 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
 
     .default-state-label {
       font-size: 0.75rem;
-      white-space: nowrap;
-      flex-shrink: 0;
       color: var(--color-text-secondary);
       display: flex;
       align-items: center;
       gap: 4px;
+      flex-wrap: wrap;
+    }
+    .default-state-title {
+      font-weight: 600;
+    }
+    .default-mode-option {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      white-space: nowrap;
     }
     .default-state-input {
       width: 80px;
@@ -2160,6 +2188,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       name: 'New Calculation',
       type: 'MedianPixelColor',
       skipIfUnchanged: true,
+      defaultValueMode: 'defaultValue',
       colorStateMappings: [],
       substringMappings: [],
     };
@@ -2176,6 +2205,9 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   onCalcTypeChanged(calc: any): void {
     if (calc.skipIfUnchanged === undefined) {
       calc.skipIfUnchanged = true;
+    }
+    if (!calc.defaultValueMode) {
+      calc.defaultValueMode = 'defaultValue';
     }
     if (!calc.colorStateMappings) calc.colorStateMappings = [];
     if (!calc.colorThresholdMappings) calc.colorThresholdMappings = [];
@@ -3195,6 +3227,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   private normalizeCalculationEvaluationDefaultsOnRegion(region: any): void {
     for (const calc of region.stateCalculations || []) {
       calc.skipIfUnchanged = calc.skipIfUnchanged !== false;
+      calc.defaultValueMode = calc.defaultValueMode === 'lastKnownValue' ? 'lastKnownValue' : 'defaultValue';
       if (calc.ollamaConfig) {
         calc.ollamaConfig.skipIfUnchanged = calc.ollamaConfig.skipIfUnchanged !== false;
       }

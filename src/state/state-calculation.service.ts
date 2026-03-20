@@ -233,11 +233,11 @@ export function evaluateFrameState(
             }
         }
 
-        // Apply defaultStateValue for any calculation that couldn't resolve a value
+        // Apply explicit defaultStateValue for calculations using defaultValue mode.
         for (const result of calculationResults) {
             if (result.currentValue === '') {
                 const matchingCalc = region.stateCalculations.find((c) => c.id === result.stateCalculationId);
-                if (matchingCalc?.defaultStateValue) {
+                if ((matchingCalc?.defaultValueMode ?? 'defaultValue') === 'defaultValue' && matchingCalc?.defaultStateValue) {
                     result.currentValue = matchingCalc.defaultStateValue;
                 }
             }

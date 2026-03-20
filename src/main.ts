@@ -658,6 +658,28 @@ function getDirtyMonitoredRegionIds(workingRegions: any[] | null, savedRegions: 
   return dirtyIds;
 }
 
+function applyLastKnownValueFallbacks(
+  calculationResults: any[],
+  runtimeRegion: any,
+  runtimeRegionId: string,
+): void {
+  for (const calcResult of calculationResults) {
+    if (calcResult.currentValue !== '') {
+      continue;
+    }
+
+    const calc = (runtimeRegion.stateCalculations || []).find((c: any) => c.id === calcResult.stateCalculationId);
+    if (calc?.defaultValueMode !== 'lastKnownValue') {
+      continue;
+    }
+
+    const lastKnownResult = lastCalcResults.get(`${runtimeRegionId}:${calc.id}`);
+    if (lastKnownResult?.currentValue) {
+      calcResult.currentValue = lastKnownResult.currentValue;
+    }
+  }
+}
+
 /** Timestamp when performance diagnostic logging should stop. 0 = inactive. */
 let perfDiagEndTime = 0;
 const PERF_DIAG_DURATION_MS = 10_000;
@@ -776,6 +798,10 @@ function startStateEvaluationLoop(): void {
     const instanceStates = frameState.regionInstanceStates || frameState.regionStates;
     for (const regionState of instanceStates as any[]) {
       const runtimeRegionId = regionState.runtimeMonitoredRegionId || regionState.monitoredRegionId;
+      const runtimeRegion = latestEvaluatedRuntimeRegions.find((r: any) => r.id === runtimeRegionId);
+      if (runtimeRegion) {
+        applyLastKnownValueFallbacks(regionState.calculationResults, runtimeRegion, runtimeRegionId);
+      }
       for (const calcResult of regionState.calculationResults) {
         const calcKey = `${runtimeRegionId}:${calcResult.stateCalculationId}`;
         lastCalcResults.set(calcKey, calcResult);
@@ -785,7 +811,6 @@ function startStateEvaluationLoop(): void {
       const evaluatedCalcIds = new Set(
         (result.throttledCalcIdsByRegion[runtimeRegionId] || [])
       );
-      const runtimeRegion = latestEvaluatedRuntimeRegions.find((r: any) => r.id === runtimeRegionId);
       if (runtimeRegion) {
         for (const calc of (runtimeRegion.stateCalculations || [])) {
           const calcWasThrottled = !evaluatedCalcIds.has(calc.id);
@@ -1021,8 +1046,11 @@ function startStateEvaluationLoopFallback(): void {
     const instanceStates = frameState.regionInstanceStates || frameState.regionStates;
     for (const rs of instanceStates as any[]) {
       const runtimeRegionId = rs.runtimeMonitoredRegionId || rs.monitoredRegionId;
-      for (const cr of rs.calculationResults) lastCalcResults.set(`${runtimeRegionId}:${cr.stateCalculationId}`, cr);
       const orig = runtimeRegions.find((r: any) => r.id === runtimeRegionId);
+      if (orig) {
+        applyLastKnownValueFallbacks(rs.calculationResults, orig, runtimeRegionId);
+      }
+      for (const cr of rs.calculationResults) lastCalcResults.set(`${runtimeRegionId}:${cr.stateCalculationId}`, cr);
       const throt = throttledRegions.find((r: any) => r.id === runtimeRegionId);
       if (orig && throt) {
         const evalIds = new Set((throt.stateCalculations || []).map((c: any) => c.id));
