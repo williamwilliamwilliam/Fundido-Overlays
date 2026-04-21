@@ -41,6 +41,7 @@ export class OcrService {
 
   /** Latest OCR results keyed by `regionId:calcId`. */
   private latestResults = new Map<string, StateCalculationResult>();
+  private lastEvaluationTimestamps = new Map<string, number>();
 
   /**
    * Tracks when each OCR mapping first started matching continuously.
@@ -157,7 +158,13 @@ export class OcrService {
 
     this.isProcessing = true;
     try {
+      const nowMs = Date.now();
       for (const { region, calculation } of ocrCalculations) {
+        const cacheKey = `${region.id}:${calculation.id}`;
+        if (this.shouldThrottleRegionCalculation(region, cacheKey, nowMs)) {
+          continue;
+        }
+
         // Extract raw RGBA pixels from the frame buffer
         const rawPixels = this.extractRegionRgba(this.latestFrame!, region.bounds);
         if (!rawPixels) continue;
@@ -184,7 +191,8 @@ export class OcrService {
         const rawText = data.text.trim().substring(0, maxChars);
 
         const result = this.evaluateSubstringMappings(rawText, calculation);
-        this.latestResults.set(`${region.id}:${calculation.id}`, result);
+        this.latestResults.set(cacheKey, result);
+        this.lastEvaluationTimestamps.set(cacheKey, nowMs);
       }
     } catch (error) {
       logger.error(LogCategory.StateCalculation, 'OCR cycle error.', error);
@@ -202,6 +210,16 @@ export class OcrService {
       }
     }
     return results;
+  }
+
+  private shouldThrottleRegionCalculation(region: RuntimeMonitoredRegion, cacheKey: string, nowMs: number): boolean {
+    const intervalMs = Number((region as any).evaluationIntervalMs);
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      return false;
+    }
+
+    const lastRun = this.lastEvaluationTimestamps.get(cacheKey);
+    return lastRun !== undefined && (nowMs - lastRun) < Math.max(20, Math.round(intervalMs));
   }
 
   // ---------------------------------------------------------------------------

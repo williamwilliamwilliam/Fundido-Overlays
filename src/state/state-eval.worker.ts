@@ -42,7 +42,7 @@ parentPort!.on('message', (request: EvalRequest) => {
   };
 
   const nowMs = Date.now();
-  const minCalcIntervalMs = Math.round(1000 / (request.throttleConfig.maxCalcFrequency || 10));
+  const globalMinCalcIntervalMs = Math.round(1000 / (request.throttleConfig.maxCalcFrequency || 10));
 
   // Restore timestamps from main thread on first call, then maintain locally
   for (const [key, val] of Object.entries(request.throttleConfig.lastCalcTimestamps)) {
@@ -72,6 +72,7 @@ parentPort!.on('message', (request: EvalRequest) => {
     const allowedCalcs = (region.stateCalculations || []).filter((calc: any) => {
       const calcKey = `${region.id}:${calc.id}`;
       const lastRun = lastCalcTimestamps.get(calcKey);
+      const minCalcIntervalMs = getRegionEvaluationIntervalMs(region, globalMinCalcIntervalMs);
       const isRateLimited = lastRun !== undefined && (nowMs - lastRun) < minCalcIntervalMs;
       if (isRateLimited) return false;
       const shouldSkip = calc.skipIfUnchanged !== false && regionIsUnchanged && region.alwaysEvaluate !== true;
@@ -140,3 +141,12 @@ parentPort!.on('message', (request: EvalRequest) => {
     },
   });
 });
+
+function getRegionEvaluationIntervalMs(region: any, globalMinCalcIntervalMs: number): number {
+  const regionIntervalMs = Number(region.evaluationIntervalMs);
+  if (Number.isFinite(regionIntervalMs) && regionIntervalMs > 0) {
+    return Math.max(20, Math.round(regionIntervalMs));
+  }
+
+  return globalMinCalcIntervalMs;
+}

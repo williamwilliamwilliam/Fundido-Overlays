@@ -42,6 +42,8 @@ function buildDefaultConfig(): FundidoConfig {
     ollama: defaultOllama,
     monitoredRegions: [],
     overlayGroups: [],
+    profiles: [],
+    profileRulesEnabled: false,
   };
 }
 
@@ -102,6 +104,26 @@ export class ConfigPersistenceService {
       const configIsMissingCaptureEnabled = parsed.gameCapture && parsed.gameCapture.captureEnabled === undefined;
       if (configIsMissingCaptureEnabled) {
         parsed.gameCapture.captureEnabled = false;
+      }
+
+      if (!Array.isArray(parsed.profiles)) {
+        parsed.profiles = defaults.profiles;
+        logger.info(LogCategory.Persistence, 'Backfilled missing profiles config with defaults.');
+      }
+      for (const profile of parsed.profiles) {
+        if (!Array.isArray(profile.rules)) {
+          profile.rules = [];
+        }
+      }
+      parsed.profileRulesEnabled ??= defaults.profileRulesEnabled;
+
+      if (!Array.isArray(parsed.overlayGroups)) {
+        parsed.overlayGroups = defaults.overlayGroups;
+      }
+      for (const group of parsed.overlayGroups) {
+        if (!Array.isArray(group.profileIds)) {
+          group.profileIds = [];
+        }
       }
 
       logger.info(LogCategory.Persistence, 'Configuration loaded from disk.');

@@ -22,6 +22,7 @@ export class OllamaService {
 
   /** Latest Ollama results keyed by `regionId:calcId`. */
   private latestResults = new Map<string, StateCalculationResult>();
+  private lastEvaluationTimestamps = new Map<string, number>();
 
   /**
    * Per-calculation frame tracking keyed by `regionId:calcId`.
@@ -166,6 +167,9 @@ export class OllamaService {
     if (!ollamaCalcConfig || !ollamaCalcConfig.prompt) return;
 
     const cacheKey = `${region.id}:${calculation.id}`;
+    if (this.shouldThrottleRegionCalculation(region, cacheKey)) {
+      return;
+    }
 
     const shouldSkipIfUnchanged = ollamaCalcConfig.skipIfUnchanged !== false && (region as any).alwaysEvaluate !== true;
     if (shouldSkipIfUnchanged) {
@@ -211,6 +215,17 @@ export class OllamaService {
       ollamaResponse: trimmedResponse,
       ollamaResponseTimeMs: elapsedMs,
     });
+    this.lastEvaluationTimestamps.set(cacheKey, startTime);
+  }
+
+  private shouldThrottleRegionCalculation(region: RuntimeMonitoredRegion, cacheKey: string): boolean {
+    const intervalMs = Number((region as any).evaluationIntervalMs);
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      return false;
+    }
+
+    const lastRun = this.lastEvaluationTimestamps.get(cacheKey);
+    return lastRun !== undefined && (Date.now() - lastRun) < Math.max(20, Math.round(intervalMs));
   }
 
   private collectOllamaCalculations(): Array<{ region: RuntimeMonitoredRegion; calculation: StateCalculation }> {

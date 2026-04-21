@@ -9,6 +9,7 @@ import {
   OnDestroy,
   OnInit,
   QueryList,
+  ViewChild,
   ViewChildren,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -68,6 +69,26 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       <div class="toolbar-secondary">
         <button class="tertiary-btn" (click)="expandAllRegions()"><span class="tertiary-icon">&#9662;</span>Expand All</button>
         <button class="tertiary-btn" (click)="collapseAllRegions()"><span class="tertiary-icon">&#9656;</span>Collapse All</button>
+      </div>
+
+      <div class="region-filter-bar">
+        <label class="filter-search-label">
+          <span>Search</span>
+          <input
+            #regionSearchInput
+            type="search"
+            [(ngModel)]="regionSearchText"
+            placeholder="Region or calculation name" />
+        </label>
+        <label class="checkbox-label filter-checkbox">
+          <input
+            type="checkbox"
+            [(ngModel)]="hideInactiveUnusedRegions" />
+          Hide Inactive/Unused Regions
+        </label>
+        <span class="filter-count" *ngIf="regions.length > 0 && visibleRegions.length !== regions.length">
+          Showing {{ visibleRegions.length }} of {{ regions.length }}
+        </span>
       </div>
 
       <div *ngIf="showImportRegionDialog" class="modal-backdrop" (click)="closeImportRegionDialog()">
@@ -150,7 +171,11 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
         No monitored regions defined yet. Click "+ Add Region" to get started.
       </div>
 
-      <div *ngFor="let region of regions; let regionIndex = index; trackBy: trackByRegionId"
+      <div *ngIf="regions.length > 0 && visibleRegions.length === 0" class="empty-state">
+        No monitored regions match the current filters.
+      </div>
+
+      <div *ngFor="let region of visibleRegions; trackBy: trackByRegionId"
         class="region-card"
         [attr.data-highlight-id]="region.id"
         [class.highlight-flash]="highlightId === region.id"
@@ -232,7 +257,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
               {{ getCollapsedStateValue(region) || '' }}
             </div>
           </div>
-          <button class="danger-text" (click)="removeRegion(regionIndex)">Remove</button>
+          <button class="danger-text" (click)="removeRegionById(region.id)">Remove</button>
         </div>
         <ng-container *ngIf="isRegionExpanded(region.id)">
         <div class="cross-ref-row" *ngIf="regionCrossRefs.get(region.id)?.length">
@@ -267,6 +292,27 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
                 [disabled]="pickingRegionId !== null">
                 {{ pickingRegionId === region.id ? 'Picking...' : 'Pick Region' }}
               </button>
+            </div>
+            <div class="region-bounds">
+              <label class="checkbox-label" title="Override the global max calculation frequency for this region.">
+                <input
+                  type="checkbox"
+                  [ngModel]="hasRegionEvaluationIntervalOverride(region)"
+                  (ngModelChange)="onRegionEvaluationIntervalOverrideChanged(region, $event)" />
+                Limit Evaluation Rate
+              </label>
+              <label *ngIf="hasRegionEvaluationIntervalOverride(region)">Evaluate Every
+                <input
+                  type="number"
+                  min="0.02"
+                  step="0.1"
+                  [ngModel]="getRegionEvaluationIntervalSeconds(region)"
+                  (ngModelChange)="onRegionEvaluationIntervalSecondsChanged(region, $event)" />
+                sec
+              </label>
+              <span *ngIf="!hasRegionEvaluationIntervalOverride(region)" class="repeat-summary">
+                Global: {{ getGlobalEvaluationIntervalSeconds() }} sec
+              </span>
             </div>
             <div class="repeat-section">
               <div class="section-header repeat-header">
@@ -777,6 +823,21 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       margin-bottom: var(--spacing-sm); 
       margin-top: var(--spacing-lg);
       flex-wrap: wrap;
+    }
+    .region-filter-bar {
+      display: flex;
+      gap: var(--spacing-md);
+      margin: var(--spacing-sm) 0 var(--spacing-md);
+      flex-wrap: wrap;
+    }
+    .filter-search-label {
+      display: flex;
+      flex-direction: column;
+      min-width: 280px;
+      color: var(--color-text-secondary);
+    }
+    .filter-search-label input {
+      min-width: 280px;
     }
     .tertiary-btn {
       background: transparent;
@@ -1736,10 +1797,16 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   private static readonly STORAGE_KEY_COLLAPSED_REGIONS = 'fundido:collapsedRegions';
   private static readonly SHARED_REGION_EXPORT_TYPE = 'FundidoMonitoredRegion';
 
+  @ViewChild('regionSearchInput') private regionSearchInputRef?: ElementRef<HTMLInputElement>;
   @ViewChildren('previewCanvas') private previewCanvasRefs!: QueryList<ElementRef<HTMLCanvasElement>>;
 
   regions: any[] = [];
   overlayGroups: any[] = [];
+  profiles: any[] = [];
+  profileRulesEnabled = false;
+  maxCalcFrequency = 10;
+  regionSearchText = '';
+  hideInactiveUnusedRegions = false;
   showImportRegionDialog = false;
   showUnsavedChangesDialog = false;
   importRegionJsonText = '';
@@ -1765,6 +1832,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   private pendingImportedRegion: any | null = null;
   private pendingNavigationPromise: Promise<boolean> | null = null;
   private pendingNavigationResolve: ((allowNavigation: boolean) => void) | null = null;
+  private requiredMonitoredRegionIds = new Set<string>();
 
   /** Maps regionId → { medianHex, calcResults: Map<calcId, { currentValue, confidences }> } */
   private regionStateMap = new Map<string, {
@@ -1830,6 +1898,13 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
   @HostListener('window:keydown', ['$event'])
   onKeyDown(event: KeyboardEvent): void {
+    const isCtrlF = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f';
+    if (isCtrlF) {
+      event.preventDefault();
+      this.focusRegionSearch();
+      return;
+    }
+
     const isCtrlS = (event.ctrlKey || event.metaKey) && event.key === 's';
     if (isCtrlS) {
       event.preventDefault();
@@ -1865,6 +1940,10 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.loadCollapsedRegionState();
     this.syncCollapsedRegionState();
     this.overlayGroups = config.overlayGroups || [];
+    this.profiles = config.profiles || [];
+    this.profileRulesEnabled = config.profileRulesEnabled === true;
+    this.maxCalcFrequency = config.maxCalcFrequency ?? 10;
+    this.requiredMonitoredRegionIds = this.getRegionIdsRequiredForRuntimeAutomation();
     this.buildRegionCrossRefs();
     // Push to backend for live evaluation, but don't mark as dirty since nothing changed
     this.electronService.setWorkingRegions(this.regions);
@@ -1892,7 +1971,10 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
     this.ngZone.runOutsideAngular(() => {
       this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
+        const profileStatesChanged = this.applyFrameProfileStates(frameState);
         if (this.processFrameState(frameState)) {
+          this.scheduleViewRefresh();
+        } else if (profileStatesChanged) {
           this.scheduleViewRefresh();
         }
       });
@@ -2066,6 +2148,86 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     this.pushWorkingRegions();
     this.changeDetectorRef.markForCheck();
     await this.saveAllRegions();
+  }
+
+  async removeRegionById(regionId: string): Promise<void> {
+    const regionIndex = this.regions.findIndex((region) => region.id === regionId);
+    if (regionIndex < 0) return;
+    await this.removeRegion(regionIndex);
+  }
+
+  get visibleRegions(): any[] {
+    return this.regions.filter((region) => this.regionMatchesFilters(region));
+  }
+
+  private regionMatchesFilters(region: any): boolean {
+    if (this.hideInactiveUnusedRegions && !this.isRegionRequiredForRuntime(region)) {
+      return false;
+    }
+
+    const search = this.regionSearchText.trim().toLowerCase();
+    if (!search) {
+      return true;
+    }
+
+    if ((region.name || '').toLowerCase().includes(search)) {
+      return true;
+    }
+
+    return (region.stateCalculations || []).some((calc: any) =>
+      (calc.name || '').toLowerCase().includes(search)
+    );
+  }
+
+  private isRegionRequiredForRuntime(region: any): boolean {
+    return region?.enabled !== false && this.requiredMonitoredRegionIds.has(region.id);
+  }
+
+  private focusRegionSearch(): void {
+    const input = this.regionSearchInputRef?.nativeElement;
+    if (!input) return;
+
+    input.focus();
+    input.select();
+  }
+
+  hasRegionEvaluationIntervalOverride(region: any): boolean {
+    return Number.isFinite(Number(region?.evaluationIntervalMs)) && Number(region.evaluationIntervalMs) > 0;
+  }
+
+  getRegionEvaluationIntervalSeconds(region: any): number {
+    const intervalMs = Number(region?.evaluationIntervalMs);
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      return this.getGlobalEvaluationIntervalSeconds();
+    }
+
+    return Math.round((intervalMs / 1000) * 100) / 100;
+  }
+
+  getGlobalEvaluationIntervalSeconds(): number {
+    const maxFrequency = Number(this.maxCalcFrequency) || 10;
+    return Math.round((1 / maxFrequency) * 100) / 100;
+  }
+
+  onRegionEvaluationIntervalOverrideChanged(region: any, enabled: boolean): void {
+    if (enabled) {
+      region.evaluationIntervalMs = this.getDefaultRegionEvaluationIntervalMs();
+    } else {
+      delete region.evaluationIntervalMs;
+    }
+    this.onFieldChanged();
+  }
+
+  onRegionEvaluationIntervalSecondsChanged(region: any, value: any): void {
+    const seconds = Number(value);
+    region.evaluationIntervalMs = Number.isFinite(seconds) && seconds > 0
+      ? Math.max(20, Math.round(seconds * 1000))
+      : this.getDefaultRegionEvaluationIntervalMs();
+    this.onFieldChanged();
+  }
+
+  private getDefaultRegionEvaluationIntervalMs(): number {
+    return Math.max(20, Math.round(1000 / (Number(this.maxCalcFrequency) || 10)));
   }
 
   isRegionExpanded(regionId: string): boolean {
@@ -2823,6 +2985,97 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
           existing.push({ groupId: group.id, groupName: group.name, overlayId: overlay.id, overlayName: overlay.name, source: 'mirror' });
           this.regionCrossRefs.set(mirrorRegionId, existing);
         }
+      }
+    }
+  }
+
+  private applyFrameProfileStates(frameState: any): boolean {
+    if (!Array.isArray(frameState?.profileStates)) {
+      return false;
+    }
+
+    const activeByProfileId = new Map(
+      frameState.profileStates.map((profileState: any) => [profileState.id, profileState.active])
+    );
+    let changed = false;
+
+    for (const profile of this.profiles) {
+      if (!activeByProfileId.has(profile.id)) {
+        continue;
+      }
+
+      const nextActive = activeByProfileId.get(profile.id);
+      if (profile.active !== nextActive) {
+        profile.active = nextActive;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.requiredMonitoredRegionIds = this.getRegionIdsRequiredForRuntimeAutomation();
+    }
+
+    return changed;
+  }
+
+  private getRegionIdsRequiredForRuntimeAutomation(): Set<string> {
+    const referencedIds = new Set<string>();
+
+    for (const group of this.getProfileActivatedOverlayGroups()) {
+      if (group.enabled === false) {
+        continue;
+      }
+
+      for (const rule of group.rules || []) {
+        this.addConditionRegionIds(referencedIds, rule.conditions);
+      }
+
+      for (const overlay of group.overlays || []) {
+        for (const rule of overlay.rules || []) {
+          this.addConditionRegionIds(referencedIds, rule.conditions);
+        }
+
+        if (overlay.contentType === 'regionMirror' && overlay.regionMirrorConfig?.monitoredRegionId) {
+          referencedIds.add(overlay.regionMirrorConfig.monitoredRegionId);
+        }
+      }
+    }
+
+    for (const profile of this.profiles || []) {
+      for (const rule of profile.rules || []) {
+        this.addConditionRegionIds(referencedIds, rule.conditions);
+      }
+    }
+
+    return referencedIds;
+  }
+
+  private getProfileActivatedOverlayGroups(): any[] {
+    if (this.profiles.length === 0) {
+      return this.overlayGroups || [];
+    }
+
+    const activeProfileIds = new Set(
+      this.profiles.filter((profile) => profile.active).map((profile) => profile.id)
+    );
+
+    return (this.overlayGroups || []).map((group) => {
+      const profileIds = group.profileIds || [];
+      if (profileIds.length === 0) {
+        return group;
+      }
+
+      return {
+        ...group,
+        enabled: profileIds.some((profileId: string) => activeProfileIds.has(profileId)),
+      };
+    });
+  }
+
+  private addConditionRegionIds(referencedIds: Set<string>, conditions: any[] | undefined): void {
+    for (const condition of conditions || []) {
+      if (condition.monitoredRegionId) {
+        referencedIds.add(condition.monitoredRegionId);
       }
     }
   }

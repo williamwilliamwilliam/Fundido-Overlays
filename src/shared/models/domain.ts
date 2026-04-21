@@ -15,6 +15,7 @@ export type MonitoredRegionId = string & { readonly __brand: 'MonitoredRegionId'
 export type StateCalculationId = string & { readonly __brand: 'StateCalculationId' };
 export type OverlayGroupId = string & { readonly __brand: 'OverlayGroupId' };
 export type OverlayId = string & { readonly __brand: 'OverlayId' };
+export type ProfileId = string & { readonly __brand: 'ProfileId' };
 export type GroupDefaultVisibilityMode = 'visible' | 'hidden' | 'opacity';
 
 // ---------------------------------------------------------------------------
@@ -219,6 +220,8 @@ export interface MonitoredRegion {
   lastUpdatedAt?: number;
   /** Optional repeat configuration that expands this region into multiple runtime instances. */
   repeat?: MonitoredRegionRepeatConfig;
+  /** Optional minimum milliseconds between evaluations for this region. Defaults to global maxCalcFrequency. */
+  evaluationIntervalMs?: number;
   /** The area of the capture this region covers. */
   bounds: Rectangle;
   /** One or more calculations that derive state from this region. */
@@ -366,6 +369,8 @@ export interface OverlayGroup {
   name: string;
   /** Whether this group is active and rendered. Default true. */
   enabled: boolean;
+  /** Profiles that activate this group. Empty means the group is not profile-managed. */
+  profileIds?: ProfileId[];
   /** Unix epoch milliseconds when this group was last changed. */
   lastUpdatedAt?: number;
   /** Scale multiplier applied to the whole group. Multiplies with individual overlay scales. */
@@ -415,6 +420,28 @@ export interface OllamaConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Profiles
+// ---------------------------------------------------------------------------
+
+export interface Profile {
+  id: ProfileId;
+  name: string;
+  active: boolean;
+  rules?: ProfileRule[];
+}
+
+export type ProfileRuleAction = 'activate' | 'inactivate';
+
+export interface ProfileRule {
+  id: string;
+  /** How conditions are combined. 'AND' = all must match, 'OR' = any must match. Default 'AND'. */
+  logicMode: RuleLogicMode;
+  conditions: RuleCondition[];
+  thenAction: ProfileRuleAction;
+  otherwiseAction: ProfileRuleAction;
+}
+
+// ---------------------------------------------------------------------------
 // Top-level Configuration (persisted)
 // ---------------------------------------------------------------------------
 
@@ -425,6 +452,9 @@ export interface FundidoConfig {
   ollama: OllamaConfig;
   monitoredRegions: MonitoredRegion[];
   overlayGroups: OverlayGroup[];
+  profiles: Profile[];
+  /** Whether Profile Rules automatically activate/inactivate profiles. Default false. */
+  profileRulesEnabled?: boolean;
   /** Max state calculation evaluations per second per calculation. Default 10. */
   maxCalcFrequency?: number;
 }

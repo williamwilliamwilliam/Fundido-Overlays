@@ -13,7 +13,14 @@ import { OllamaService } from './state/ollama.service';
 import { registerIpcHandlers } from './ipc/ipc-handlers';
 import { logger, LogCategory, WorkerLogMessage } from './shared/logger';
 import { computeRegionPixelHash } from './shared/pixel-hash';
-import { FundidoConfig, PreviewConfig, getRuntimeMonitoredRegions } from './shared';
+import {
+  applyProfileRulesToConfig,
+  FundidoConfig,
+  getProfileActivatedOverlayGroups,
+  getRegionIdsReferencedByProfileRules,
+  getRuntimeMonitoredRegions,
+  PreviewConfig,
+} from './shared';
 import * as IpcChannels from './shared/ipc-channels';
 
 // ---------------------------------------------------------------------------
@@ -168,7 +175,7 @@ function resolvePreviewUsageMode(): PreviewUsageMode {
 
   if (pickerActiveRef.active) return 'regions';
 
-  if (uiActivePageRef.page === 'regions') return 'regions';
+  if (uiActivePageRef.page === 'regions' || uiActivePageRef.page === 'profiles') return 'regions';
   if (uiActivePageRef.page === 'capture' && mainWindow.isFocused()) return 'capture';
   return 'inactive';
 }
@@ -524,7 +531,7 @@ function createMainWindow(): void {
  */
 function getRegionIdsReferencedByEnabledOverlays(): Set<string> {
   const referencedIds = new Set<string>();
-  const overlayGroups = currentConfigRef.config.overlayGroups || [];
+  const overlayGroups = getProfileActivatedOverlayGroups(currentConfigRef.config);
 
   for (const group of overlayGroups) {
     const groupIsDisabled = group.enabled === false;
@@ -558,6 +565,28 @@ function getRegionIdsReferencedByEnabledOverlays(): Set<string> {
   return referencedIds;
 }
 
+function getRegionIdsRequiredForRuntimeAutomation(): Set<string> {
+  const referencedIds = getRegionIdsReferencedByEnabledOverlays();
+  for (const regionId of getRegionIdsReferencedByProfileRules(currentConfigRef.config)) {
+    referencedIds.add(regionId);
+  }
+  return referencedIds;
+}
+
+function applyProfileRuleResults(frameState: any): void {
+  const profileStateChanged = applyProfileRulesToConfig(currentConfigRef.config, frameState);
+  frameState.profileStates = (currentConfigRef.config.profiles || []).map((profile) => ({
+    id: profile.id,
+    active: profile.active,
+  }));
+
+  if (!profileStateChanged) {
+    return;
+  }
+
+  overlayWindowManager.syncOverlayWindows(getProfileActivatedOverlayGroups(currentConfigRef.config));
+}
+
 // ---------------------------------------------------------------------------
 // State calculation throttling and time tracking
 // ---------------------------------------------------------------------------
@@ -581,6 +610,35 @@ function shouldThrottleCalc(calcKey: string, nowMs: number, minIntervalMs: numbe
   if (lastRun === undefined) return false;
   const elapsedSinceLastRun = nowMs - lastRun;
   return elapsedSinceLastRun < minIntervalMs;
+}
+
+function getRegionEvaluationIntervalMs(region: any, globalMinCalcIntervalMs: number): number {
+  const regionIntervalMs = Number(region.evaluationIntervalMs);
+  if (Number.isFinite(regionIntervalMs) && regionIntervalMs > 0) {
+    return Math.max(20, Math.round(regionIntervalMs));
+  }
+
+  return globalMinCalcIntervalMs;
+}
+
+function getStateEvaluationLoopIntervalMs(): number {
+  const maxCalcFrequency = currentConfigRef.config.maxCalcFrequency ?? 10;
+  const globalIntervalMs = Math.round(1000 / maxCalcFrequency);
+  const regions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions ?? [];
+  let fastestIntervalMs = globalIntervalMs;
+
+  for (const region of regions) {
+    if (region.enabled === false) {
+      continue;
+    }
+
+    const regionIntervalMs = Number(region.evaluationIntervalMs);
+    if (Number.isFinite(regionIntervalMs) && regionIntervalMs > 0) {
+      fastestIntervalMs = Math.min(fastestIntervalMs, Math.max(20, Math.round(regionIntervalMs)));
+    }
+  }
+
+  return fastestIntervalMs;
 }
 
 /** Records that a calc ran and how long it took. */
@@ -854,6 +912,7 @@ function startStateEvaluationLoop(): void {
     perfCounters.pipelineSamples++;
 
     // Broadcast to overlay windows and UI
+    applyProfileRuleResults(frameState);
     overlayWindowManager.broadcastFrameState(frameState);
     const uiIsVisible = !uiMinimizedRef.minimized && mainWindow && !mainWindow.isDestroyed();
     if (uiIsVisible) {
@@ -875,12 +934,13 @@ function startStateEvaluationLoop(): void {
     const allMonitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions;
     const enabledRegions = allMonitoredRegions.filter((region: any) => region.enabled !== false);
 
-    const userIsActivelyConfiguringRegions = uiActivePageRef.page === 'regions' && !uiMinimizedRef.minimized;
+    const userIsActivelyConfiguringRegions =
+      (uiActivePageRef.page === 'regions' || uiActivePageRef.page === 'profiles') && !uiMinimizedRef.minimized;
     let monitoredRegions: any[];
     if (userIsActivelyConfiguringRegions) {
       monitoredRegions = enabledRegions;
     } else {
-      const referencedRegionIds = getRegionIdsReferencedByEnabledOverlays();
+      const referencedRegionIds = getRegionIdsRequiredForRuntimeAutomation();
       monitoredRegions = enabledRegions.filter(
         (region: any) => referencedRegionIds.has(region.id)
       );
@@ -901,7 +961,7 @@ function startStateEvaluationLoop(): void {
     }
 
     perfCounters.activeRegionCount = runtimeRegions.length;
-    const enabledOverlayGroups = (currentConfigRef.config.overlayGroups || []).filter((g: any) => g.enabled !== false);
+    const enabledOverlayGroups = getProfileActivatedOverlayGroups(currentConfigRef.config).filter((g: any) => g.enabled !== false);
     perfCounters.activeOverlayGroupCount = enabledOverlayGroups.length;
 
     // Convert to physical pixel coordinates
@@ -953,9 +1013,7 @@ function startStateEvaluationLoop(): void {
     });
   };
 
-  const maxCalcFrequency = currentConfigRef.config.maxCalcFrequency ?? 10;
-  const intervalMs = Math.round(1000 / maxCalcFrequency);
-  stateEvalInterval = setInterval(sendEvalRequest, intervalMs);
+  stateEvalInterval = setInterval(sendEvalRequest, getStateEvaluationLoopIntervalMs());
 }
 
 /**
@@ -970,12 +1028,13 @@ function startStateEvaluationLoopFallback(): void {
     const allMonitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions;
     const enabledRegions = allMonitoredRegions.filter((region: any) => region.enabled !== false);
 
-    const userIsActivelyConfiguringRegions = uiActivePageRef.page === 'regions' && !uiMinimizedRef.minimized;
+    const userIsActivelyConfiguringRegions =
+      (uiActivePageRef.page === 'regions' || uiActivePageRef.page === 'profiles') && !uiMinimizedRef.minimized;
     let monitoredRegions: any[];
     if (userIsActivelyConfiguringRegions) {
       monitoredRegions = enabledRegions;
     } else {
-      const referencedRegionIds = getRegionIdsReferencedByEnabledOverlays();
+      const referencedRegionIds = getRegionIdsRequiredForRuntimeAutomation();
       monitoredRegions = enabledRegions.filter((region: any) => referencedRegionIds.has(region.id));
     }
 
@@ -1027,8 +1086,9 @@ function startStateEvaluationLoopFallback(): void {
       const unchanged = prev !== undefined && prev === curr;
       const allowed = (region.stateCalculations || []).filter((calc: any) => {
         const key = `${region.id}:${calc.id}`;
+        const regionMinCalcIntervalMs = getRegionEvaluationIntervalMs(region, minCalcIntervalMs);
         const shouldSkipIfUnchanged = calc.skipIfUnchanged !== false;
-        return !shouldThrottleCalc(key, nowMs, minCalcIntervalMs) &&
+        return !shouldThrottleCalc(key, nowMs, regionMinCalcIntervalMs) &&
           !(shouldSkipIfUnchanged && unchanged && region.alwaysEvaluate !== true);
       });
       return { ...region, stateCalculations: allowed };
@@ -1064,6 +1124,7 @@ function startStateEvaluationLoopFallback(): void {
     }
 
     perfCounters.stateEvals++;
+    applyProfileRuleResults(frameState);
     overlayWindowManager.broadcastFrameState(frameState);
     const uiIsVisible = !uiMinimizedRef.minimized && mainWindow && !mainWindow.isDestroyed();
     if (uiIsVisible) mainWindow!.webContents.send(IpcChannels.STATE_UPDATED, frameState);
@@ -1071,8 +1132,7 @@ function startStateEvaluationLoopFallback(): void {
     perfCounters.pipelineSamples++;
   };
 
-  const maxCalcFrequency = currentConfigRef.config.maxCalcFrequency ?? 10;
-  stateEvalInterval = setInterval(runStateEvaluation, Math.round(1000 / maxCalcFrequency));
+  stateEvalInterval = setInterval(runStateEvaluation, getStateEvaluationLoopIntervalMs());
 }
 
 function stopStateEvaluationLoop(): void {
@@ -1127,7 +1187,7 @@ app.whenReady().then(() => {
   });
 
   // Create overlay windows for any groups defined in the saved config
-  overlayWindowManager.syncOverlayWindows(currentConfigRef.config.overlayGroups);
+  overlayWindowManager.syncOverlayWindows(getProfileActivatedOverlayGroups(currentConfigRef.config));
 
   // Auto-start capture if it was running when the app last closed
   const shouldAutoStartCapture = currentConfigRef.config.gameCapture.captureEnabled === true;

@@ -8,6 +8,8 @@ const STUB_CONFIG = {
   preview: { previewFps: 10, previewScale: 0.5, downsampleMethod: 'bilinear', jpegQuality: 70 },
   monitoredRegions: [],
   overlayGroups: [],
+  profiles: [],
+  profileRulesEnabled: false,
 };
 
 /**

@@ -24,6 +24,7 @@ type PreviewMeta = Pick<
 interface CaptureRegionOverlay {
   id: string;
   name: string;
+  active: boolean;
   leftPercent: number;
   topPercent: number;
   widthPercent: number;
@@ -81,6 +82,7 @@ interface CaptureRegionOverlay {
             <div
               *ngFor="let overlay of captureRegionOverlays"
               class="region-overlay-box"
+              [class.region-overlay-box-active]="overlay.active"
               [style.left.%]="overlay.leftPercent"
               [style.top.%]="overlay.topPercent"
               [style.width.%]="overlay.widthPercent"
@@ -238,6 +240,11 @@ interface CaptureRegionOverlay {
       min-height: 2px;
     }
 
+    .region-overlay-box-active {
+      border-color: rgba(76, 175, 80, 0.98);
+      background: rgba(76, 175, 80, 0.12);
+    }
+
     .placeholder {
       color: var(--color-text-secondary);
       font-style: italic;
@@ -321,9 +328,12 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
   previewZoom = 1;
   previewTransformOrigin = '50% 50%';
   private monitoredRegions: any[] = [];
+  private activeMonitoredRegionIds = new Set<string>();
+  private requiredMonitoredRegionIds = new Set<string>();
   private hasInitializedDisplaySelection = false;
 
   private previewSubscription: Subscription | null = null;
+  private stateSubscription: Subscription | null = null;
   private metricsSubscription: Subscription | null = null;
   private pausedSubscription: Subscription | null = null;
   private latestPreviewSrc: string | null = null;
@@ -339,6 +349,7 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
 
     const config = await this.electronService.loadConfig();
     this.monitoredRegions = (config.monitoredRegions || []).filter((region: any) => region.enabled !== false);
+    this.requiredMonitoredRegionIds = this.getRegionIdsRequiredForRuntimeAutomation(config);
     this.availableDisplays = await this.electronService.listDisplays();
 
     const configuredDisplayIndex = config.gameCapture?.captureSource === 'primary'
@@ -371,6 +382,12 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
       this.changeDetectorRef.markForCheck();
     });
 
+    this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
+      this.activeMonitoredRegionIds = this.extractActiveMonitoredRegionIds(frameState);
+      this.captureRegionOverlays = this.buildCaptureRegionOverlays();
+      this.changeDetectorRef.markForCheck();
+    });
+
     this.pausedSubscription = this.electronService.previewPausedStream.subscribe((paused) => {
       this.isPreviewPaused = paused;
       this.changeDetectorRef.markForCheck();
@@ -390,6 +407,7 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
 
   ngOnDestroy(): void {
     this.previewSubscription?.unsubscribe();
+    this.stateSubscription?.unsubscribe();
     this.metricsSubscription?.unsubscribe();
     this.pausedSubscription?.unsubscribe();
     this.electronService.setActivePage('');
@@ -461,6 +479,7 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
     config.gameCapture.captureEnabled = true;
     await this.electronService.saveConfig(config);
     this.monitoredRegions = (config.monitoredRegions || []).filter((region: any) => region.enabled !== false);
+    this.requiredMonitoredRegionIds = this.getRegionIdsRequiredForRuntimeAutomation(config);
 
     if (!this.isCapturing) {
       await this.electronService.startCapture();
@@ -543,6 +562,7 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
         overlays.push({
           id: `${region.id}:${instanceBounds.repeatIndexX}:${instanceBounds.repeatIndexY}`,
           name: region.name || 'Unnamed Region',
+          active: this.activeMonitoredRegionIds.has(region.id) || this.requiredMonitoredRegionIds.has(region.id),
           leftPercent: (clippedLeft / this.previewMeta.previewWidth) * 100,
           topPercent: (clippedTop / this.previewMeta.previewHeight) * 100,
           widthPercent: (clippedWidth / this.previewMeta.previewWidth) * 100,
@@ -617,5 +637,86 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
     }
 
     return Math.max(1, Math.floor(numericValue));
+  }
+
+  private extractActiveMonitoredRegionIds(frameState: any): Set<string> {
+    const activeIds = new Set<string>();
+
+    for (const regionState of frameState?.regionStates || []) {
+      if (regionState.monitoredRegionId) {
+        activeIds.add(regionState.monitoredRegionId);
+      }
+    }
+
+    for (const instanceState of frameState?.regionInstanceStates || []) {
+      if (instanceState.monitoredRegionId) {
+        activeIds.add(instanceState.monitoredRegionId);
+      }
+      if (instanceState.sourceMonitoredRegionId) {
+        activeIds.add(instanceState.sourceMonitoredRegionId);
+      }
+    }
+
+    return activeIds;
+  }
+
+  private getRegionIdsRequiredForRuntimeAutomation(config: any): Set<string> {
+    const referencedIds = new Set<string>();
+
+    for (const group of this.getProfileActivatedOverlayGroups(config)) {
+      if (group.enabled === false) {
+        continue;
+      }
+
+      for (const rule of group.rules || []) {
+        this.addConditionRegionIds(referencedIds, rule.conditions);
+      }
+
+      for (const overlay of group.overlays || []) {
+        for (const rule of overlay.rules || []) {
+          this.addConditionRegionIds(referencedIds, rule.conditions);
+        }
+
+        if (overlay.contentType === 'regionMirror' && overlay.regionMirrorConfig?.monitoredRegionId) {
+          referencedIds.add(overlay.regionMirrorConfig.monitoredRegionId);
+        }
+      }
+    }
+
+    for (const profile of config.profiles || []) {
+      for (const rule of profile.rules || []) {
+        this.addConditionRegionIds(referencedIds, rule.conditions);
+      }
+    }
+
+    return referencedIds;
+  }
+
+  private getProfileActivatedOverlayGroups(config: any): any[] {
+    const profiles = config.profiles || [];
+    if (profiles.length === 0) {
+      return config.overlayGroups || [];
+    }
+
+    const activeProfileIds = new Set(profiles.filter((profile: any) => profile.active).map((profile: any) => profile.id));
+    return (config.overlayGroups || []).map((group: any) => {
+      const profileIds = group.profileIds || [];
+      if (profileIds.length === 0) {
+        return group;
+      }
+
+      return {
+        ...group,
+        enabled: profileIds.some((profileId: string) => activeProfileIds.has(profileId)),
+      };
+    });
+  }
+
+  private addConditionRegionIds(referencedIds: Set<string>, conditions: any[] | undefined): void {
+    for (const condition of conditions || []) {
+      if (condition.monitoredRegionId) {
+        referencedIds.add(condition.monitoredRegionId);
+      }
+    }
   }
 }

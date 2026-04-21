@@ -26,6 +26,12 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
           {{ globalEnabled ? 'ON' : 'OFF' }}
         </button>
         <div class="nav-links">
+          <a routerLink="/profiles" routerLinkActive="active" class="nav-link">
+            Profiles
+            <span *ngIf="activeProfileNames.length > 0" class="active-profile-list">
+              ({{ activeProfileNames.join(', ') }})
+            </span>
+          </a>
           <a routerLink="/capture" routerLinkActive="active" class="nav-link">Capture</a>
           <a routerLink="/regions" routerLinkActive="active" class="nav-link">Monitored Regions</a>
           <a routerLink="/overlays" routerLinkActive="active" class="nav-link">Overlay Groups</a>
@@ -138,6 +144,11 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
       font-weight: 500;
     }
 
+    .active-profile-list {
+      color: var(--color-success);
+      font-weight: 500;
+    }
+
     .main-area {
       flex: 1;
       position: relative;
@@ -228,9 +239,14 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
 export class AppComponent implements OnInit, OnDestroy {
   globalEnabled = true;
   isDebugMinimized = true;
+  activeProfileNames: string[] = [];
 
   private expandedPanelHeightPx = DEFAULT_PANEL_HEIGHT_PX;
   private appCloseRequestSubscription: Subscription | null = null;
+  private stateSubscription: Subscription | null = null;
+  private profileNameById = new Map<string, string>();
+  private activeProfileIdsSignature = '';
+  private profileCacheRefreshPromise: Promise<void> | null = null;
 
   private static readonly STORAGE_KEY_DEBUG_MINIMIZED = 'fundido:debugMinimized';
   private static readonly STORAGE_KEY_DEBUG_HEIGHT = 'fundido:debugHeight';
@@ -244,14 +260,21 @@ export class AppComponent implements OnInit, OnDestroy {
 
   async ngOnInit(): Promise<void> {
     this.globalEnabled = await this.electronService.globalStatus();
+    await this.refreshActiveProfileNames();
     this.appCloseRequestSubscription = this.electronService.appCloseRequestedStream.subscribe(async () => {
       const allowClose = await this.pendingChangesService.confirmClose();
       this.electronService.respondToAppCloseRequest(allowClose);
+    });
+    this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
+      if (Array.isArray(frameState?.profileStates)) {
+        this.refreshActiveProfileNamesFromProfileStates(frameState.profileStates);
+      }
     });
   }
 
   ngOnDestroy(): void {
     this.appCloseRequestSubscription?.unsubscribe();
+    this.stateSubscription?.unsubscribe();
   }
 
   async toggleGlobal(): Promise<void> {
@@ -340,5 +363,62 @@ export class AppComponent implements OnInit, OnDestroy {
     } catch {
       // ignore
     }
+  }
+
+  private async refreshActiveProfileNames(): Promise<void> {
+    const config = await this.electronService.loadConfig();
+    this.profileNameById = new Map(
+      (config.profiles || [])
+        .filter((profile: any) => profile.id && profile.name)
+        .map((profile: any) => [profile.id, profile.name])
+    );
+    this.activeProfileNames = (config.profiles || [])
+      .filter((profile: any) => profile.active)
+      .map((profile: any) => profile.name)
+      .filter((name: string) => !!name);
+    this.activeProfileIdsSignature = this.buildActiveProfileIdsSignature(
+      (config.profiles || [])
+        .filter((profile: any) => profile.active)
+        .map((profile: any) => profile.id)
+    );
+  }
+
+  private refreshActiveProfileNamesFromProfileStates(profileStates: any[]): void {
+    const activeProfileIds = profileStates
+      .filter((profileState: any) => profileState.active)
+      .map((profileState: any) => profileState.id);
+    const nextSignature = this.buildActiveProfileIdsSignature(activeProfileIds);
+    if (nextSignature === this.activeProfileIdsSignature) {
+      return;
+    }
+
+    this.activeProfileIdsSignature = nextSignature;
+    const hasUnknownProfileId = activeProfileIds.some((profileId: string) => !this.profileNameById.has(profileId));
+    if (hasUnknownProfileId) {
+      this.refreshProfileNameCache();
+    }
+
+    const activeProfileIdSet = new Set(activeProfileIds);
+    this.activeProfileNames = Array.from(activeProfileIdSet)
+      .map((profileId) => this.profileNameById.get(profileId))
+      .filter((name): name is string => !!name);
+  }
+
+  private refreshProfileNameCache(): void {
+    if (this.profileCacheRefreshPromise) {
+      return;
+    }
+
+    this.profileCacheRefreshPromise = this.refreshActiveProfileNames()
+      .finally(() => {
+        this.profileCacheRefreshPromise = null;
+      });
+  }
+
+  private buildActiveProfileIdsSignature(profileIds: string[]): string {
+    return Array.from(new Set(
+      profileIds
+        .filter((profileId) => !!profileId)
+    )).sort().join('|');
   }
 }

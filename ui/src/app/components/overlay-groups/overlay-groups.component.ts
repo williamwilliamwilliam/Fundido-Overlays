@@ -73,7 +73,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       <!-- ======================== GROUP CARD ======================== -->
       <div *ngFor="let group of groups; let groupIndex = index"
         class="group-card"
-        [class.group-disabled]="group.enabled === false">
+        [class.group-disabled]="group.enabled === false && isGroupProfileManaged(group)">
         <div class="group-header">
           <button
             class="collapse-toggle"
@@ -82,9 +82,12 @@ import { PendingChangesService } from '../../services/pending-changes.service';
             [title]="isGroupExpanded(group.id) ? 'Collapse' : 'Expand'">
             {{ isGroupExpanded(group.id) ? '▾' : '▸' }}
           </button>
-          <label class="enabled-toggle" title="Enable/disable this group">
+          <label
+            class="enabled-toggle"
+            [title]="isGroupProfileManaged(group) ? 'Profiles control whether this group is enabled' : 'Enable/disable this group'">
             <input type="checkbox"
               [ngModel]="group.enabled !== false"
+              [disabled]="isGroupProfileManaged(group)"
               (ngModelChange)="group.enabled = $event; onFieldChanged()" />
           </label>
           <input
@@ -98,6 +101,26 @@ import { PendingChangesService } from '../../services/pending-changes.service';
         <ng-container *ngIf="isGroupExpanded(group.id)">
 
         <div class="group-settings">
+          <div class="profile-multiselect" *ngIf="profiles.length > 0" (click)="onProfileDropdownClick($event)">
+            <span class="profiles-label">Profiles</span>
+            <button
+              type="button"
+              class="profile-select-button"
+              (click)="toggleProfileDropdown(group.id, $event)">
+              <span>{{ getGroupProfileSummary(group) }}</span>
+              <span class="profile-select-arrow">{{ openProfileDropdownGroupId === group.id ? '▲' : '▼' }}</span>
+            </button>
+            <div class="profile-select-menu" *ngIf="openProfileDropdownGroupId === group.id">
+              <label *ngFor="let profile of profiles" class="profile-option" [class.profile-option-active]="profile.active">
+                <input
+                  type="checkbox"
+                  [ngModel]="isGroupInProfile(group, profile.id)"
+                  (ngModelChange)="onGroupProfileChanged(group, profile.id, $event)" />
+                <span class="profile-option-name">{{ profile.name }}</span>
+                <span class="profile-option-state">{{ profile.active ? 'Active' : 'Inactive' }}</span>
+              </label>
+            </div>
+          </div>
           <label>Scale
             <input
               type="number"
@@ -204,11 +227,11 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                 <input type="checkbox" [(ngModel)]="cond.negate" (ngModelChange)="onFieldChanged()" />
                 NOT
               </label>
-              <select [(ngModel)]="cond.monitoredRegionId" (ngModelChange)="onFieldChanged()">
+              <select [(ngModel)]="cond.monitoredRegionId" (ngModelChange)="onRegionSelectedForCondition(cond)">
                 <option value="">Select Region</option>
                 <option *ngFor="let r of monitoredRegions" [value]="r.id">{{ r.name }}</option>
               </select>
-              <select [(ngModel)]="cond.stateCalculationId" (ngModelChange)="onFieldChanged()">
+              <select [(ngModel)]="cond.stateCalculationId" (ngModelChange)="onCalculationSelectedForCondition(cond)">
                 <option value="">Select Calc</option>
                 <option *ngFor="let c of getCalcsForRegion(cond.monitoredRegionId)" [value]="c.id">{{ c.name }}</option>
               </select>
@@ -412,7 +435,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                     <option value="">Select Region</option>
                     <option *ngFor="let region of monitoredRegions" [ngValue]="region.id">{{ region.name }}</option>
                   </select>
-                  <select [(ngModel)]="cond.stateCalculationId" (ngModelChange)="onFieldChanged()">
+                  <select [(ngModel)]="cond.stateCalculationId" (ngModelChange)="onCalculationSelectedForCondition(cond)">
                     <option value="">Select Calc</option>
                     <option *ngFor="let calc of getCalcsForRegion(cond.monitoredRegionId)" [ngValue]="calc.id">{{ calc.name }}</option>
                   </select>
@@ -603,6 +626,68 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       display: flex; flex-direction: column; gap: var(--spacing-xs); color: var(--color-text-secondary); font-size: 0.85rem;
     }
     .group-settings input[type="number"] { width: 70px; }
+    .profile-multiselect {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-xs);
+      min-width: 240px;
+    }
+    .profiles-label { color: var(--color-text-secondary); font-size: 0.85rem; }
+    .profile-select-button {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--spacing-sm);
+      min-width: 240px;
+      max-width: 320px;
+      background-color: var(--color-bg-secondary);
+      text-align: left;
+    }
+    .profile-select-button span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .profile-select-arrow {
+      color: var(--color-text-secondary);
+      font-size: 0.7rem;
+      flex-shrink: 0;
+    }
+    .profile-select-menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      z-index: 20;
+      width: min(360px, 80vw);
+      max-height: 260px;
+      overflow-y: auto;
+      padding: var(--spacing-xs);
+      background-color: var(--color-bg-secondary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+    .profile-option {
+      display: grid !important;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: var(--spacing-sm) !important;
+      padding: var(--spacing-xs) var(--spacing-sm);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      color: var(--color-text-secondary) !important;
+      font-size: 0.85rem !important;
+    }
+    .profile-option:hover { background-color: var(--color-bg-panel); }
+    .profile-option.profile-option-active { color: var(--color-text-primary) !important; }
+    .profile-option input { accent-color: var(--color-accent); }
+    .profile-option-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .profile-option-state { color: var(--color-text-secondary); font-size: 0.75rem; }
 
     .pick-btn {
       font-size: 0.8rem; padding: 4px 12px; background-color: var(--color-bg-panel);
@@ -765,6 +850,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
 
   groups: any[] = [];
   monitoredRegions: any[] = [];
+  profiles: any[] = [];
   showImportDialog = false;
   showUnsavedChangesDialog = false;
   importJsonText = '';
@@ -774,6 +860,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   highlightId: string | null = null;
   copiedOverlayRule: any | null = null;
   copiedOverlayRuleId: string | null = null;
+  openProfileDropdownGroupId: string | null = null;
   private currentFrameState: any | null = null;
   private viewRefreshScheduled = false;
   private collapsedGroupIds = new Set<string>();
@@ -832,6 +919,11 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     }
   }
 
+  @HostListener('document:click')
+  onDocumentClick(): void {
+    this.openProfileDropdownGroupId = null;
+  }
+
   async ngOnInit(): Promise<void> {
     this.pendingChangesService.register(this);
     const config = await this.electronService.loadConfig();
@@ -843,6 +935,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.loadCollapsedGroupState();
     this.syncCollapsedGroupState();
     this.monitoredRegions = config.monitoredRegions || [];
+    this.profiles = config.profiles || [];
+    this.applyProfileActivationToGroups();
     this.buildOverlayCrossRefs();
     this.ngZone.runOutsideAngular(() => {
       this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
@@ -944,9 +1038,11 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   // ---------------------------------------------------------------------------
 
   addGroup(): void {
+    const activeProfileIds = this.profiles.filter((profile) => profile.active).map((profile) => profile.id);
     const newGroup = {
       id: crypto.randomUUID(), name: 'New Group', enabled: true,
       lastUpdatedAt: Date.now(),
+      profileIds: activeProfileIds,
       scale: 1,
       defaultVisibilityMode: 'visible',
       defaultOpacity: 1,
@@ -1014,6 +1110,46 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     if (group.defaultVisibilityMode === 'opacity' && group.defaultOpacity === undefined) {
       group.defaultOpacity = 1;
     }
+    this.markGroupsChanged();
+  }
+
+  isGroupInProfile(group: any, profileId: string): boolean {
+    return (group.profileIds || []).includes(profileId);
+  }
+
+  isGroupProfileManaged(group: any): boolean {
+    return (group.profileIds || []).length > 0;
+  }
+
+  getGroupProfileSummary(group: any): string {
+    const selectedProfiles = this.profiles.filter((profile) => this.isGroupInProfile(group, profile.id));
+    if (selectedProfiles.length === 0) {
+      return 'No profiles';
+    }
+    if (selectedProfiles.length === 1) {
+      return selectedProfiles[0].name;
+    }
+    return `${selectedProfiles.length} profiles`;
+  }
+
+  toggleProfileDropdown(groupId: string, event: Event): void {
+    event.stopPropagation();
+    this.openProfileDropdownGroupId = this.openProfileDropdownGroupId === groupId ? null : groupId;
+  }
+
+  onProfileDropdownClick(event: Event): void {
+    event.stopPropagation();
+  }
+
+  onGroupProfileChanged(group: any, profileId: string, belongsToProfile: boolean): void {
+    const profileIds = new Set<string>(group.profileIds || []);
+    if (belongsToProfile) {
+      profileIds.add(profileId);
+    } else {
+      profileIds.delete(profileId);
+    }
+    group.profileIds = Array.from(profileIds);
+    this.applyProfileActivationToGroups();
     this.markGroupsChanged();
   }
 
@@ -1342,8 +1478,12 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
         condition.operator === 'equalsInEveryRepeatedRegion')) {
       condition.operator = 'equals';
     }
-    condition.stateCalculationId = '';
-    condition.value = '';
+    this.autofillConditionCalculationAndValue(condition);
+    this.markGroupsChanged();
+  }
+
+  onCalculationSelectedForCondition(condition: any): void {
+    this.autofillConditionValue(condition);
     this.markGroupsChanged();
   }
 
@@ -1457,6 +1597,17 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     return calc?.type || '';
   }
 
+  private autofillConditionCalculationAndValue(condition: any): void {
+    const firstCalc = this.getCalcsForRegion(condition.monitoredRegionId)[0];
+    condition.stateCalculationId = firstCalc?.id || '';
+    this.autofillConditionValue(condition);
+  }
+
+  private autofillConditionValue(condition: any): void {
+    const firstValue = this.getStateValuesForCalc(condition.monitoredRegionId, condition.stateCalculationId)[0];
+    condition.value = firstValue || '';
+  }
+
   // ---------------------------------------------------------------------------
   // Cross-references
   // ---------------------------------------------------------------------------
@@ -1518,6 +1669,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
 
   async saveAllGroups(): Promise<void> {
     const config = await this.electronService.loadConfig();
+    this.applyProfileActivationToGroups();
     config.overlayGroups = JSON.parse(JSON.stringify(this.groups));
     await this.electronService.saveConfig(config);
     this.hasUnsavedChanges = false;
@@ -1761,6 +1913,9 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
 
   private normalizeGroupDefaults(): void {
     for (const group of this.groups) {
+      if (!Array.isArray(group.profileIds)) {
+        group.profileIds = [];
+      }
       if (group.scale === undefined) {
         group.scale = 1;
       }
@@ -1769,6 +1924,19 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
       }
       if (group.defaultOpacity === undefined) {
         group.defaultOpacity = 1;
+      }
+    }
+  }
+
+  private applyProfileActivationToGroups(): void {
+    if (this.profiles.length === 0) {
+      return;
+    }
+
+    const activeProfileIds = new Set(this.profiles.filter((profile) => profile.active).map((profile) => profile.id));
+    for (const group of this.groups) {
+      if ((group.profileIds || []).length > 0) {
+        group.enabled = (group.profileIds || []).some((profileId: string) => activeProfileIds.has(profileId));
       }
     }
   }

@@ -1,6 +1,6 @@
 import { ipcMain, IpcMainInvokeEvent, BrowserWindow } from 'electron';
 import * as IpcChannels from '../shared/ipc-channels';
-import { FundidoConfig, MonitoredRegion, OverlayGroup } from '../shared';
+import { applyProfileActivationToOverlayGroups, FundidoConfig, getProfileActivatedOverlayGroups, MonitoredRegion, OverlayGroup } from '../shared';
 import { ConfigPersistenceService } from '../persistence/config-persistence.service';
 import { GameCaptureService } from '../capture/game-capture.service';
 import { PreviewFrameService } from '../capture/preview-frame.service';
@@ -51,7 +51,7 @@ export function registerIpcHandlers(
     }
 
     // Restore overlay windows
-    overlayWindowManager.syncOverlayWindows(currentConfigRef.config.overlayGroups || []);
+    overlayWindowManager.syncOverlayWindows(getProfileActivatedOverlayGroups(currentConfigRef.config));
     return { success: true };
   });
 
@@ -84,10 +84,11 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IpcChannels.CONFIG_SAVE, (_event: IpcMainInvokeEvent, config: FundidoConfig) => {
     logger.debug(LogCategory.Ipc, 'CONFIG_SAVE invoked');
+    applyProfileActivationToOverlayGroups(config);
     currentConfigRef.config = config;
     configService.save(config);
     // Sync overlay windows whenever config is saved
-    overlayWindowManager.syncOverlayWindows(config.overlayGroups || []);
+    overlayWindowManager.syncOverlayWindows(getProfileActivatedOverlayGroups(config));
     return { success: true };
   });
 
@@ -124,6 +125,7 @@ export function registerIpcHandlers(
       try {
         const importedGroups = JSON.parse(jsonString) as OverlayGroup[];
         currentConfigRef.config.overlayGroups = importedGroups;
+        applyProfileActivationToOverlayGroups(currentConfigRef.config);
         configService.save(currentConfigRef.config);
         return { success: true, groupCount: importedGroups.length };
       } catch (error) {
