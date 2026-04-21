@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, HostListener, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, HostListener, NgZone, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -8,6 +8,7 @@ import { PendingChangesComponent } from '../../guards/pending-changes.guard';
 @Component({
   selector: 'app-profiles',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [CommonModule, FormsModule],
   template: `
     <div class="page">
@@ -305,6 +306,7 @@ export class ProfilesComponent implements OnInit, OnDestroy, PendingChangesCompo
   constructor(
     private readonly electronService: ElectronService,
     private readonly changeDetectorRef: ChangeDetectorRef,
+    private readonly ngZone: NgZone,
   ) {}
 
   @HostListener('window:keydown', ['$event'])
@@ -328,11 +330,14 @@ export class ProfilesComponent implements OnInit, OnDestroy, PendingChangesCompo
     this.monitoredRegions = JSON.parse(JSON.stringify(config.monitoredRegions || []));
     this.profileRulesEnabled = config.profileRulesEnabled === true;
     this.normalizeProfileRules();
-    this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
-      this.currentFrameState = frameState;
-      this.syncProfileActiveStatesFromFrameState(frameState);
-      this.applyLocalProfileRuleResults();
-      this.scheduleViewRefresh();
+    this.changeDetectorRef.markForCheck();
+    this.ngZone.runOutsideAngular(() => {
+      this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
+        this.currentFrameState = frameState;
+        this.syncProfileActiveStatesFromFrameState(frameState);
+        this.applyLocalProfileRuleResults();
+        this.scheduleViewRefresh();
+      });
     });
   }
 
@@ -561,6 +566,7 @@ export class ProfilesComponent implements OnInit, OnDestroy, PendingChangesCompo
     config.overlayGroups = JSON.parse(JSON.stringify(this.overlayGroups));
     await this.electronService.saveConfig(config);
     this.hasUnsavedChanges = false;
+    this.changeDetectorRef.markForCheck();
   }
 
   onProfilesChanged(): void {

@@ -3302,7 +3302,6 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
   private handlePreviewFrame(frame: RegionsPreviewFrameData): void {
     this.latestPreviewFrame = frame;
-    this.updateRawPreviewSurface(frame);
     this.scheduleRegionPreviewRender();
 
     if (!this.hasPreviewFrame) {
@@ -3379,7 +3378,9 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   }
 
   private renderAllRegionPreviews(): void {
-    if (!this.rawPreviewCanvas || !this.latestPreviewFrame) return;
+    if (!this.latestPreviewFrame) return;
+    this.updateRawPreviewSurface(this.latestPreviewFrame);
+    if (!this.rawPreviewCanvas) return;
 
     const displayOriginX = this.latestPreviewFrame.displayOriginX || 0;
     const displayOriginY = this.latestPreviewFrame.displayOriginY || 0;

@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, HostListener, NgZone, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, HostListener, NgZone, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
@@ -10,6 +10,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
 @Component({
   selector: 'app-overlay-groups',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [CommonModule, FormsModule, RouterLink],
   template: `
     <div class="page">
@@ -229,11 +230,11 @@ import { PendingChangesService } from '../../services/pending-changes.service';
               </label>
               <select [(ngModel)]="cond.monitoredRegionId" (ngModelChange)="onRegionSelectedForCondition(cond)">
                 <option value="">Select Region</option>
-                <option *ngFor="let r of monitoredRegions" [value]="r.id">{{ r.name }}</option>
+                <option *ngFor="let r of monitoredRegions; trackBy: trackByRegionId" [value]="r.id">{{ r.name }}</option>
               </select>
               <select [(ngModel)]="cond.stateCalculationId" (ngModelChange)="onCalculationSelectedForCondition(cond)">
                 <option value="">Select Calc</option>
-                <option *ngFor="let c of getCalcsForRegion(cond.monitoredRegionId)" [value]="c.id">{{ c.name }}</option>
+                <option *ngFor="let c of getCalcsForRegion(cond.monitoredRegionId); trackBy: trackByCalcId" [value]="c.id">{{ c.name }}</option>
               </select>
               <select [(ngModel)]="cond.operator" (ngModelChange)="onFieldChanged()">
                 <option value="equals">equals</option>
@@ -264,7 +265,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
               </div>
               <select [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()">
                 <option value="">Select Value</option>
-                <option *ngFor="let v of getStateValuesForCalc(cond.monitoredRegionId, cond.stateCalculationId)" [value]="v">{{ v }}</option>
+                <option *ngFor="let v of getStateValuesForCalc(cond.monitoredRegionId, cond.stateCalculationId); trackBy: trackByStringValue" [value]="v">{{ v }}</option>
               </select>
               <span
                 class="condition-debug-status"
@@ -401,7 +402,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
             <div class="config-row">
               <label>Region
                 <select [(ngModel)]="overlay.regionMirrorConfig.monitoredRegionId" (ngModelChange)="onFieldChanged()">
-                  <option *ngFor="let region of monitoredRegions" [ngValue]="region.id">{{ region.name }}</option>
+                  <option *ngFor="let region of monitoredRegions; trackBy: trackByRegionId" [ngValue]="region.id">{{ region.name }}</option>
                 </select>
               </label>
               <label>Scale <input type="number" step="0.1" [(ngModel)]="overlay.regionMirrorConfig.size.scale" (ngModelChange)="onFieldChanged()" style="width:60px" /></label>
@@ -456,11 +457,11 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                   </label>
                   <select [(ngModel)]="cond.monitoredRegionId" (ngModelChange)="onRegionSelectedForCondition(cond)">
                     <option value="">Select Region</option>
-                    <option *ngFor="let region of monitoredRegions" [ngValue]="region.id">{{ region.name }}</option>
+                    <option *ngFor="let region of monitoredRegions; trackBy: trackByRegionId" [ngValue]="region.id">{{ region.name }}</option>
                   </select>
                   <select [(ngModel)]="cond.stateCalculationId" (ngModelChange)="onCalculationSelectedForCondition(cond)">
                     <option value="">Select Calc</option>
-                    <option *ngFor="let calc of getCalcsForRegion(cond.monitoredRegionId)" [ngValue]="calc.id">{{ calc.name }}</option>
+                    <option *ngFor="let calc of getCalcsForRegion(cond.monitoredRegionId); trackBy: trackByCalcId" [ngValue]="calc.id">{{ calc.name }}</option>
                   </select>
                   <select [(ngModel)]="cond.operator" (ngModelChange)="onFieldChanged()">
                     <option value="equals">=</option>
@@ -502,7 +503,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                   <select *ngIf="getCalcType(cond.monitoredRegionId, cond.stateCalculationId) !== 'OllamaLLM'"
                     [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()">
                     <option value="">Select Value</option>
-                    <option *ngFor="let sv of getStateValuesForCalc(cond.monitoredRegionId, cond.stateCalculationId)" [ngValue]="sv">{{ sv }}</option>
+                    <option *ngFor="let sv of getStateValuesForCalc(cond.monitoredRegionId, cond.stateCalculationId); trackBy: trackByStringValue" [ngValue]="sv">{{ sv }}</option>
                   </select>
                   <input *ngIf="getCalcType(cond.monitoredRegionId, cond.stateCalculationId) === 'OllamaLLM'"
                     [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()"
@@ -1423,6 +1424,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.profiles = config.profiles || [];
     this.applyProfileActivationToGroups();
     this.buildOverlayCrossRefs();
+    this.changeDetectorRef.markForCheck();
     this.ngZone.runOutsideAngular(() => {
       this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
         this.currentFrameState = frameState;
@@ -1451,7 +1453,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
           scrollTimer = setTimeout(() => {
             scrollContainer.removeEventListener('scroll', onScrollEnd);
             this.highlightId = targetId;
-            setTimeout(() => { this.highlightId = null; }, 2500);
+            this.changeDetectorRef.markForCheck();
+            setTimeout(() => { this.highlightId = null; this.changeDetectorRef.markForCheck(); }, 2500);
           }, 150);
         };
 
@@ -1461,7 +1464,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
         scrollTimer = setTimeout(() => {
           scrollContainer.removeEventListener('scroll', onScrollEnd);
           this.highlightId = targetId;
-          setTimeout(() => { this.highlightId = null; }, 2500);
+          this.changeDetectorRef.markForCheck();
+          setTimeout(() => { this.highlightId = null; this.changeDetectorRef.markForCheck(); }, 2500);
         }, 600);
       }, 150);
     });
@@ -1483,6 +1487,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     }
 
     this.showUnsavedChangesDialog = true;
+    this.changeDetectorRef.markForCheck();
     this.pendingNavigationPromise = new Promise<boolean>((resolve) => {
       this.pendingNavigationResolve = resolve;
     });
@@ -1501,6 +1506,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
       this.resolvePendingNavigation(true);
     } catch {
       this.isResolvingUnsavedChanges = false;
+      this.changeDetectorRef.markForCheck();
     }
   }
 
@@ -2130,6 +2136,18 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     return inst.key;
   }
 
+  trackByRegionId(_index: number, region: any): string {
+    return region.id;
+  }
+
+  trackByCalcId(_index: number, calc: any): string {
+    return calc.id;
+  }
+
+  trackByStringValue(_index: number, value: string): string {
+    return value;
+  }
+
   toggleInstanceDropdown(condition: any, event: Event): void {
     event.stopPropagation();
     this.openInstanceDropdownCondition = this.openInstanceDropdownCondition === condition ? null : condition;
@@ -2240,6 +2258,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.hasUnsavedChanges = false;
     this.refreshSavedOverlaySnapshots();
     this.refreshGroupComparableSnapshots();
+    this.changeDetectorRef.markForCheck();
   }
 
   async exportGroups(): Promise<void> {
@@ -2259,6 +2278,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
       this.syncCollapsedGroupState();
       this.showImportDialog = false;
       this.importJsonText = '';
+      this.changeDetectorRef.markForCheck();
     }
   }
 
