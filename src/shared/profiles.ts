@@ -158,5 +158,25 @@ function evaluateProfileRuleConditionOperator(condition: RuleCondition, calcResu
     return matchingValues.every((value) => value === condition.value);
   }
 
+  if (condition.operator === 'equalsAtLeastNTimesAcrossRepeatedRegions') {
+    const minCount = condition.minimumCount ?? 1;
+    return matchingValues.filter((value) => value === condition.value).length >= minCount;
+  }
+
+  if (condition.operator === 'equalsInEverySelectedRepeatedRegion' || condition.operator === 'equalsAtLeastOnceInSelectedRepeatedRegions') {
+    const selectedKeys = condition.selectedRepeatInstances || [];
+    const selectedInstances = matchingInstances.filter(
+      (instanceState) => selectedKeys.includes(`${instanceState.repeatIndexX}_${instanceState.repeatIndexY}`),
+    );
+    if (selectedInstances.length === 0) return false;
+    const selectedValues = selectedInstances.map((instanceState) =>
+      instanceState.calculationResults.find((r) => r.stateCalculationId === condition.stateCalculationId)?.currentValue,
+    );
+    if (condition.operator === 'equalsInEverySelectedRepeatedRegion') {
+      return selectedValues.every((value) => value === condition.value);
+    }
+    return selectedValues.some((value) => value === condition.value);
+  }
+
   return true;
 }

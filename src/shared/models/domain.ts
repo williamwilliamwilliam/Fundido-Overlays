@@ -320,7 +320,10 @@ export type RuleOperator =
   | 'equals'
   | 'notEquals'
   | 'equalsAtLeastOnceAcrossRepeatedRegions'
-  | 'equalsInEveryRepeatedRegion';
+  | 'equalsInEveryRepeatedRegion'
+  | 'equalsAtLeastNTimesAcrossRepeatedRegions'
+  | 'equalsInEverySelectedRepeatedRegion'
+  | 'equalsAtLeastOnceInSelectedRepeatedRegions';
 export type RuleLogicMode = 'AND' | 'OR';
 
 export interface RuleCondition {
@@ -330,6 +333,11 @@ export interface RuleCondition {
   value: string;
   /** If true, the result of this condition is inverted (NOT). Default false. */
   negate: boolean;
+  /** For 'equalsAtLeastNTimesAcrossRepeatedRegions': minimum number of matching instances. */
+  minimumCount?: number;
+  /** For 'equalsInEverySelectedRepeatedRegion' / 'equalsAtLeastOnceInSelectedRepeatedRegions':
+   *  selected instance keys as "{repeatIndexX}_{repeatIndexY}" strings. */
+  selectedRepeatInstances?: string[];
 }
 
 export type RuleAction = 'show' | 'hide' | 'opacity';

@@ -99,7 +99,28 @@ import { PendingChangesComponent } from '../../guards/pending-changes.guard';
                   <option *ngIf="isRepeatingRegion(condition.monitoredRegionId)" value="equalsInEveryRepeatedRegion">
                     In every Repeated Region
                   </option>
+                  <option *ngIf="isRepeatingRegion(condition.monitoredRegionId)" value="equalsAtLeastNTimesAcrossRepeatedRegions">
+                    Occurs a minimum number of times
+                  </option>
+                  <option *ngIf="isRepeatingRegion(condition.monitoredRegionId)" value="equalsInEverySelectedRepeatedRegion">
+                    In Every Selected Region
+                  </option>
+                  <option *ngIf="isRepeatingRegion(condition.monitoredRegionId)" value="equalsAtLeastOnceInSelectedRepeatedRegions">
+                    At Least One Selected Region
+                  </option>
                 </select>
+                <input *ngIf="condition.operator === 'equalsAtLeastNTimesAcrossRepeatedRegions'"
+                  type="number" min="1" [(ngModel)]="condition.minimumCount" (ngModelChange)="onProfilesChanged()"
+                  class="minimum-count-input" placeholder="Min" />
+                <div *ngIf="condition.operator === 'equalsInEverySelectedRepeatedRegion' || condition.operator === 'equalsAtLeastOnceInSelectedRepeatedRegions'"
+                  class="repeat-instance-selector">
+                  <label *ngFor="let inst of getRepeatInstanceOptions(condition.monitoredRegionId)" class="repeat-instance-option">
+                    <input type="checkbox"
+                      [checked]="isRepeatInstanceSelected(condition, inst.key)"
+                      (change)="toggleRepeatInstance(condition, inst.key)" />
+                    {{ inst.label }}
+                  </label>
+                </div>
                 <select
                   *ngIf="getCalcType(condition.monitoredRegionId, condition.stateCalculationId) !== 'OllamaLLM'"
                   [(ngModel)]="condition.value"
@@ -241,6 +262,9 @@ import { PendingChangesComponent } from '../../guards/pending-changes.guard';
       font-size: 0.8rem;
     }
     .condition-value-input { min-width: 160px; }
+    .minimum-count-input { width: 54px; font-size: 0.8rem; }
+    .repeat-instance-selector { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 2px 4px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-primary); }
+    .repeat-instance-option { display: flex; align-items: center; gap: 2px; font-size: 0.75rem; white-space: nowrap; cursor: pointer; }
     .condition-debug-status {
       font-family: var(--font-mono);
       font-size: 0.75rem;
@@ -390,9 +414,14 @@ export class ProfilesComponent implements OnInit, OnDestroy, PendingChangesCompo
   }
 
   onRegionSelectedForCondition(condition: any): void {
-    if (!this.isRepeatingRegion(condition.monitoredRegionId) &&
-      (condition.operator === 'equalsAtLeastOnceAcrossRepeatedRegions' ||
-        condition.operator === 'equalsInEveryRepeatedRegion')) {
+    const repeatedOnlyOperators = [
+      'equalsAtLeastOnceAcrossRepeatedRegions',
+      'equalsInEveryRepeatedRegion',
+      'equalsAtLeastNTimesAcrossRepeatedRegions',
+      'equalsInEverySelectedRepeatedRegion',
+      'equalsAtLeastOnceInSelectedRepeatedRegions',
+    ];
+    if (!this.isRepeatingRegion(condition.monitoredRegionId) && repeatedOnlyOperators.includes(condition.operator)) {
       condition.operator = 'equals';
     }
     this.autofillConditionCalculationAndValue(condition);
@@ -418,6 +447,43 @@ export class ProfilesComponent implements OnInit, OnDestroy, PendingChangesCompo
     const repeatsInX = region.repeat.x?.enabled === true && (region.repeat.x?.count ?? 1) > 1;
     const repeatsInY = region.repeat.y?.enabled === true && (region.repeat.y?.count ?? 1) > 1;
     return repeatsInX || repeatsInY;
+  }
+
+  getRepeatInstanceOptions(regionId: string): Array<{ key: string; label: string }> {
+    const region = this.monitoredRegions.find((candidate: any) => candidate.id === regionId);
+    if (!region?.repeat?.enabled) return [];
+    const xCount = region.repeat.x?.enabled === true && (region.repeat.x?.count ?? 1) > 1 ? (region.repeat.x?.count ?? 1) : 1;
+    const yCount = region.repeat.y?.enabled === true && (region.repeat.y?.count ?? 1) > 1 ? (region.repeat.y?.count ?? 1) : 1;
+    const options: Array<{ key: string; label: string }> = [];
+    for (let y = 0; y < yCount; y++) {
+      for (let x = 0; x < xCount; x++) {
+        const key = `${x}_${y}`;
+        let label: string;
+        if (x === 0 && y === 0) {
+          label = 'Base';
+        } else if (yCount === 1) {
+          label = `X${x}`;
+        } else if (xCount === 1) {
+          label = `Y${y}`;
+        } else {
+          label = `X${x} Y${y}`;
+        }
+        options.push({ key, label });
+      }
+    }
+    return options;
+  }
+
+  isRepeatInstanceSelected(condition: any, key: string): boolean {
+    return (condition.selectedRepeatInstances || []).includes(key);
+  }
+
+  toggleRepeatInstance(condition: any, key: string): void {
+    if (!condition.selectedRepeatInstances) condition.selectedRepeatInstances = [];
+    const idx = condition.selectedRepeatInstances.indexOf(key);
+    if (idx >= 0) condition.selectedRepeatInstances.splice(idx, 1);
+    else condition.selectedRepeatInstances.push(key);
+    this.onProfilesChanged();
   }
 
   getStateValuesForCalc(regionId: string, calcId: string): string[] {
@@ -638,6 +704,28 @@ export class ProfilesComponent implements OnInit, OnDestroy, PendingChangesCompo
 
     if (condition.operator === 'equalsInEveryRepeatedRegion') {
       return matchingValues.every((value: string | undefined) => value === condition.value);
+    }
+
+    if (condition.operator === 'equalsAtLeastNTimesAcrossRepeatedRegions') {
+      const minCount = condition.minimumCount ?? 1;
+      return matchingValues.filter((value: string | undefined) => value === condition.value).length >= minCount;
+    }
+
+    if (condition.operator === 'equalsInEverySelectedRepeatedRegion' || condition.operator === 'equalsAtLeastOnceInSelectedRepeatedRegions') {
+      const selectedKeys: string[] = condition.selectedRepeatInstances || [];
+      const selectedInstances = matchingInstances.filter(
+        (instanceState: any) => selectedKeys.includes(`${instanceState.repeatIndexX}_${instanceState.repeatIndexY}`),
+      );
+      if (selectedInstances.length === 0) return false;
+      const selectedValues = selectedInstances.map((instanceState: any) =>
+        instanceState.calculationResults.find(
+          (r: any) => r.stateCalculationId === condition.stateCalculationId,
+        )?.currentValue,
+      );
+      if (condition.operator === 'equalsInEverySelectedRepeatedRegion') {
+        return selectedValues.every((value: string | undefined) => value === condition.value);
+      }
+      return selectedValues.some((value: string | undefined) => value === condition.value);
     }
 
     return true;

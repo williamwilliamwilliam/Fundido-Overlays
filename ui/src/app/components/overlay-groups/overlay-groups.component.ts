@@ -238,7 +238,30 @@ import { PendingChangesService } from '../../services/pending-changes.service';
               <select [(ngModel)]="cond.operator" (ngModelChange)="onFieldChanged()">
                 <option value="equals">equals</option>
                 <option value="notEquals">not equals</option>
+                <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsAtLeastOnceAcrossRepeatedRegions">At least once across Repeated Regions</option>
+                <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsInEveryRepeatedRegion">In every Repeated Region</option>
+                <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsAtLeastNTimesAcrossRepeatedRegions">Occurs a minimum number of times</option>
+                <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsInEverySelectedRepeatedRegion">In Every Selected Region</option>
+                <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsAtLeastOnceInSelectedRepeatedRegions">At Least One Selected Region</option>
               </select>
+              <input *ngIf="cond.operator === 'equalsAtLeastNTimesAcrossRepeatedRegions'"
+                type="number" min="1" [(ngModel)]="cond.minimumCount" (ngModelChange)="onFieldChanged()"
+                class="minimum-count-input" placeholder="Min" />
+              <div *ngIf="cond.operator === 'equalsInEverySelectedRepeatedRegion' || cond.operator === 'equalsAtLeastOnceInSelectedRepeatedRegions'"
+                class="instance-multiselect">
+                <button type="button" class="instance-select-button" (click)="toggleInstanceDropdown(cond, $event)">
+                  <span>{{ getInstanceSelectionSummary(cond, cond.monitoredRegionId) }}</span>
+                  <span class="profile-select-arrow">{{ openInstanceDropdownCondition === cond ? '▲' : '▼' }}</span>
+                </button>
+                <div class="profile-select-menu instance-select-menu" *ngIf="openInstanceDropdownCondition === cond" (click)="$event.stopPropagation()">
+                  <label *ngFor="let inst of getRepeatInstanceOptions(cond.monitoredRegionId); trackBy: trackByInstKey" class="profile-option">
+                    <input type="checkbox"
+                      [ngModel]="isRepeatInstanceSelected(cond, inst.key)"
+                      (ngModelChange)="onRepeatInstanceChanged(cond, inst.key, $event)" />
+                    <span class="profile-option-name">{{ inst.label }}</span>
+                  </label>
+                </div>
+              </div>
               <select [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()">
                 <option value="">Select Value</option>
                 <option *ngFor="let v of getStateValuesForCalc(cond.monitoredRegionId, cond.stateCalculationId)" [value]="v">{{ v }}</option>
@@ -401,7 +424,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
             </div>
             <div
               *ngFor="let rule of overlay.rules; let ruleIndex = index"
-              class="rule-row"
+              class="rule-row overlay-rule-row"
               [class.rule-drag-over]="ruleDragOverIndex === ruleIndex && ruleDragOverOverlayId === overlay.id"
               (dragover)="onRuleDragOver($event, overlay, ruleIndex)"
               (dragleave)="onRuleDragLeave($event)"
@@ -448,7 +471,34 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                     <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsInEveryRepeatedRegion">
                       In every Repeated Region
                     </option>
+                    <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsAtLeastNTimesAcrossRepeatedRegions">
+                      Occurs a minimum number of times
+                    </option>
+                    <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsInEverySelectedRepeatedRegion">
+                      In Every Selected Region
+                    </option>
+                    <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsAtLeastOnceInSelectedRepeatedRegions">
+                      At Least One Selected Region
+                    </option>
                   </select>
+                  <input *ngIf="cond.operator === 'equalsAtLeastNTimesAcrossRepeatedRegions'"
+                    type="number" min="1" [(ngModel)]="cond.minimumCount" (ngModelChange)="onFieldChanged()"
+                    class="minimum-count-input" placeholder="Min" />
+                  <div *ngIf="cond.operator === 'equalsInEverySelectedRepeatedRegion' || cond.operator === 'equalsAtLeastOnceInSelectedRepeatedRegions'"
+                    class="instance-multiselect">
+                    <button type="button" class="instance-select-button" (click)="toggleInstanceDropdown(cond, $event)">
+                      <span>{{ getInstanceSelectionSummary(cond, cond.monitoredRegionId) }}</span>
+                      <span class="profile-select-arrow">{{ openInstanceDropdownCondition === cond ? '▲' : '▼' }}</span>
+                    </button>
+                    <div class="profile-select-menu instance-select-menu" *ngIf="openInstanceDropdownCondition === cond" (click)="$event.stopPropagation()">
+                      <label *ngFor="let inst of getRepeatInstanceOptions(cond.monitoredRegionId); trackBy: trackByInstKey" class="profile-option">
+                        <input type="checkbox"
+                          [ngModel]="isRepeatInstanceSelected(cond, inst.key)"
+                          (ngModelChange)="onRepeatInstanceChanged(cond, inst.key, $event)" />
+                        <span class="profile-option-name">{{ inst.label }}</span>
+                      </label>
+                    </div>
+                  </div>
                   <select *ngIf="getCalcType(cond.monitoredRegionId, cond.stateCalculationId) !== 'OllamaLLM'"
                     [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()">
                     <option value="">Select Value</option>
@@ -506,11 +556,34 @@ import { PendingChangesService } from '../../services/pending-changes.service';
     </div>
   `,
   styles: [`
-    .page { max-width: 1100px; }
-    h2 { margin-bottom: var(--spacing-sm); }
-    .description { color: var(--color-text-secondary); margin-bottom: var(--spacing-lg); }
-    .toolbar { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-sm); flex-wrap: wrap; }
-    .toolbar-secondary { display: flex; gap: var(--spacing-md); margin-bottom: var(--spacing-sm); margin-top: var(--spacing-lg); flex-wrap: wrap; }
+    .page {
+      max-width: 1100px;
+    }
+
+    h2 {
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .description {
+      color: var(--color-text-secondary);
+      margin-bottom: var(--spacing-lg);
+    }
+
+    .toolbar {
+      display: flex;
+      gap: var(--spacing-sm);
+      margin-bottom: var(--spacing-sm);
+      flex-wrap: wrap;
+    }
+
+    .toolbar-secondary {
+      display: flex;
+      gap: var(--spacing-md);
+      margin-bottom: var(--spacing-sm);
+      margin-top: var(--spacing-lg);
+      flex-wrap: wrap;
+    }
+
     .tertiary-btn {
       background: transparent;
       border: none;
@@ -520,13 +593,25 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       text-decoration: underline;
       text-underline-offset: 2px;
     }
-    .tertiary-btn:hover { color: var(--color-accent); }
-    .tertiary-icon { display: inline-block; margin-right: 6px; font-size: 1.25rem; }
+
+    .tertiary-btn:hover {
+      color: var(--color-accent);
+    }
+
+    .tertiary-icon {
+      display: inline-block;
+      margin-right: 6px;
+      font-size: 1.25rem;
+    }
 
     .import-dialog {
-      background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); padding: var(--spacing-md); margin-bottom: var(--spacing-lg);
+      background-color: var(--color-bg-secondary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--spacing-md);
+      margin-bottom: var(--spacing-lg);
     }
+
     .modal-backdrop {
       position: fixed;
       inset: 0;
@@ -537,6 +622,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       padding: var(--spacing-lg);
       z-index: 1000;
     }
+
     .modal-dialog {
       width: min(520px, 100%);
       background-color: var(--color-bg-secondary);
@@ -545,29 +631,47 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       padding: var(--spacing-md);
       box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
     }
+
     .modal-description {
       color: var(--color-text-secondary);
       margin-bottom: var(--spacing-sm);
     }
+
     .unsaved-actions {
       margin-top: var(--spacing-md);
       flex-wrap: wrap;
     }
+
     .danger-btn {
       background-color: #7f1d1d;
       border-color: #7f1d1d;
       color: #fff;
     }
+
     .danger-btn:hover {
       background-color: #991b1b;
       border-color: #991b1b;
     }
-    .import-dialog textarea { width: 100%; font-family: var(--font-mono); font-size: 0.85rem; margin-bottom: var(--spacing-sm); }
-    .import-actions { display: flex; gap: var(--spacing-sm); }
+
+    .import-dialog textarea {
+      width: 100%;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .import-actions {
+      display: flex;
+      gap: var(--spacing-sm);
+    }
 
     .empty-state {
-      color: var(--color-text-secondary); font-style: italic; padding: var(--spacing-lg);
-      text-align: center; border: 1px dashed var(--color-border); border-radius: var(--radius-md);
+      color: var(--color-text-secondary);
+      font-style: italic;
+      padding: var(--spacing-lg);
+      text-align: center;
+      border: 1px dashed var(--color-border);
+      border-radius: var(--radius-md);
     }
 
     .add-bottom-btn {
@@ -576,11 +680,24 @@ import { PendingChangesService } from '../../services/pending-changes.service';
     }
 
     .group-card {
-      background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); padding: var(--spacing-md); margin-bottom: var(--spacing-md);
+      background-color: var(--color-bg-secondary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--spacing-md);
+      margin-bottom: var(--spacing-md);
     }
-    .group-card.group-disabled { opacity: var(--opacity-disabled); }
-    .group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm); gap: var(--spacing-sm); }
+
+    .group-card.group-disabled {
+      opacity: var(--opacity-disabled);
+    }
+
+    .group-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--spacing-sm);
+      gap: var(--spacing-sm);
+    }
 
     .collapse-toggle {
       background: transparent;
@@ -594,38 +711,93 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       line-height: 1;
       flex-shrink: 0;
     }
+
     .collapse-toggle:hover {
       color: var(--color-text-primary);
       border-color: var(--color-accent);
       background-color: var(--color-bg-panel);
     }
 
-    .enabled-toggle { display: flex; align-items: center; cursor: pointer; flex-shrink: 0; }
-    .enabled-toggle input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var(--color-accent); }
+    .enabled-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .enabled-toggle input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: var(--color-accent);
+    }
 
     .cross-ref-row {
-      display: flex; align-items: center; gap: var(--spacing-sm); flex-wrap: wrap;
-      margin-bottom: var(--spacing-sm); padding: 4px var(--spacing-sm);
-      background-color: var(--color-bg-primary); border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      flex-wrap: wrap;
+      margin-bottom: var(--spacing-sm);
+      padding: 4px var(--spacing-sm);
+      background-color: var(--color-bg-primary);
+      border-radius: var(--radius-sm);
     }
-    .cross-ref-label { font-size: 0.75rem; color: var(--color-text-secondary); white-space: nowrap; }
-    .cross-ref-link { font-size: 0.75rem; color: var(--color-accent); cursor: pointer; text-decoration: underline; white-space: nowrap; }
-    .cross-ref-link:hover { opacity: 0.8; }
+
+    .cross-ref-label {
+      font-size: 0.75rem;
+      color: var(--color-text-secondary);
+      white-space: nowrap;
+    }
+
+    .cross-ref-link {
+      font-size: 0.75rem;
+      color: var(--color-accent);
+      cursor: pointer;
+      text-decoration: underline;
+      white-space: nowrap;
+    }
+
+    .cross-ref-link:hover {
+      opacity: 0.8;
+    }
 
     .name-input, .overlay-name-input {
-      font-size: 1rem; font-weight: 500; background: transparent;
-      border: 1px solid transparent; padding: var(--spacing-xs); flex: 1;
+      font-size: 1rem;
+      font-weight: 500;
+      background: transparent;
+      border: 1px solid transparent;
+      padding: var(--spacing-xs);
+      flex: 1;
     }
-    .name-input:focus, .overlay-name-input:focus { border-color: var(--color-accent); }
-    .overlay-name-input { font-size: 0.9rem; }
+
+    .name-input:focus, .overlay-name-input:focus {
+      border-color: var(--color-accent);
+    }
+
+    .overlay-name-input {
+      font-size: 0.9rem;
+    }
 
     .group-settings {
-      display: flex; gap: var(--spacing-md); margin-bottom: var(--spacing-md); flex-wrap: wrap; align-items: flex-end;
+      display: flex;
+      gap: var(--spacing-md);
+      margin-bottom: var(--spacing-md);
+      flex-wrap: wrap;
+      align-items: flex-end;
     }
+
     .group-settings label {
-      display: flex; flex-direction: column; gap: var(--spacing-xs); color: var(--color-text-secondary); font-size: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-xs);
+      color: var(--color-text-secondary);
+      font-size: 0.85rem;
     }
-    .group-settings input[type="number"] { width: 70px; }
+
+    .group-settings input[type="number"] {
+      width: 70px;
+    }
+
     .profile-multiselect {
       position: relative;
       display: flex;
@@ -633,7 +805,12 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       gap: var(--spacing-xs);
       min-width: 240px;
     }
-    .profiles-label { color: var(--color-text-secondary); font-size: 0.85rem; }
+
+    .profiles-label {
+      color: var(--color-text-secondary);
+      font-size: 0.85rem;
+    }
+
     .profile-select-button {
       display: flex;
       align-items: center;
@@ -644,16 +821,19 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       background-color: var(--color-bg-secondary);
       text-align: left;
     }
+
     .profile-select-button span:first-child {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
     .profile-select-arrow {
       color: var(--color-text-secondary);
       font-size: 0.7rem;
       flex-shrink: 0;
     }
+
     .profile-select-menu {
       position: absolute;
       top: calc(100% + 4px);
@@ -668,6 +848,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       border-radius: var(--radius-sm);
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
     }
+
     .profile-option {
       display: grid !important;
       grid-template-columns: auto minmax(0, 1fr) auto;
@@ -679,32 +860,74 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       color: var(--color-text-secondary) !important;
       font-size: 0.85rem !important;
     }
-    .profile-option:hover { background-color: var(--color-bg-panel); }
-    .profile-option.profile-option-active { color: var(--color-text-primary) !important; }
-    .profile-option input { accent-color: var(--color-accent); }
+
+    .profile-option:hover {
+      background-color: var(--color-bg-panel);
+    }
+
+    .profile-option.profile-option-active {
+      color: var(--color-text-primary) !important;
+    }
+
+    .profile-option input {
+      accent-color: var(--color-accent);
+    }
+
     .profile-option-name {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .profile-option-state { color: var(--color-text-secondary); font-size: 0.75rem; }
+
+    .profile-option-state {
+      color: var(--color-text-secondary);
+      font-size: 0.75rem;
+    }
 
     .pick-btn {
-      font-size: 0.8rem; padding: 4px 12px; background-color: var(--color-bg-panel);
-      border: 1px solid var(--color-accent); color: var(--color-accent);
-      border-radius: var(--radius-sm); white-space: nowrap; align-self: flex-end;
+      font-size: 0.8rem;
+      padding: 4px 12px;
+      background-color: var(--color-bg-panel);
+      border: 1px solid var(--color-accent);
+      color: var(--color-accent);
+      border-radius: var(--radius-sm);
+      white-space: nowrap;
+      align-self: flex-end;
     }
-    .pick-btn:hover { background-color: var(--color-accent); color: var(--color-text-primary); }
 
-    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-sm); }
-    .section-label { font-size: 0.85rem; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
-    .add-btn { font-size: 0.8rem; padding: 2px 10px; }
+    .pick-btn:hover {
+      background-color: var(--color-accent);
+      color: var(--color-text-primary);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .section-label {
+      font-size: 0.85rem;
+      color: var(--color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .add-btn {
+      font-size: 0.8rem;
+      padding: 2px 10px;
+    }
 
     .overlay-card {
-      background-color: var(--color-bg-primary); border: 1px solid var(--color-border);
-      border-radius: var(--radius-sm); padding: var(--spacing-sm); margin-bottom: var(--spacing-sm);
+      background-color: var(--color-bg-primary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: var(--spacing-sm);
+      margin-bottom: var(--spacing-sm);
       transition: border-color 0.1s ease;
     }
+
     .overlay-save-row {
       display: flex;
       justify-content: flex-end;
@@ -712,11 +935,18 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       padding-top: var(--spacing-sm);
       border-top: 1px solid var(--color-border);
     }
+
     .overlay-card.drag-over {
       border-color: var(--color-accent);
       border-style: dashed;
     }
-    .overlay-header { display: flex; align-items: center; gap: var(--spacing-sm); margin-bottom: var(--spacing-sm); }
+
+    .overlay-header {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      margin-bottom: var(--spacing-sm);
+    }
 
     .drag-handle {
       cursor: grab;
@@ -726,42 +956,138 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       opacity: 0.5;
       user-select: none;
     }
-    .drag-handle:hover { opacity: 1; }
-    .drag-handle:active { cursor: grabbing; }
+
+    .drag-handle:hover {
+      opacity: 1;
+    }
+
+    .drag-handle:active {
+      cursor: grabbing;
+    }
 
     /* Defaults row */
     .defaults-row {
-      display: flex; align-items: center; gap: var(--spacing-lg); margin-bottom: var(--spacing-sm);
-      padding: var(--spacing-xs) 0; border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-lg);
+      margin-bottom: var(--spacing-sm);
+      padding: var(--spacing-xs) 0;
+      border-bottom: 1px solid var(--color-border);
     }
-    .checkbox-label { display: flex; align-items: center; gap: var(--spacing-xs); font-size: 0.85rem; color: var(--color-text-secondary); cursor: pointer; }
-    .opacity-label { display: flex; align-items: center; gap: var(--spacing-sm); font-size: 0.85rem; color: var(--color-text-secondary); }
-    .opacity-label input[type="range"] { width: 120px; accent-color: var(--color-accent); }
-    .opacity-value { font-family: var(--font-mono); font-size: 0.8rem; min-width: 40px; color: var(--color-text-primary); }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      font-size: 0.85rem;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+    }
+
+    .opacity-label {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      font-size: 0.85rem;
+      color: var(--color-text-secondary);
+    }
+
+    .opacity-label input[type="range"] {
+      width: 120px;
+      accent-color: var(--color-accent);
+    }
+
+    .opacity-value {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      min-width: 40px;
+      color: var(--color-text-primary);
+    }
 
     /* Content configs */
-    .content-config { padding: var(--spacing-xs) 0 var(--spacing-sm) 0; }
-    .config-row { display: flex; gap: var(--spacing-md); align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
-    .config-row label { display: flex; align-items: center; gap: var(--spacing-xs); color: var(--color-text-secondary); font-size: 0.8rem; }
-    .wide-input { flex: 1; min-width: 200px; }
+    .content-config {
+      padding: var(--spacing-xs) 0 var(--spacing-sm) 0;
+    }
+
+    .config-row {
+      display: flex;
+      gap: var(--spacing-md);
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+    }
+
+    .config-row label {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      color: var(--color-text-secondary);
+      font-size: 0.8rem;
+    }
+
+    .wide-input {
+      flex: 1;
+      min-width: 200px;
+    }
 
     /* Rules */
-    .rules-section { border-top: 1px solid var(--color-border); padding-top: var(--spacing-sm); margin-top: var(--spacing-sm); }
-    .rules-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-xs); }
-    .rules-header-actions { display: flex; align-items: center; gap: var(--spacing-sm); }
-    .rules-label { font-size: 0.75rem; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.3px; }
-    .rules-empty { font-size: 0.8rem; color: var(--color-text-secondary); font-style: italic; padding: 4px 0; }
-    .group-rule-action-row { margin-top: 6px; }
+    .rules-section {
+      border-top: 1px solid var(--color-border);
+      padding-top: var(--spacing-sm);
+      margin-top: var(--spacing-sm);
+    }
 
-    .section-hint { font-size: 0.7rem; color: var(--color-text-secondary); font-style: italic; flex: 1; margin-left: var(--spacing-sm); }
-    .group-rules-header { margin-bottom: var(--spacing-xs); }
+    .rules-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--spacing-xs);
+    }
+
+    .rules-header-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+    }
+
+    .rules-label {
+      font-size: 0.75rem;
+      color: var(--color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .rules-empty {
+      font-size: 0.8rem;
+      color: var(--color-text-secondary);
+      font-style: italic;
+      padding: 4px 0;
+    }
+
+    .group-rule-action-row {
+      margin-top: 6px;
+    }
+
+    .section-hint {
+      font-size: 0.7rem;
+      color: var(--color-text-secondary);
+      font-style: italic;
+      flex: 1;
+      margin-left: var(--spacing-sm);
+    }
+
+    .group-rules-header {
+      margin-bottom: var(--spacing-xs);
+    }
 
     .group-rule-row {
       border-left: 3px solid var(--color-accent);
     }
+
     .group-rule-top-row {
       justify-content: space-between;
     }
+
     .group-rule-row .rule-line {
       display: flex;
       align-items: center;
@@ -769,30 +1095,118 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       flex-wrap: wrap;
       margin-bottom: 4px;
     }
+
     .group-rule-row .conditions-list {
       padding-left: 50px;
     }
 
-    .rule-row {
-      background-color: var(--color-bg-secondary); border: 1px solid var(--color-border);
-      border-radius: var(--radius-sm); padding: var(--spacing-xs) var(--spacing-sm); margin-bottom: 4px;
+    .rule-row.overlay-rule-row{
+      background-color: rgba(0, 0, 0, 0.25);
     }
+
+    .rule-row {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: var(--spacing-xs) var(--spacing-sm);
+      margin-bottom: 4px;
+    }
+
     .rule-row.rule-drag-over {
       border-color: var(--color-accent);
       box-shadow: inset 0 0 0 1px var(--color-accent);
     }
-    .rule-conditions { margin-bottom: 4px; }
-    .rule-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--spacing-sm); }
-    .condition-row { display: flex; align-items: center; gap: var(--spacing-xs); margin-bottom: 2px; flex-wrap: wrap; }
-    .condition-row select { font-size: 0.8rem; max-width: 150px; }
-    .condition-debug-status { font-size: 0.72rem; font-weight: 600; }
-    .condition-debug-status-true { color: var(--color-success); }
-    .condition-debug-status-false { color: var(--color-error); }
-    .condition-remove-btn { margin-left: auto; }
-    .rule-keyword { font-size: 0.75rem; font-weight: 600; color: var(--color-accent); text-transform: uppercase; min-width: 40px; }
-    .condition-joiner { min-width: 30px; text-align: center; }
-    .logic-mode-row { display: flex; align-items: center; gap: var(--spacing-sm); margin-bottom: 4px; }
-    .logic-mode-select { font-size: 0.75rem; }
+
+    .rule-conditions {
+      margin-bottom: 4px;
+    }
+
+    .rule-card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: var(--spacing-sm);
+    }
+
+    .condition-row {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      margin-bottom: 2px;
+      flex-wrap: wrap;
+    }
+
+    .condition-row select {
+      font-size: 0.8rem;
+      max-width: 150px;
+    }
+
+    .condition-debug-status {
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+
+    .condition-debug-status-true {
+      color: var(--color-success);
+    }
+
+    .condition-debug-status-false {
+      color: var(--color-error);
+    }
+
+    .condition-remove-btn {
+      margin-left: auto;
+    }
+
+    .minimum-count-input {
+      width: 54px;
+      font-size: 0.8rem;
+    }
+
+    .instance-multiselect {
+      position: relative;
+      display: inline-flex;
+      flex-direction: column;
+    }
+
+    .instance-select-button {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--spacing-sm);
+      min-width: 120px;
+      background-color: var(--color-bg-secondary);
+      text-align: left;
+      font-size: 0.8rem;
+    }
+
+    .instance-select-menu {
+      width: min(200px, 80vw);
+    }
+
+    .rule-keyword {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--color-accent);
+      text-transform: uppercase;
+      min-width: 40px;
+    }
+
+    .condition-joiner {
+      min-width: 30px;
+      text-align: center;
+    }
+
+    .logic-mode-row {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      margin-bottom: 4px;
+    }
+
+    .logic-mode-select {
+      font-size: 0.75rem;
+    }
+
     .rule-drag-handle {
       cursor: grab;
       color: var(--color-text-secondary);
@@ -800,18 +1214,72 @@ import { PendingChangesService } from '../../services/pending-changes.service';
       line-height: 1;
       user-select: none;
     }
-    .rule-drag-handle:active { cursor: grabbing; }
-    .rule-copy-btn { font-size: 0.75rem; flex-shrink: 0; }
-    .not-checkbox { display: flex; align-items: center; gap: 2px; font-size: 0.7rem; font-weight: 600; color: var(--color-text-secondary); cursor: pointer; white-space: nowrap; }
-    .not-checkbox input[type="checkbox"] { margin: 0; }
-    .add-condition-btn { font-size: 0.7rem; background: transparent; border: 1px dashed var(--color-border); padding: 1px 8px; }
-    .rule-action { display: flex; align-items: center; gap: var(--spacing-sm); flex-wrap: wrap; }
-    .rule-action select { font-size: 0.8rem; }
-    .rule-action input[type="range"] { width: 100px; accent-color: var(--color-accent); }
-    .rule-debug-status { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.02em; }
-    .rule-debug-status-true { color: var(--color-success); }
-    .rule-debug-status-false { color: var(--color-error); }
-    .rule-remove-btn { margin-left: auto; }
+
+    .rule-drag-handle:active {
+      cursor: grabbing;
+    }
+
+    .rule-copy-btn {
+      font-size: 0.75rem;
+      flex-shrink: 0;
+    }
+
+    .not-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .not-checkbox input[type="checkbox"] {
+      margin: 0;
+    }
+
+    .add-condition-btn {
+      font-size: 0.7rem;
+      background: transparent;
+      border: 1px dashed var(--color-border);
+      padding: 1px 8px;
+    }
+
+    .rule-action {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      flex-wrap: wrap;
+    }
+
+    .rule-action select {
+      font-size: 0.8rem;
+    }
+
+    .rule-action input[type="range"] {
+      width: 100px;
+      accent-color: var(--color-accent);
+    }
+
+    .rule-debug-status {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .rule-debug-status-true {
+      color: var(--color-success);
+    }
+
+    .rule-debug-status-false {
+      color: var(--color-error);
+    }
+
+    .rule-remove-btn {
+      margin-left: auto;
+    }
+
     .rules-result-summary {
       margin-top: var(--spacing-xs);
       font-size: 0.78rem;
@@ -820,13 +1288,27 @@ import { PendingChangesService } from '../../services/pending-changes.service';
     }
 
     .add-overlay-btn {
-      font-size: 0.85rem; background: transparent; border: 1px dashed var(--color-border);
-      width: 100%; padding: var(--spacing-sm);
+      font-size: 0.85rem;
+      background: transparent;
+      border: 1px dashed var(--color-border);
+      width: 100%;
+      padding: var(--spacing-sm);
     }
 
-    .danger-text { background: transparent; border: none; color: var(--color-error); font-size: 0.85rem; }
-    .danger-text.small { font-size: 0.8rem; }
-    .danger-text:hover { text-decoration: underline; }
+    .danger-text {
+      background: transparent;
+      border: none;
+      color: var(--color-error);
+      font-size: 0.85rem;
+    }
+
+    .danger-text.small {
+      font-size: 0.8rem;
+    }
+
+    .danger-text:hover {
+      text-decoration: underline;
+    }
 
     @keyframes highlight-flash {
       0%, 15% {
@@ -840,6 +1322,7 @@ import { PendingChangesService } from '../../services/pending-changes.service';
         background-color: transparent;
       }
     }
+
     .highlight-flash {
       animation: highlight-flash 2.5s ease-out forwards;
     }
@@ -861,6 +1344,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   copiedOverlayRule: any | null = null;
   copiedOverlayRuleId: string | null = null;
   openProfileDropdownGroupId: string | null = null;
+  openInstanceDropdownCondition: any | null = null;
   private currentFrameState: any | null = null;
   private viewRefreshScheduled = false;
   private collapsedGroupIds = new Set<string>();
@@ -922,6 +1406,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   @HostListener('document:click')
   onDocumentClick(): void {
     this.openProfileDropdownGroupId = null;
+    this.openInstanceDropdownCondition = null;
   }
 
   async ngOnInit(): Promise<void> {
@@ -1473,9 +1958,14 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   }
 
   onRegionSelectedForCondition(condition: any): void {
-    if (!this.isRepeatingRegion(condition.monitoredRegionId) &&
-      (condition.operator === 'equalsAtLeastOnceAcrossRepeatedRegions' ||
-        condition.operator === 'equalsInEveryRepeatedRegion')) {
+    const repeatedOnlyOperators = [
+      'equalsAtLeastOnceAcrossRepeatedRegions',
+      'equalsInEveryRepeatedRegion',
+      'equalsAtLeastNTimesAcrossRepeatedRegions',
+      'equalsInEverySelectedRepeatedRegion',
+      'equalsAtLeastOnceInSelectedRepeatedRegions',
+    ];
+    if (!this.isRepeatingRegion(condition.monitoredRegionId) && repeatedOnlyOperators.includes(condition.operator)) {
       condition.operator = 'equals';
     }
     this.autofillConditionCalculationAndValue(condition);
@@ -1570,6 +2060,81 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     const repeatsInY = region.repeat.y?.enabled === true && (region.repeat.y?.count ?? 1) > 1;
     return repeatsInX || repeatsInY;
   }
+
+  getRepeatInstanceOptions(regionId: string): Array<{ key: string; label: string }> {
+    const region = this.monitoredRegions.find((r: any) => r.id === regionId);
+    if (!region?.repeat?.enabled) return [];
+
+    const rawXCount = region.repeat.x?.count ?? 1;
+    const rawYCount = region.repeat.y?.count ?? 1;
+    const rawXEnabled = region.repeat.x?.enabled === true;
+    const rawYEnabled = region.repeat.y?.enabled === true;
+
+    const xCount = rawXEnabled && rawXCount > 1 ? rawXCount : 1;
+    const yCount = rawYEnabled && rawYCount > 1 ? rawYCount : 1;
+    const totalCount = xCount * yCount;
+
+    const countsAreFiniteAndReasonable = Number.isFinite(xCount) && Number.isFinite(yCount) && totalCount <= 10000;
+    if (!countsAreFiniteAndReasonable) {
+      console.error(`[getRepeatInstanceOptions] Unsafe repeat count detected — xCount=${xCount}, yCount=${yCount}, total=${totalCount}. Aborting loop to prevent hang.`);
+      return [{ key: '0_0', label: 'Base (count overflow — check region config)' }];
+    }
+
+    const options: Array<{ key: string; label: string }> = [];
+    for (let y = 0; y < yCount; y++) {
+      for (let x = 0; x < xCount; x++) {
+        const key = `${x}_${y}`;
+        let label: string;
+        if (x === 0 && y === 0) {
+          label = 'Base';
+        } else if (yCount === 1) {
+          label = `X${x}`;
+        } else if (xCount === 1) {
+          label = `Y${y}`;
+        } else {
+          label = `X${x} Y${y}`;
+        }
+        options.push({ key, label });
+      }
+    }
+    return options;
+  }
+
+  isRepeatInstanceSelected(condition: any, key: string): boolean {
+    return (condition.selectedRepeatInstances || []).includes(key);
+  }
+
+  onRepeatInstanceChanged(condition: any, key: string, selected: boolean): void {
+    if (!condition.selectedRepeatInstances) condition.selectedRepeatInstances = [];
+    if (selected) {
+      if (!condition.selectedRepeatInstances.includes(key)) condition.selectedRepeatInstances.push(key);
+    } else {
+      const idx = condition.selectedRepeatInstances.indexOf(key);
+      if (idx >= 0) condition.selectedRepeatInstances.splice(idx, 1);
+    }
+    this.markGroupsChanged();
+  }
+
+  getInstanceSelectionSummary(condition: any, regionId: string): string {
+    const selected: string[] = condition.selectedRepeatInstances || [];
+    if (selected.length === 0) return 'Select regions…';
+    const options = this.getRepeatInstanceOptions(regionId);
+    if (selected.length === options.length) return 'All regions';
+    if (selected.length === 1) {
+      return options.find((o) => o.key === selected[0])?.label ?? '1 region';
+    }
+    return `${selected.length} regions`;
+  }
+
+  trackByInstKey(_index: number, inst: { key: string; label: string }): string {
+    return inst.key;
+  }
+
+  toggleInstanceDropdown(condition: any, event: Event): void {
+    event.stopPropagation();
+    this.openInstanceDropdownCondition = this.openInstanceDropdownCondition === condition ? null : condition;
+  }
+
 
   /**
    * Returns the list of possible state values for a given region + calculation.
@@ -1860,6 +2425,28 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
       return matchingValues.every((value: string | undefined) => value === condition.value);
     }
 
+    if (condition.operator === 'equalsAtLeastNTimesAcrossRepeatedRegions') {
+      const minCount = condition.minimumCount ?? 1;
+      return matchingValues.filter((value: string | undefined) => value === condition.value).length >= minCount;
+    }
+
+    if (condition.operator === 'equalsInEverySelectedRepeatedRegion' || condition.operator === 'equalsAtLeastOnceInSelectedRepeatedRegions') {
+      const selectedKeys: string[] = condition.selectedRepeatInstances || [];
+      const selectedInstances = matchingInstances.filter(
+        (instanceState: any) => selectedKeys.includes(`${instanceState.repeatIndexX}_${instanceState.repeatIndexY}`),
+      );
+      if (selectedInstances.length === 0) return false;
+      const selectedValues = selectedInstances.map((instanceState: any) =>
+        instanceState.calculationResults.find(
+          (r: any) => r.stateCalculationId === condition.stateCalculationId,
+        )?.currentValue,
+      );
+      if (condition.operator === 'equalsInEverySelectedRepeatedRegion') {
+        return selectedValues.every((value: string | undefined) => value === condition.value);
+      }
+      return selectedValues.some((value: string | undefined) => value === condition.value);
+    }
+
     return true;
   }
 
@@ -1911,23 +2498,6 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     );
   }
 
-  private normalizeGroupDefaults(): void {
-    for (const group of this.groups) {
-      if (!Array.isArray(group.profileIds)) {
-        group.profileIds = [];
-      }
-      if (group.scale === undefined) {
-        group.scale = 1;
-      }
-      if (!group.defaultVisibilityMode) {
-        group.defaultVisibilityMode = 'visible';
-      }
-      if (group.defaultOpacity === undefined) {
-        group.defaultOpacity = 1;
-      }
-    }
-  }
-
   private applyProfileActivationToGroups(): void {
     if (this.profiles.length === 0) {
       return;
@@ -1953,27 +2523,6 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     }
   }
 
-  private markGroupsChanged(): void {
-    this.updateGroupLastUpdatedTimestamps();
-    this.hasUnsavedChanges = true;
-  }
-
-  private updateGroupLastUpdatedTimestamps(): void {
-    const nextComparableSnapshots = new Map<string, string>();
-    const now = Date.now();
-
-    for (const group of this.groups) {
-      const comparable = this.serializeGroupComparable(group);
-      const previousComparable = this.groupComparableSnapshots.get(group.id);
-      if (previousComparable === undefined || previousComparable !== comparable) {
-        group.lastUpdatedAt = now;
-      }
-      nextComparableSnapshots.set(group.id, comparable);
-    }
-
-    this.groupComparableSnapshots = nextComparableSnapshots;
-  }
-
   private serializeGroupComparable(group: any): string {
     const clone = JSON.parse(JSON.stringify(group));
     delete clone.lastUpdatedAt;
@@ -1993,5 +2542,43 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     } catch {
       // Ignore storage errors so the editor remains usable.
     }
+  }
+
+  private normalizeGroupDefaults(): void {
+    for (const group of this.groups) {
+      if (!Array.isArray(group.profileIds)) {
+        group.profileIds = [];
+      }
+      if (group.scale === undefined) {
+        group.scale = 1;
+      }
+      if (!group.defaultVisibilityMode) {
+        group.defaultVisibilityMode = 'visible';
+      }
+      if (group.defaultOpacity === undefined) {
+        group.defaultOpacity = 1;
+      }
+    }
+  }
+
+  private markGroupsChanged(): void {
+    this.updateGroupLastUpdatedTimestamps();
+    this.hasUnsavedChanges = true;
+  }
+
+  private updateGroupLastUpdatedTimestamps(): void {
+    const nextComparableSnapshots = new Map<string, string>();
+    const now = Date.now();
+
+    for (const group of this.groups) {
+      const comparable = this.serializeGroupComparable(group);
+      const previousComparable = this.groupComparableSnapshots.get(group.id);
+      if (previousComparable === undefined || previousComparable !== comparable) {
+        group.lastUpdatedAt = now;
+      }
+      nextComparableSnapshots.set(group.id, comparable);
+    }
+
+    this.groupComparableSnapshots = nextComparableSnapshots;
   }
 }

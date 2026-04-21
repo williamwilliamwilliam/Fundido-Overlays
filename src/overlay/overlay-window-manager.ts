@@ -217,6 +217,26 @@ export class OverlayWindowManager {
       return matchingValues.every((value: string | undefined) => value === cond.value);
     }
 
+    if (cond.operator === 'equalsAtLeastNTimesAcrossRepeatedRegions') {
+      const minCount = cond.minimumCount ?? 1;
+      return matchingValues.filter((value: string | undefined) => value === cond.value).length >= minCount;
+    }
+
+    if (cond.operator === 'equalsInEverySelectedRepeatedRegion' || cond.operator === 'equalsAtLeastOnceInSelectedRepeatedRegions') {
+      const selectedKeys: string[] = cond.selectedRepeatInstances || [];
+      const selectedInstances = matchingInstances.filter(
+        (instanceState: any) => selectedKeys.includes(`${instanceState.repeatIndexX}_${instanceState.repeatIndexY}`),
+      );
+      if (selectedInstances.length === 0) return false;
+      const selectedValues = selectedInstances.map((instanceState: any) =>
+        instanceState.calculationResults.find((r: any) => r.stateCalculationId === cond.stateCalculationId)?.currentValue,
+      );
+      if (cond.operator === 'equalsInEverySelectedRepeatedRegion') {
+        return selectedValues.every((value: string | undefined) => value === cond.value);
+      }
+      return selectedValues.some((value: string | undefined) => value === cond.value);
+    }
+
     return true;
   }
 
@@ -723,6 +743,25 @@ function buildOverlayRendererHtml(): string {
     }
     if (c.operator === 'equalsInEveryRepeatedRegion') {
       return matchingValues.every((value) => value === c.value);
+    }
+    if (c.operator === 'equalsAtLeastNTimesAcrossRepeatedRegions') {
+      const minCount = c.minimumCount ?? 1;
+      return matchingValues.filter((value) => value === c.value).length >= minCount;
+    }
+    if (c.operator === 'equalsInEverySelectedRepeatedRegion' || c.operator === 'equalsAtLeastOnceInSelectedRepeatedRegions') {
+      const selectedKeys = c.selectedRepeatInstances || [];
+      const selectedInstances = matchingInstances.filter(
+        (instanceState) => selectedKeys.includes(instanceState.repeatIndexX + '_' + instanceState.repeatIndexY)
+      );
+      if (selectedInstances.length === 0) return false;
+      const selectedValues = selectedInstances.map((instanceState) => {
+        const r = instanceState.calculationResults.find((r) => r.stateCalculationId === c.stateCalculationId);
+        return r ? r.currentValue : undefined;
+      });
+      if (c.operator === 'equalsInEverySelectedRepeatedRegion') {
+        return selectedValues.every((value) => value === c.value);
+      }
+      return selectedValues.some((value) => value === c.value);
     }
 
     return true;
