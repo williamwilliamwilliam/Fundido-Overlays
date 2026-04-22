@@ -670,6 +670,17 @@ function getCalcTimeInWindowMs(calcKey: string, nowMs: number): number {
 /** Holds the most recently captured frame for the slow path to consume. */
 const latestFrameRef: { frame: CapturedFrame | null } = { frame: null };
 
+/**
+ * Tracks when the last STATE_UPDATED IPC message was sent to the renderer UI.
+ * State eval may run at 30-50Hz for responsive overlay control, but the UI
+ * only needs ~10Hz — profiles, regions, and overlay rule displays don't
+ * require faster than that. Overlays get their updates via a separate path
+ * (overlayWindowManager.broadcastFrameState) which is unaffected by this.
+ */
+let lastStateUpdateSentToUiAt = 0;
+const STATE_UPDATE_UI_RATE_HZ = 10;
+const stateUpdateUiMinIntervalMs = Math.round(1000 / STATE_UPDATE_UI_RATE_HZ);
+
 /** Timer handle for the state evaluation loop. */
 let stateEvalInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -755,6 +766,18 @@ function setupCaptureToOverlayPipeline(): void {
   captureService.setFrameCapturedCallback((frame) => {
     const callbackEntryTime = Date.now();
     const timeSinceLastFrame = lastFrameTimestamp > 0 ? callbackEntryTime - lastFrameTimestamp : 0;
+
+    // Throttle to the configured target FPS. The native addon pushes frames at the
+    // display refresh rate regardless of this setting, so we drop frames here when
+    // they arrive faster than the target interval. Reading the config each callback
+    // means setting changes take effect immediately without restarting capture.
+    const targetFps = currentConfigRef.config.gameCapture?.targetFps ?? 30;
+    const minFrameIntervalMs = 1000 / targetFps;
+    const frameArrivedBeforeTargetInterval = lastFrameTimestamp > 0 && timeSinceLastFrame < minFrameIntervalMs;
+    if (frameArrivedBeforeTargetInterval) {
+      return;
+    }
+
     lastFrameTimestamp = callbackEntryTime;
 
     perfCounters.captureFrames++;
@@ -916,7 +939,12 @@ function startStateEvaluationLoop(): void {
     overlayWindowManager.broadcastFrameState(frameState);
     const uiIsVisible = !uiMinimizedRef.minimized && mainWindow && !mainWindow.isDestroyed();
     if (uiIsVisible) {
-      mainWindow!.webContents.send(IpcChannels.STATE_UPDATED, frameState);
+      const nowMs = Date.now();
+      const uiUpdateIsOverdue = nowMs - lastStateUpdateSentToUiAt >= stateUpdateUiMinIntervalMs;
+      if (uiUpdateIsOverdue) {
+        lastStateUpdateSentToUiAt = nowMs;
+        mainWindow!.webContents.send(IpcChannels.STATE_UPDATED, frameState);
+      }
     }
   });
 
@@ -1127,7 +1155,14 @@ function startStateEvaluationLoopFallback(): void {
     applyProfileRuleResults(frameState);
     overlayWindowManager.broadcastFrameState(frameState);
     const uiIsVisible = !uiMinimizedRef.minimized && mainWindow && !mainWindow.isDestroyed();
-    if (uiIsVisible) mainWindow!.webContents.send(IpcChannels.STATE_UPDATED, frameState);
+    if (uiIsVisible) {
+      const nowMs = Date.now();
+      const uiUpdateIsOverdue = nowMs - lastStateUpdateSentToUiAt >= stateUpdateUiMinIntervalMs;
+      if (uiUpdateIsOverdue) {
+        lastStateUpdateSentToUiAt = nowMs;
+        mainWindow!.webContents.send(IpcChannels.STATE_UPDATED, frameState);
+      }
+    }
     perfCounters.pipelineTotalMs += Date.now() - pipelineStartTime;
     perfCounters.pipelineSamples++;
   };

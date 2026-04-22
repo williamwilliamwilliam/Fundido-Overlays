@@ -333,9 +333,10 @@ export class ProfilesComponent implements OnInit, OnDestroy, PendingChangesCompo
     this.changeDetectorRef.markForCheck();
     this.ngZone.runOutsideAngular(() => {
       this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
+        // Only stash the frame reference here — keep the IPC callback as lean as possible.
+        // The expensive profile sync and rule evaluation happen in scheduleViewRefresh
+        // so they run at most once per rAF cycle, not once per IPC message.
         this.currentFrameState = frameState;
-        this.syncProfileActiveStatesFromFrameState(frameState);
-        this.applyLocalProfileRuleResults();
         this.scheduleViewRefresh();
       });
     });
@@ -745,6 +746,13 @@ export class ProfilesComponent implements OnInit, OnDestroy, PendingChangesCompo
     this.viewRefreshScheduled = true;
     requestAnimationFrame(() => {
       this.viewRefreshScheduled = false;
+      // Run the profile sync here rather than in the IPC callback so this
+      // expensive work executes at most once per render frame, not once per
+      // incoming message (which can be many times per frame).
+      if (this.currentFrameState) {
+        this.syncProfileActiveStatesFromFrameState(this.currentFrameState);
+        this.applyLocalProfileRuleResults();
+      }
       this.changeDetectorRef.detectChanges();
     });
   }
