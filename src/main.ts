@@ -1224,6 +1224,10 @@ app.whenReady().then(() => {
   // Create overlay windows for any groups defined in the saved config
   overlayWindowManager.syncOverlayWindows(getProfileActivatedOverlayGroups(currentConfigRef.config));
 
+  // Apply the saved cursor frequency so the interval is correct from first launch
+  const initialCursorFrequencyHz = currentConfigRef.config.overlay?.cursorFrequencyHz ?? 60;
+  overlayWindowManager.setCursorFrequencyHz(initialCursorFrequencyHz);
+
   // Auto-start capture if it was running when the app last closed
   const shouldAutoStartCapture = currentConfigRef.config.gameCapture.captureEnabled === true;
   if (shouldAutoStartCapture) {

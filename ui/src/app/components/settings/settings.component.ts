@@ -52,6 +52,27 @@ import { ElectronService } from '../../services/electron.service';
       </div>
 
       <div class="settings-section">
+        <h3>Overlays</h3>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label">Cursor Frequency</label>
+            <span class="setting-hint">
+              How often cursor-following overlays update their position.
+              60Hz is recommended for most setups. 120Hz reduces visible
+              lag on high-refresh-rate displays at the cost of extra CPU.
+            </span>
+          </div>
+          <div class="setting-control">
+            <select [(ngModel)]="cursorFrequencyHz" (ngModelChange)="onSettingChanged()">
+              <option [ngValue]="60">60 Hz</option>
+              <option [ngValue]="120">120 Hz</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <h3>Performance</h3>
 
         <div class="setting-row">
@@ -362,6 +383,9 @@ import { ElectronService } from '../../services/electron.service';
   `],
 })
 export class SettingsComponent implements OnInit, OnDestroy {
+  // Overlay settings
+  cursorFrequencyHz: 60 | 120 = 60;
+
   // Capture settings
   captureTargetFps = 30;
   captureSource = '0';
@@ -394,6 +418,8 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
   async ngOnInit(): Promise<void> {
     const config = await this.electronService.loadConfig();
+
+    this.cursorFrequencyHz = (config.overlay?.cursorFrequencyHz ?? 60) as 60 | 120;
 
     this.captureTargetFps = config.gameCapture?.targetFps ?? 30;
     this.captureSource = config.gameCapture?.captureSource ?? 'primary';
@@ -466,6 +492,10 @@ export class SettingsComponent implements OnInit, OnDestroy {
     this.saveDebounceTimer = null;
 
     const config = await this.electronService.loadConfig();
+
+    config.overlay = {
+      cursorFrequencyHz: this.cursorFrequencyHz,
+    };
 
     config.gameCapture.targetFps = this.captureTargetFps;
     config.gameCapture.captureSource = this.captureSource;

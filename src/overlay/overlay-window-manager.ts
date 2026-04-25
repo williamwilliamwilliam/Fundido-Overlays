@@ -353,23 +353,35 @@ export class OverlayWindowManager {
     this.overlayGroupConfigs.clear();
   }
 
-  private cursorTrackingActive = false;
+  private cursorFrequencyHz: 60 | 120 = 60;
+  private cursorIntervalHandle: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Updates the cursor polling rate. If tracking is already active, restarts
+   * the interval immediately so the change takes effect without a config reload.
+   */
+  public setCursorFrequencyHz(hz: 60 | 120): void {
+    this.cursorFrequencyHz = hz;
+    const isCurrentlyTracking = this.cursorIntervalHandle !== null;
+    if (isCurrentlyTracking) {
+      this.stopCursorTracking();
+      this.startCursorTracking();
+    }
+  }
 
   private updateCursorTracking(): void {
     const shouldTrack = this.hasCursorFollowingGroups;
-    if (shouldTrack && !this.cursorTrackingActive) {
+    const isCurrentlyTracking = this.cursorIntervalHandle !== null;
+    if (shouldTrack && !isCurrentlyTracking) {
       this.startCursorTracking();
-    } else if (!shouldTrack) {
+    } else if (!shouldTrack && isCurrentlyTracking) {
       this.stopCursorTracking();
     }
   }
 
   private startCursorTracking(): void {
-    this.cursorTrackingActive = true;
-
-    const pollCursor = () => {
-      if (!this.cursorTrackingActive) return;
-
+    const intervalMs = Math.round(1000 / this.cursorFrequencyHz);
+    this.cursorIntervalHandle = setInterval(() => {
       const cursorPoint = screen.getCursorScreenPoint();
       for (const [_groupId, window] of this.overlayWindowsByGroupId) {
         if (!window.isDestroyed()) {
@@ -379,15 +391,14 @@ export class OverlayWindowManager {
           });
         }
       }
-
-      setImmediate(pollCursor);
-    };
-
-    setImmediate(pollCursor);
+    }, intervalMs);
   }
 
   private stopCursorTracking(): void {
-    this.cursorTrackingActive = false;
+    if (this.cursorIntervalHandle !== null) {
+      clearInterval(this.cursorIntervalHandle);
+      this.cursorIntervalHandle = null;
+    }
   }
 
   private createOverlayWindow(group: OverlayGroup): void {

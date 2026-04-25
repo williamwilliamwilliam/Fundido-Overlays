@@ -428,6 +428,20 @@ export interface OllamaConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Overlay Settings
+// ---------------------------------------------------------------------------
+
+export interface OverlayConfig {
+  /**
+   * How many times per second the cursor position is sampled and sent to
+   * overlay windows that use 'relativeToCursor' positioning.
+   * 60Hz is sufficient for most use cases; 120Hz reduces visible lag on
+   * high-refresh-rate displays. Default 60.
+   */
+  cursorFrequencyHz: 60 | 120;
+}
+
+// ---------------------------------------------------------------------------
 // Profiles
 // ---------------------------------------------------------------------------
 
@@ -458,6 +472,7 @@ export interface FundidoConfig {
   preview: PreviewConfig;
   ocr: OcrConfig;
   ollama: OllamaConfig;
+  overlay?: OverlayConfig;
   monitoredRegions: MonitoredRegion[];
   overlayGroups: OverlayGroup[];
   profiles: Profile[];

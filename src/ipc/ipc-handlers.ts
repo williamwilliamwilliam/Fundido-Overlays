@@ -89,6 +89,9 @@ export function registerIpcHandlers(
     configService.save(config);
     // Sync overlay windows whenever config is saved
     overlayWindowManager.syncOverlayWindows(getProfileActivatedOverlayGroups(config));
+    // Apply cursor frequency immediately so the change takes effect without restarting
+    const cursorFrequencyHz = config.overlay?.cursorFrequencyHz ?? 60;
+    overlayWindowManager.setCursorFrequencyHz(cursorFrequencyHz);
     return { success: true };
   });
 

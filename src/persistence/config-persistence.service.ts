@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import { FundidoConfig, GameCaptureConfig, PreviewConfig, OcrConfig, OllamaConfig } from '../shared';
+import { FundidoConfig, GameCaptureConfig, PreviewConfig, OcrConfig, OllamaConfig, OverlayConfig } from '../shared';
 import { logger, LogCategory } from '../shared/logger';
 
 const CONFIG_FILE_NAME = 'fundido-config.json';
@@ -35,11 +35,16 @@ function buildDefaultConfig(): FundidoConfig {
     keepAlive: '5m',
   };
 
+  const defaultOverlay: OverlayConfig = {
+    cursorFrequencyHz: 60,
+  };
+
   return {
     gameCapture: defaultGameCapture,
     preview: defaultPreview,
     ocr: defaultOcr,
     ollama: defaultOllama,
+    overlay: defaultOverlay,
     monitoredRegions: [],
     overlayGroups: [],
     profiles: [],
@@ -104,6 +109,13 @@ export class ConfigPersistenceService {
       const configIsMissingCaptureEnabled = parsed.gameCapture && parsed.gameCapture.captureEnabled === undefined;
       if (configIsMissingCaptureEnabled) {
         parsed.gameCapture.captureEnabled = false;
+      }
+
+      if (!parsed.overlay) {
+        parsed.overlay = defaults.overlay;
+        logger.info(LogCategory.Persistence, 'Backfilled missing overlay config with defaults.');
+      } else {
+        parsed.overlay.cursorFrequencyHz ??= defaults.overlay!.cursorFrequencyHz;
       }
 
       if (!Array.isArray(parsed.profiles)) {
