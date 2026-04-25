@@ -7,14 +7,18 @@ import {
 import { logger, LogCategory } from '../shared/logger';
 
 /**
- * Manages the lifecycle of transparent, click-through overlay windows.
- *
- * Each overlay group gets its own BrowserWindow. This keeps rendering
- * isolated and makes it straightforward to position groups independently.
+ * Manages a single transparent, click-through overlay BrowserWindow that
+ * renders all enabled overlay groups. Using one window instead of one per
+ * group eliminates N-1 extra GPU compositor passes — a meaningful performance
+ * win when multiple groups are active simultaneously.
  */
 export class OverlayWindowManager {
-  private overlayWindowsByGroupId = new Map<OverlayGroupId, BrowserWindow>();
+  /** The single shared overlay window. Null when no groups are enabled. */
+  private overlayWindow: BrowserWindow | null = null;
+
+  /** Config map used by the main process for rule evaluation (mirror visibility). */
   private overlayGroupConfigs = new Map<OverlayGroupId, OverlayGroup>();
+
   private hasCursorFollowingGroups = false;
 
   /** Tracks which mirror region IDs are currently visible, updated when frame state arrives. */
@@ -29,54 +33,57 @@ export class OverlayWindowManager {
   }
 
   /**
-   * Creates, updates, or removes overlay windows to match the given groups.
-   * Call this whenever the overlay group configuration changes.
+   * Synchronises the overlay window to match the given list of groups.
+   * Creates the window on first call, sends `overlay:groups-sync` to update
+   * the renderer when it already exists, and closes it when no groups remain.
+   * One BrowserWindow is reused across all groups — no per-group compositor pass.
    */
   public syncOverlayWindows(overlayGroups: OverlayGroup[]): void {
     const enabledGroups = overlayGroups.filter((group) => group.enabled !== false);
-    const enabledGroupIds = new Set(enabledGroups.map((group) => group.id));
 
-    // Close windows for groups that no longer exist or are disabled
-    for (const [groupId, window] of this.overlayWindowsByGroupId) {
-      const groupShouldClose = !enabledGroupIds.has(groupId);
-      if (groupShouldClose) {
-        logger.info(LogCategory.Overlay, `Closing overlay window for removed/disabled group: ${groupId}`);
-        if (!window.isDestroyed()) window.close();
-        this.overlayWindowsByGroupId.delete(groupId);
-        this.overlayGroupConfigs.delete(groupId);
-      }
-    }
-
-    // Create or update windows for each enabled group
+    // Keep the main-process config map in sync for mirror-visibility evaluation.
+    this.overlayGroupConfigs.clear();
     for (const group of enabledGroups) {
       this.overlayGroupConfigs.set(group.id, group);
-      const existingWindow = this.overlayWindowsByGroupId.get(group.id);
-      if (existingWindow && !existingWindow.isDestroyed()) {
-        existingWindow.webContents.send('overlay:init', group);
-      } else {
-        this.createOverlayWindow(group);
-      }
     }
 
-    // Start or stop cursor tracking based on whether any enabled group uses relativeToCursor
+    if (enabledGroups.length === 0) {
+      const windowExistsAndIsOpen = this.overlayWindow && !this.overlayWindow.isDestroyed();
+      if (windowExistsAndIsOpen) {
+        logger.info(LogCategory.Overlay, 'No enabled overlay groups — closing overlay window.');
+        this.overlayWindow!.close();
+        this.overlayWindow = null;
+      }
+      this.hasCursorFollowingGroups = false;
+      this.updateCursorTracking();
+      return;
+    }
+
+    const windowNeedsCreation = !this.overlayWindow || this.overlayWindow.isDestroyed();
+    if (windowNeedsCreation) {
+      this.createOverlayWindow(enabledGroups);
+    } else {
+      // Window already exists — send the updated group list; renderer diffs and patches the DOM.
+      this.overlayWindow!.webContents.send('overlay:groups-sync', enabledGroups);
+    }
+
     this.hasCursorFollowingGroups = enabledGroups.some(
-      (group) => group.position.mode === 'relativeToCursor'
+      (group) => group.position.mode === 'relativeToCursor',
     );
     this.updateCursorTracking();
   }
 
   /**
-   * Pushes updated frame state to all overlay windows so they can
-   * re-evaluate rules and update their display.
+   * Pushes updated frame state to the overlay window so it can
+   * re-evaluate rules and update its display.
    */
   public broadcastFrameState(frameState: FrameState): void {
     this.lastFrameState = frameState;
     this.updateVisibleMirrorRegionIds(frameState);
 
-    for (const [_groupId, window] of this.overlayWindowsByGroupId) {
-      if (!window.isDestroyed()) {
-        window.webContents.send('overlay:frame-state', frameState);
-      }
+    const windowIsOpen = this.overlayWindow && !this.overlayWindow.isDestroyed();
+    if (windowIsOpen) {
+      this.overlayWindow!.webContents.send('overlay:frame-state', frameState);
     }
   }
 
@@ -119,8 +126,6 @@ export class OverlayWindowManager {
 
         const regionId = overlay.regionMirrorConfig!.monitoredRegionId;
 
-        // Group-level show/opacity affects only the group container.
-        // Individual overlay rules still determine whether this overlay renders.
         const defaultVisible = overlay.defaultVisible !== false;
         let isVisible = defaultVisible;
 
@@ -162,7 +167,6 @@ export class OverlayWindowManager {
         (rs: any) => rs.monitoredRegionId === cond.monitoredRegionId
       );
       if (!regionState) {
-        // Missing region state means condition can't be evaluated
         if (logicMode === 'AND') return false;
         continue;
       }
@@ -241,17 +245,16 @@ export class OverlayWindowManager {
   }
 
   /**
-   * Sends preview frame data to overlay windows for region mirror rendering.
+   * Sends preview frame data to the overlay window for region mirror rendering.
    * Includes monitored regions so mirrors can crop to specific region bounds.
    */
   public broadcastPreviewFrame(previewData: any, monitoredRegions: any[]): void {
-    for (const [_groupId, window] of this.overlayWindowsByGroupId) {
-      if (!window.isDestroyed()) {
-        window.webContents.send('overlay:preview-frame', {
-          ...previewData,
-          monitoredRegions,
-        });
-      }
+    const windowIsOpen = this.overlayWindow && !this.overlayWindow.isDestroyed();
+    if (windowIsOpen) {
+      this.overlayWindow!.webContents.send('overlay:preview-frame', {
+        ...previewData,
+        monitoredRegions,
+      });
     }
   }
 
@@ -260,9 +263,8 @@ export class OverlayWindowManager {
 
   /**
    * Extracts BGRA pixel crops for visible mirrored regions into a single
-   * contiguous buffer and sends it with metadata to overlay windows.
-   * One IPC message per overlay window with one Buffer — minimizes
-   * structured clone overhead compared to many separate Buffers.
+   * contiguous buffer and sends it to the overlay window.
+   * One IPC message, one Buffer — minimizes structured clone overhead.
    */
   public broadcastMirrorCrops(
     frameBuffer: Buffer,
@@ -273,7 +275,8 @@ export class OverlayWindowManager {
     displayOriginY: number,
     dpiScaleFactor: number,
   ): void {
-    if (this.overlayWindowsByGroupId.size === 0) return;
+    const windowIsOpen = this.overlayWindow && !this.overlayWindow.isDestroyed();
+    if (!windowIsOpen) return;
     if (this.visibleMirrorRegionIds.size === 0) return;
 
     const regionById = new Map<string, any>();
@@ -332,24 +335,18 @@ export class OverlayWindowManager {
 
     // Send a slice of the pre-allocated buffer (only the bytes we wrote)
     const message = { buffer: this.batchedCropBuffer.subarray(0, totalBytes), crops: cropMeta };
-    for (const [_groupId, window] of this.overlayWindowsByGroupId) {
-      if (!window.isDestroyed()) {
-        window.webContents.send('overlay:mirror-batch', message);
-      }
-    }
+    this.overlayWindow!.webContents.send('overlay:mirror-batch', message);
   }
 
   /**
-   * Closes all overlay windows. Called on app shutdown.
+   * Closes the overlay window. Called on global disable and app shutdown.
    */
   public closeAll(): void {
     this.stopCursorTracking();
-    for (const [_groupId, window] of this.overlayWindowsByGroupId) {
-      if (!window.isDestroyed()) {
-        window.close();
-      }
+    if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
+      this.overlayWindow.close();
     }
-    this.overlayWindowsByGroupId.clear();
+    this.overlayWindow = null;
     this.overlayGroupConfigs.clear();
   }
 
@@ -382,14 +379,13 @@ export class OverlayWindowManager {
   private startCursorTracking(): void {
     const intervalMs = Math.round(1000 / this.cursorFrequencyHz);
     this.cursorIntervalHandle = setInterval(() => {
-      const cursorPoint = screen.getCursorScreenPoint();
-      for (const [_groupId, window] of this.overlayWindowsByGroupId) {
-        if (!window.isDestroyed()) {
-          window.webContents.send('overlay:cursor-position', {
-            x: cursorPoint.x,
-            y: cursorPoint.y,
-          });
-        }
+      const windowIsOpen = this.overlayWindow && !this.overlayWindow.isDestroyed();
+      if (windowIsOpen) {
+        const cursorPoint = screen.getCursorScreenPoint();
+        this.overlayWindow!.webContents.send('overlay:cursor-position', {
+          x: cursorPoint.x,
+          y: cursorPoint.y,
+        });
       }
     }, intervalMs);
   }
@@ -401,8 +397,8 @@ export class OverlayWindowManager {
     }
   }
 
-  private createOverlayWindow(group: OverlayGroup): void {
-    logger.info(LogCategory.Overlay, `Creating overlay window for group: "${group.name}" (${group.id})`);
+  private createOverlayWindow(initialGroups: OverlayGroup[]): void {
+    logger.info(LogCategory.Overlay, `Creating shared overlay window for ${initialGroups.length} group(s).`);
 
     const primaryDisplay = screen.getPrimaryDisplay();
     const displayBounds = primaryDisplay.bounds;
@@ -433,15 +429,15 @@ export class OverlayWindowManager {
     overlayWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
     overlayWindow.webContents.once('did-finish-load', () => {
-      overlayWindow.webContents.send('overlay:init', group);
+      overlayWindow.webContents.send('overlay:groups-sync', initialGroups);
     });
 
-    this.overlayWindowsByGroupId.set(group.id, overlayWindow);
+    this.overlayWindow = overlayWindow;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Inline overlay renderer HTML
+// Inline overlay renderer HTML — manages ALL groups in one document
 // ---------------------------------------------------------------------------
 
 function buildOverlayRendererHtml(): string {
@@ -457,7 +453,7 @@ function buildOverlayRendererHtml(): string {
     overflow: hidden;
     user-select: none;
   }
-  #overlay-container {
+  .group-overlay-container {
     position: absolute;
     display: flex;
     will-change: transform;
@@ -469,130 +465,87 @@ function buildOverlayRendererHtml(): string {
 </style>
 </head>
 <body>
-<div id="overlay-container"></div>
 <script>
   const { ipcRenderer } = require('electron');
 
-  let overlayGroup = null;
+  // All active groups, keyed by group ID
+  const overlayGroupsById = new Map();
+  // The root container element for each group, keyed by group ID
+  const groupContainerElementById = new Map();
 
-  ipcRenderer.on('overlay:init', (_event, group) => {
-    overlayGroup = group;
-    applyGroupLayout(group);
-    renderOverlayElements(group);
-    applyDefaults(group);
+  // ---------------------------------------------------------------------------
+  // overlay:groups-sync — full diff/patch of the active group set
+  // ---------------------------------------------------------------------------
+
+  ipcRenderer.on('overlay:groups-sync', (_event, groups) => {
+    const incomingGroupIds = new Set(groups.map(function(g) { return g.id; }));
+
+    // Remove containers for groups that are no longer in the list
+    for (const [groupId, containerEl] of groupContainerElementById) {
+      const groupWasRemoved = !incomingGroupIds.has(groupId);
+      if (groupWasRemoved) {
+        containerEl.remove();
+        groupContainerElementById.delete(groupId);
+        overlayGroupsById.delete(groupId);
+      }
+    }
+
+    // Add new groups or refresh existing ones
+    for (const group of groups) {
+      overlayGroupsById.set(group.id, group);
+      const existingContainerEl = groupContainerElementById.get(group.id);
+      if (existingContainerEl) {
+        // Group already has a container — update layout and overlay elements
+        applyGroupLayout(group, existingContainerEl);
+        renderOverlayElements(group, existingContainerEl);
+        applyDefaults(group, existingContainerEl);
+      } else {
+        // New group — create its container and add it to the document
+        const newContainerEl = createGroupContainer(group);
+        document.body.appendChild(newContainerEl);
+        groupContainerElementById.set(group.id, newContainerEl);
+      }
+    }
   });
+
+  function createGroupContainer(group) {
+    const containerEl = document.createElement('div');
+    containerEl.classList.add('group-overlay-container');
+    containerEl.dataset.groupId = group.id;
+    applyGroupLayout(group, containerEl);
+    renderOverlayElements(group, containerEl);
+    applyDefaults(group, containerEl);
+    return containerEl;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Frame state — evaluate rules for every active group
+  // ---------------------------------------------------------------------------
 
   ipcRenderer.on('overlay:frame-state', (_event, frameState) => {
-    if (overlayGroup) evaluateRules(overlayGroup, frameState);
+    for (const [groupId, group] of overlayGroupsById) {
+      const containerEl = groupContainerElementById.get(groupId);
+      if (containerEl) evaluateRules(group, frameState, containerEl);
+    }
   });
 
-  // Cursor tracking: main process polls at ~120Hz and sends position via IPC.
-  // We apply it directly via GPU-composited transform — no lerp, no rAF delay.
+  // ---------------------------------------------------------------------------
+  // Cursor tracking — update all relativeToCursor groups from one IPC message
+  // ---------------------------------------------------------------------------
+
   ipcRenderer.on('overlay:cursor-position', (_event, cursor) => {
-    if (!overlayGroup) return;
-    if (overlayGroup.position.mode === 'relativeToCursor') {
-      updateContainerTransform(overlayGroup, cursor.x, cursor.y);
+    for (const [groupId, group] of overlayGroupsById) {
+      if (group.position.mode === 'relativeToCursor') {
+        const containerEl = groupContainerElementById.get(groupId);
+        if (containerEl) updateContainerTransform(group, containerEl, cursor.x, cursor.y);
+      }
     }
   });
 
-  function getGroupScale(group) {
-    return group && group.scale !== undefined ? group.scale : 1;
-  }
+  // ---------------------------------------------------------------------------
+  // Mirror batch — querySelectorAll spans the whole document naturally
+  // ---------------------------------------------------------------------------
 
-  function updateContainerTransform(group, cursorX, cursorY) {
-    const c = document.getElementById('overlay-container');
-    if (!c || !group) return;
-
-    const scale = getGroupScale(group);
-    const p = group.position;
-    const x = p.mode === 'relativeToCursor' ? cursorX + (p.offsetX || 0) : (p.x || 0);
-    const y = p.mode === 'relativeToCursor' ? cursorY + (p.offsetY || 0) : (p.y || 0);
-    c.style.transformOrigin = 'top left';
-    c.style.transform = 'translate(' + x + 'px, ' + y + 'px) scale(' + scale + ')';
-  }
-
-  function applyGroupLayout(group) {
-    const c = document.getElementById('overlay-container');
-    const p = group.position;
-    c.style.left = '0px';
-    c.style.top = '0px';
-    const dirMap = { right: 'row', left: 'row-reverse', down: 'column', up: 'column-reverse' };
-    c.style.flexDirection = dirMap[group.growDirection] || 'row';
-    const alMap = { start: 'flex-start', center: 'center', end: 'flex-end' };
-    c.style.alignItems = alMap[group.alignment] || 'flex-start';
-    c.style.gap = (group.gap !== undefined && group.gap !== null ? group.gap : 0) + 'px';
-    updateContainerTransform(group, 0, 0);
-  }
-
-  function renderOverlayElements(group) {
-    const c = document.getElementById('overlay-container');
-    c.innerHTML = '';
-    for (const ov of group.overlays) {
-      const el = document.createElement('div');
-      el.classList.add('overlay-item');
-      el.dataset.overlayId = ov.id;
-      if (ov.contentType === 'text' && ov.textConfig) renderText(el, ov.textConfig);
-      else if (ov.contentType === 'image' && ov.imageConfig) renderImage(el, ov.imageConfig);
-      else if (ov.contentType === 'regionMirror') renderMirror(el, ov.regionMirrorConfig);
-      c.appendChild(el);
-    }
-  }
-
-  function renderText(el, cfg) {
-    el.style.fontFamily = cfg.fontFamily || 'Segoe UI';
-    el.style.fontSize = (cfg.fontSize || 16) + 'px';
-    el.style.fontWeight = cfg.fontWeight || 'normal';
-    el.style.fontStyle = cfg.fontStyle || 'normal';
-    el.style.color = cfg.color || '#ffffff';
-    el.style.backgroundColor = cfg.backgroundColor || 'rgba(0,0,0,0.6)';
-    el.style.padding = (cfg.padding || 4) + 'px';
-    el.style.borderRadius = '4px';
-    el.style.whiteSpace = 'nowrap';
-    el.textContent = cfg.text || '';
-  }
-
-  function renderImage(el, cfg) {
-    if (!cfg || !cfg.filePath) return;
-    const img = document.createElement('img');
-    // Convert Windows path to file:// URL
-    let fileSrc = cfg.filePath;
-    const isAbsoluteWindowsPath = /^[A-Za-z]:/.test(fileSrc);
-    if (isAbsoluteWindowsPath) {
-      fileSrc = 'file:///' + fileSrc.replace(/\\\\/g, '/');
-    }
-    img.src = fileSrc;
-    img.alt = '';
-    img.onerror = function() { el.textContent = '[Image not found]'; el.style.color = '#ff4444'; el.style.fontSize = '12px'; };
-    const s = cfg.size || {};
-    if (s.scale && s.scale !== 1.0) { img.style.transform = 'scale(' + s.scale + ')'; img.style.transformOrigin = 'top left'; }
-    if (s.width) img.style.width = s.width + 'px';
-    if (s.height) img.style.height = s.height + 'px';
-    if (s.maxWidth) img.style.maxWidth = s.maxWidth + 'px';
-    if (s.maxHeight) img.style.maxHeight = s.maxHeight + 'px';
-    el.appendChild(img);
-  }
-
-  function renderMirror(el, cfg) {
-    if (!cfg) return;
-    const s = cfg.size || {};
-    const canvas = document.createElement('canvas');
-    canvas.dataset.mirrorRegionId = cfg.monitoredRegionId || '';
-    canvas.dataset.mirrorScale = String(s.scale || 1);
-    canvas.dataset.mirrorMaxWidth = String(s.maxWidth || 0);
-    canvas.dataset.mirrorMaxHeight = String(s.maxHeight || 0);
-    canvas.style.imageRendering = 'auto';
-    canvas.style.display = 'block';
-    // Internal resolution set when first frame arrives; CSS size controls layout
-    canvas.width = 2;
-    canvas.height = 2;
-    el.appendChild(canvas);
-  }
-
-  // Shared Image object for decoding preview frames
-  let previewImg = null;
-  let previewImgReady = false;
-
-  // ---- FAST PATH: Single batched buffer with all visible mirror crops ----
   ipcRenderer.on('overlay:mirror-batch', (_event, message) => {
     if (!message || !message.buffer || !message.crops) return;
 
@@ -651,78 +604,177 @@ function buildOverlayRendererHtml(): string {
     }
   });
 
-  // ---- LEGACY handlers (no-op, kept to avoid errors from stale messages) ----
+  // Legacy no-ops: kept to avoid errors if stale messages arrive
   ipcRenderer.on('overlay:mirror-crops', function() {});
   ipcRenderer.on('overlay:mirror-meta', function() {});
   ipcRenderer.on('overlay:preview-frame', function() {});
+  // overlay:init is no longer sent; guard against stale messages from old builds
+  ipcRenderer.on('overlay:init', function() {});
 
-  function applyDefaults(group) {
-    const container = document.getElementById('overlay-container');
-    if (container) {
-      const groupDefaultMode = group.defaultVisibilityMode || 'visible';
-      const groupDefaultOpacity = group.defaultOpacity !== undefined ? group.defaultOpacity : 1;
-      container.style.display = groupDefaultMode === 'hidden' ? 'none' : '';
-      container.style.opacity = groupDefaultMode === 'opacity' ? String(groupDefaultOpacity) : '1';
-    }
+  // ---------------------------------------------------------------------------
+  // Layout helpers
+  // ---------------------------------------------------------------------------
+
+  function getGroupScale(group) {
+    return group && group.scale !== undefined ? group.scale : 1;
+  }
+
+  function updateContainerTransform(group, containerEl, cursorX, cursorY) {
+    if (!containerEl || !group) return;
+    const scale = getGroupScale(group);
+    const p = group.position;
+    const x = p.mode === 'relativeToCursor' ? cursorX + (p.offsetX || 0) : (p.x || 0);
+    const y = p.mode === 'relativeToCursor' ? cursorY + (p.offsetY || 0) : (p.y || 0);
+    containerEl.style.transformOrigin = 'top left';
+    containerEl.style.transform = 'translate(' + x + 'px, ' + y + 'px) scale(' + scale + ')';
+  }
+
+  function applyGroupLayout(group, containerEl) {
+    const p = group.position;
+    containerEl.style.left = '0px';
+    containerEl.style.top = '0px';
+    const dirMap = { right: 'row', left: 'row-reverse', down: 'column', up: 'column-reverse' };
+    containerEl.style.flexDirection = dirMap[group.growDirection] || 'row';
+    const alMap = { start: 'flex-start', center: 'center', end: 'flex-end' };
+    containerEl.style.alignItems = alMap[group.alignment] || 'flex-start';
+    containerEl.style.gap = (group.gap !== undefined && group.gap !== null ? group.gap : 0) + 'px';
+    updateContainerTransform(group, containerEl, 0, 0);
+  }
+
+  function renderOverlayElements(group, containerEl) {
+    containerEl.innerHTML = '';
     for (const ov of group.overlays) {
-      const el = document.querySelector('[data-overlay-id="' + ov.id + '"]');
+      const el = document.createElement('div');
+      el.classList.add('overlay-item');
+      el.dataset.overlayId = ov.id;
+      if (ov.contentType === 'text' && ov.textConfig) renderText(el, ov.textConfig);
+      else if (ov.contentType === 'image' && ov.imageConfig) renderImage(el, ov.imageConfig);
+      else if (ov.contentType === 'regionMirror') renderMirror(el, ov.regionMirrorConfig);
+      containerEl.appendChild(el);
+    }
+  }
+
+  function renderText(el, cfg) {
+    el.style.fontFamily = cfg.fontFamily || 'Segoe UI';
+    el.style.fontSize = (cfg.fontSize || 16) + 'px';
+    el.style.fontWeight = cfg.fontWeight || 'normal';
+    el.style.fontStyle = cfg.fontStyle || 'normal';
+    el.style.color = cfg.color || '#ffffff';
+    el.style.backgroundColor = cfg.backgroundColor || 'rgba(0,0,0,0.6)';
+    el.style.padding = (cfg.padding || 4) + 'px';
+    el.style.borderRadius = '4px';
+    el.style.whiteSpace = 'nowrap';
+    el.textContent = cfg.text || '';
+  }
+
+  function renderImage(el, cfg) {
+    if (!cfg || !cfg.filePath) return;
+    const img = document.createElement('img');
+    let fileSrc = cfg.filePath;
+    const isAbsoluteWindowsPath = /^[A-Za-z]:/.test(fileSrc);
+    if (isAbsoluteWindowsPath) {
+      fileSrc = 'file:///' + fileSrc.replace(/\\\\/g, '/');
+    }
+    img.src = fileSrc;
+    img.alt = '';
+    img.onerror = function() { el.textContent = '[Image not found]'; el.style.color = '#ff4444'; el.style.fontSize = '12px'; };
+    const s = cfg.size || {};
+    if (s.scale && s.scale !== 1.0) { img.style.transform = 'scale(' + s.scale + ')'; img.style.transformOrigin = 'top left'; }
+    if (s.width) img.style.width = s.width + 'px';
+    if (s.height) img.style.height = s.height + 'px';
+    if (s.maxWidth) img.style.maxWidth = s.maxWidth + 'px';
+    if (s.maxHeight) img.style.maxHeight = s.maxHeight + 'px';
+    el.appendChild(img);
+  }
+
+  function renderMirror(el, cfg) {
+    if (!cfg) return;
+    const s = cfg.size || {};
+    const canvas = document.createElement('canvas');
+    canvas.dataset.mirrorRegionId = cfg.monitoredRegionId || '';
+    canvas.dataset.mirrorScale = String(s.scale || 1);
+    canvas.dataset.mirrorMaxWidth = String(s.maxWidth || 0);
+    canvas.dataset.mirrorMaxHeight = String(s.maxHeight || 0);
+    canvas.style.imageRendering = 'auto';
+    canvas.style.display = 'block';
+    canvas.width = 2;
+    canvas.height = 2;
+    el.appendChild(canvas);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Visibility / rule evaluation — scoped to a single group's container element
+  // ---------------------------------------------------------------------------
+
+  function applyDefaults(group, containerEl) {
+    const groupDefaultMode = group.defaultVisibilityMode || 'visible';
+    const groupDefaultOpacity = group.defaultOpacity !== undefined ? group.defaultOpacity : 1;
+    containerEl.style.display = groupDefaultMode === 'hidden' ? 'none' : '';
+    containerEl.style.opacity = groupDefaultMode === 'opacity' ? String(groupDefaultOpacity) : '1';
+
+    for (const ov of group.overlays) {
+      const el = containerEl.querySelector('[data-overlay-id="' + ov.id + '"]');
       if (!el) continue;
       el.style.display = (ov.defaultVisible !== false) ? '' : 'none';
       el.style.opacity = String(ov.defaultOpacity !== undefined ? ov.defaultOpacity : 1);
     }
   }
 
-  function evaluateRules(group, frameState) {
-    // --- Group-level rules: evaluated first and applied to the group container ---
+  function evaluateRules(group, frameState, containerEl) {
+    // Group-level rules applied to the container element
     const groupDefaultMode = group.defaultVisibilityMode || 'visible';
     const groupDefaultOpacity = group.defaultOpacity !== undefined ? group.defaultOpacity : 1;
     let groupOverride = {
       action: groupDefaultMode === 'hidden' ? 'hide' : (groupDefaultMode === 'opacity' ? 'opacity' : 'show'),
       opacityValue: groupDefaultMode === 'opacity' ? groupDefaultOpacity : 1,
     };
-    var groupRules = group.rules || [];
+    const groupRules = group.rules || [];
     for (var gi = 0; gi < groupRules.length; gi++) {
-      var groupRule = groupRules[gi];
+      const groupRule = groupRules[gi];
       if (evalConds(groupRule.conditions, groupRule.logicMode || 'AND', frameState)) {
         groupOverride = groupRule;
       }
     }
 
-    const container = document.getElementById('overlay-container');
-    if (container) {
-      if (groupOverride.action === 'hide') {
-        container.style.display = 'none';
-        return;
-      }
-
-      if (groupOverride.action === 'opacity') {
-        container.style.display = '';
-        container.style.opacity = String(groupOverride.opacityValue !== undefined ? groupOverride.opacityValue : 1);
-      } else if (groupOverride.action === 'show') {
-        container.style.display = '';
-        container.style.opacity = '1';
-      }
+    if (groupOverride.action === 'hide') {
+      containerEl.style.display = 'none';
+      return;
     }
 
+    if (groupOverride.action === 'opacity') {
+      containerEl.style.display = '';
+      containerEl.style.opacity = String(groupOverride.opacityValue !== undefined ? groupOverride.opacityValue : 1);
+    } else {
+      containerEl.style.display = '';
+      containerEl.style.opacity = '1';
+    }
+
+    // Per-overlay rules scoped to this group's container
     for (const ov of group.overlays) {
-      const el = document.querySelector('[data-overlay-id="' + ov.id + '"]');
+      const el = containerEl.querySelector('[data-overlay-id="' + ov.id + '"]');
       if (!el) continue;
 
-      const defVis = ov.defaultVisible !== false;
-      const defOp = ov.defaultOpacity !== undefined ? ov.defaultOpacity : 1;
-      let vis = defVis, op = defOp;
+      const defaultVisible = ov.defaultVisible !== false;
+      const defaultOpacity = ov.defaultOpacity !== undefined ? ov.defaultOpacity : 1;
+      let isVisible = defaultVisible;
+      let opacity = defaultOpacity;
+
       const rules = ov.rules || [];
       for (const rule of rules) {
         if (evalConds(rule.conditions, rule.logicMode || 'AND', frameState)) {
-          if (rule.action === 'show') { vis = true; op = 1; }
-          else if (rule.action === 'hide') { vis = false; }
-          else if (rule.action === 'opacity') { vis = true; op = rule.opacityValue !== undefined ? rule.opacityValue : 1; }
+          if (rule.action === 'show') { isVisible = true; opacity = 1; }
+          else if (rule.action === 'hide') { isVisible = false; }
+          else if (rule.action === 'opacity') { isVisible = true; opacity = rule.opacityValue !== undefined ? rule.opacityValue : 1; }
         }
       }
-      el.style.display = vis ? '' : 'none';
-      el.style.opacity = String(op);
+      el.style.display = isVisible ? '' : 'none';
+      el.style.opacity = String(opacity);
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Condition evaluation helpers
+  // ---------------------------------------------------------------------------
 
   function evalSingleCondition(c, fs) {
     const rs = fs.regionStates.find(r => r.monitoredRegionId === c.monitoredRegionId);
@@ -739,40 +791,42 @@ function buildOverlayRendererHtml(): string {
     if (c.operator === 'notEquals') return cr.currentValue !== c.value;
 
     const instanceStates = fs.regionInstanceStates || [];
-    const matchingInstances = instanceStates.filter((instanceState) =>
-      instanceState.monitoredRegionId === c.monitoredRegionId
-    );
+    const matchingInstances = instanceStates.filter(function(instanceState) {
+      return instanceState.monitoredRegionId === c.monitoredRegionId;
+    });
     if (matchingInstances.length === 0) return false;
 
-    const matchingValues = matchingInstances.map((instanceState) => {
-      const instanceCalcResult = instanceState.calculationResults.find((r) => r.stateCalculationId === c.stateCalculationId);
+    const matchingValues = matchingInstances.map(function(instanceState) {
+      const instanceCalcResult = instanceState.calculationResults.find(function(r) {
+        return r.stateCalculationId === c.stateCalculationId;
+      });
       return instanceCalcResult ? instanceCalcResult.currentValue : undefined;
     });
 
     if (c.operator === 'equalsAtLeastOnceAcrossRepeatedRegions') {
-      return matchingValues.some((value) => value === c.value);
+      return matchingValues.some(function(value) { return value === c.value; });
     }
     if (c.operator === 'equalsInEveryRepeatedRegion') {
-      return matchingValues.every((value) => value === c.value);
+      return matchingValues.every(function(value) { return value === c.value; });
     }
     if (c.operator === 'equalsAtLeastNTimesAcrossRepeatedRegions') {
-      const minCount = c.minimumCount ?? 1;
-      return matchingValues.filter((value) => value === c.value).length >= minCount;
+      const minCount = c.minimumCount !== undefined ? c.minimumCount : 1;
+      return matchingValues.filter(function(value) { return value === c.value; }).length >= minCount;
     }
     if (c.operator === 'equalsInEverySelectedRepeatedRegion' || c.operator === 'equalsAtLeastOnceInSelectedRepeatedRegions') {
       const selectedKeys = c.selectedRepeatInstances || [];
-      const selectedInstances = matchingInstances.filter(
-        (instanceState) => selectedKeys.includes(instanceState.repeatIndexX + '_' + instanceState.repeatIndexY)
-      );
+      const selectedInstances = matchingInstances.filter(function(instanceState) {
+        return selectedKeys.includes(instanceState.repeatIndexX + '_' + instanceState.repeatIndexY);
+      });
       if (selectedInstances.length === 0) return false;
-      const selectedValues = selectedInstances.map((instanceState) => {
-        const r = instanceState.calculationResults.find((r) => r.stateCalculationId === c.stateCalculationId);
+      const selectedValues = selectedInstances.map(function(instanceState) {
+        const r = instanceState.calculationResults.find(function(r) { return r.stateCalculationId === c.stateCalculationId; });
         return r ? r.currentValue : undefined;
       });
       if (c.operator === 'equalsInEverySelectedRepeatedRegion') {
-        return selectedValues.every((value) => value === c.value);
+        return selectedValues.every(function(value) { return value === c.value; });
       }
-      return selectedValues.some((value) => value === c.value);
+      return selectedValues.some(function(value) { return value === c.value; });
     }
 
     return true;
