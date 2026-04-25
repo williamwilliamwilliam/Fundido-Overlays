@@ -12,7 +12,12 @@ import { evaluateFrameState } from './state-calculation.service';
 
 interface EvalRequest {
   type: 'evaluate';
-  frameBuffer: Buffer;
+  /**
+   * The raw frame pixel data, transferred (not cloned) from the main thread.
+   * Arrives as an ArrayBuffer — Buffer.from(ArrayBuffer) wraps it in-place,
+   * so the worker reads the data without any additional copy.
+   */
+  frameBuffer: ArrayBuffer;
   frameWidth: number;
   frameHeight: number;
   frameCapturedAt: number;
@@ -34,6 +39,9 @@ const regionPixelHashCache = new Map<string, number>();
 parentPort!.on('message', (request: EvalRequest) => {
   if (request.type !== 'evaluate') return;
 
+  // request.frameBuffer arrives as an ArrayBuffer (transferred from the main thread —
+  // not structured-cloned). Buffer.from(ArrayBuffer) wraps the memory in-place
+  // without copying it, so this is a zero-copy construction.
   const frame = {
     buffer: Buffer.from(request.frameBuffer),
     width: request.frameWidth,

@@ -1021,24 +1021,47 @@ function startStateEvaluationLoop(): void {
     ollamaService.onFrameCaptured(frame);
     ollamaService.setRegions(physicalBoundsRegions);
 
-    // Send to worker
+    // Send to worker — transfer the frame buffer instead of structured-cloning it.
+    //
+    // Structured clone (the postMessage default) would copy the entire 8MB+ pixel
+    // buffer across the thread boundary. The worker then called Buffer.from() on the
+    // received Buffer, producing a second copy. Two full-frame copies per state eval.
+    //
+    // Fix: slice() the backing ArrayBuffer once to produce a standalone, transferable
+    // copy. Passing it in the transferList moves ownership to the worker in O(1) with
+    // no further copy. In the worker, Buffer.from(ArrayBuffer) wraps the memory
+    // in-place — so we go from 2 copies down to 1.
+    //
+    // We use slice() rather than transferring frame.buffer.buffer directly because
+    // the main thread still holds references to the same buffer (previewService, etc.)
+    // and detaching it would corrupt those reads.
+    // slice() is typed as returning ArrayBuffer | SharedArrayBuffer, but frame.buffer
+    // is always backed by a plain ArrayBuffer — the cast is safe here.
+    const frameArrayBufferForWorker = frame.buffer.buffer.slice(
+      frame.buffer.byteOffset,
+      frame.buffer.byteOffset + frame.buffer.byteLength,
+    ) as ArrayBuffer;
+
     workerBusy = true;
-    stateEvalWorker!.postMessage({
-      type: 'evaluate',
-      frameBuffer: frame.buffer,
-      frameWidth: frame.width,
-      frameHeight: frame.height,
-      frameCapturedAt: frame.capturedAt,
-      physicalBoundsRegions,
-      monitoredRegions: runtimeRegions,
-      throttleConfig: {
-        maxCalcFrequency: currentConfigRef.config.maxCalcFrequency ?? 10,
-        lastCalcTimestamps: {},
-        regionPixelHashCache: {},
+    stateEvalWorker!.postMessage(
+      {
+        type: 'evaluate',
+        frameBuffer: frameArrayBufferForWorker,
+        frameWidth: frame.width,
+        frameHeight: frame.height,
+        frameCapturedAt: frame.capturedAt,
+        physicalBoundsRegions,
+        monitoredRegions: runtimeRegions,
+        throttleConfig: {
+          maxCalcFrequency: currentConfigRef.config.maxCalcFrequency ?? 10,
+          lastCalcTimestamps: {},
+          regionPixelHashCache: {},
+        },
+        ocrResults: Array.from(ocrService.getAllResults().entries()),
+        ollamaResults: Array.from(ollamaService.getAllResults().entries()),
       },
-      ocrResults: Array.from(ocrService.getAllResults().entries()),
-      ollamaResults: Array.from(ollamaService.getAllResults().entries()),
-    });
+      [frameArrayBufferForWorker], // transfer list — moves ownership, no structured clone
+    );
   };
 
   stateEvalInterval = setInterval(sendEvalRequest, getStateEvaluationLoopIntervalMs());
