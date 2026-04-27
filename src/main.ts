@@ -600,6 +600,14 @@ const lastCalcResults = new Map<string, any>();
 /** Caches the last pixel hash per region ID for skip-if-unchanged logic. */
 const regionPixelHashCache = new Map<string, number>();
 
+/**
+ * Remaining forced-evaluation passes per region after a pixel hash change.
+ * Mirrors the same countdown used in the state-eval worker. See that file for
+ * the full explanation of why this is needed.
+ */
+const regionPostChangeEvalCountdown = new Map<string, number>();
+const FALLBACK_EXTRA_EVAL_PASSES_AFTER_CHANGE = 2;
+
 /** Rolling window of time-in-calculation per calcKey. Stores [timestamp, durationMs] pairs. */
 const calcTimeWindow = new Map<string, Array<[number, number]>>();
 const CALC_TIME_WINDOW_SECONDS = 10;
@@ -1131,16 +1139,40 @@ function startStateEvaluationLoopFallback(): void {
       regionPixelHashes.set(region.id, computeRegionPixelHash(frame, region.bounds));
     }
 
+    // Phase 1: advance the post-change countdown before building throttled regions.
+    const regionIsInPostChangeWindow = new Map<string, boolean>();
+    for (const region of physicalBoundsRegions) {
+      const previousHash = regionPixelHashCache.get(region.id);
+      const currentHash = regionPixelHashes.get(region.id)!;
+      const hashChanged = previousHash === undefined || previousHash !== currentHash;
+
+      if (hashChanged) {
+        regionPostChangeEvalCountdown.set(region.id, FALLBACK_EXTRA_EVAL_PASSES_AFTER_CHANGE);
+        regionIsInPostChangeWindow.set(region.id, false);
+      } else {
+        const remainingPasses = regionPostChangeEvalCountdown.get(region.id) ?? 0;
+        if (remainingPasses > 0) {
+          regionPostChangeEvalCountdown.set(region.id, remainingPasses - 1);
+          regionIsInPostChangeWindow.set(region.id, true);
+        } else {
+          regionIsInPostChangeWindow.set(region.id, false);
+        }
+      }
+    }
+
+    // Phase 2: build throttled regions using updated post-change flags.
     const throttledRegions = physicalBoundsRegions.map((region: any) => {
       const prev = regionPixelHashCache.get(region.id);
       const curr = regionPixelHashes.get(region.id)!;
       const unchanged = prev !== undefined && prev === curr;
+      const isInPostChangeWindow = regionIsInPostChangeWindow.get(region.id) ?? false;
       const allowed = (region.stateCalculations || []).filter((calc: any) => {
         const key = `${region.id}:${calc.id}`;
         const regionMinCalcIntervalMs = getRegionEvaluationIntervalMs(region, minCalcIntervalMs);
         const shouldSkipIfUnchanged = calc.skipIfUnchanged !== false;
+        const isSettledAndWindowExpired = unchanged && !isInPostChangeWindow;
         return !shouldThrottleCalc(key, nowMs, regionMinCalcIntervalMs) &&
-          !(shouldSkipIfUnchanged && unchanged && region.alwaysEvaluate !== true);
+          !(shouldSkipIfUnchanged && isSettledAndWindowExpired && region.alwaysEvaluate !== true);
       });
       return { ...region, stateCalculations: allowed };
     });

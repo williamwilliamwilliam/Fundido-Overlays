@@ -625,7 +625,9 @@ function buildOverlayRendererHtml(): string {
     const p = group.position;
     const x = p.mode === 'relativeToCursor' ? cursorX + (p.offsetX || 0) : (p.x || 0);
     const y = p.mode === 'relativeToCursor' ? cursorY + (p.offsetY || 0) : (p.y || 0);
-    containerEl.style.transformOrigin = 'top left';
+    // transformOrigin is intentionally NOT set here — it is fixed at 'top left' for
+    // the lifetime of the element and is set once in applyGroupLayout. Writing it
+    // here would be a wasted style mutation on every cursor tick at 60–120 Hz.
     containerEl.style.transform = 'translate(' + x + 'px, ' + y + 'px) scale(' + scale + ')';
   }
 
@@ -633,6 +635,8 @@ function buildOverlayRendererHtml(): string {
     const p = group.position;
     containerEl.style.left = '0px';
     containerEl.style.top = '0px';
+    // Set once here — this value never changes after group init.
+    containerEl.style.transformOrigin = 'top left';
     const dirMap = { right: 'row', left: 'row-reverse', down: 'column', up: 'column-reverse' };
     containerEl.style.flexDirection = dirMap[group.growDirection] || 'row';
     const alMap = { start: 'flex-start', center: 'center', end: 'flex-end' };

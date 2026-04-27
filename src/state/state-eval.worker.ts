@@ -36,6 +36,25 @@ interface EvalRequest {
 const lastCalcTimestamps = new Map<string, number>();
 const regionPixelHashCache = new Map<string, number>();
 
+/**
+ * Post-change evaluation window.
+ *
+ * When a region's pixel hash changes, the first evaluation runs on whatever
+ * frame triggered the hash change — which may be a mid-transition or
+ * partially-rendered frame. If that evaluation produces a wrong result, and
+ * the next frame's hash happens to match the transition-frame hash, the
+ * `skipIfUnchanged` gate will suppress all further evaluations, locking in
+ * the incorrect state.
+ *
+ * Fix: after detecting a hash change, continue forcing evaluation for
+ * EXTRA_EVAL_PASSES_AFTER_CHANGE additional passes even if the hash appears
+ * unchanged. This ensures the settled final state is always evaluated at
+ * least once after a transition, regardless of what the first changed frame
+ * looked like.
+ */
+const regionPostChangeEvalCountdown = new Map<string, number>();
+const EXTRA_EVAL_PASSES_AFTER_CHANGE = 2;
+
 parentPort!.on('message', (request: EvalRequest) => {
   if (request.type !== 'evaluate') return;
 
@@ -71,11 +90,40 @@ parentPort!.on('message', (request: EvalRequest) => {
     regionPixelHashes.set(region.id, currentHash);
   }
 
-  // Build throttled regions
+  // Phase 1: determine per-region force-eval flags and advance the post-change
+  // countdown. Must run before throttled region building so the filter can read
+  // up-to-date flags.
+  const regionIsInPostChangeWindow = new Map<string, boolean>();
+  for (const region of request.physicalBoundsRegions) {
+    const previousHash = regionPixelHashCache.get(region.id);
+    const currentHash = regionPixelHashes.get(region.id)!;
+    const hashChanged = previousHash === undefined || previousHash !== currentHash;
+
+    if (hashChanged) {
+      // Pixel changed this pass — reset the countdown. The current pass will
+      // evaluate normally because regionIsUnchanged will be false. The countdown
+      // covers the N passes immediately AFTER the change settles.
+      regionPostChangeEvalCountdown.set(region.id, EXTRA_EVAL_PASSES_AFTER_CHANGE);
+      regionIsInPostChangeWindow.set(region.id, false);
+    } else {
+      // Pixel is unchanged — check whether we are still in the post-change window.
+      const remainingPasses = regionPostChangeEvalCountdown.get(region.id) ?? 0;
+      if (remainingPasses > 0) {
+        regionPostChangeEvalCountdown.set(region.id, remainingPasses - 1);
+        regionIsInPostChangeWindow.set(region.id, true);
+      } else {
+        regionIsInPostChangeWindow.set(region.id, false);
+      }
+    }
+  }
+
+  // Phase 2: build throttled regions — skip calcs only when the region is
+  // unchanged AND the post-change window has fully expired.
   const throttledRegions = request.physicalBoundsRegions.map((region: any) => {
     const previousHash = regionPixelHashCache.get(region.id);
     const currentHash = regionPixelHashes.get(region.id)!;
     const regionIsUnchanged = previousHash !== undefined && previousHash === currentHash;
+    const isInPostChangeWindow = regionIsInPostChangeWindow.get(region.id) ?? false;
 
     const allowedCalcs = (region.stateCalculations || []).filter((calc: any) => {
       const calcKey = `${region.id}:${calc.id}`;
@@ -83,14 +131,18 @@ parentPort!.on('message', (request: EvalRequest) => {
       const minCalcIntervalMs = getRegionEvaluationIntervalMs(region, globalMinCalcIntervalMs);
       const isRateLimited = lastRun !== undefined && (nowMs - lastRun) < minCalcIntervalMs;
       if (isRateLimited) return false;
-      const shouldSkip = calc.skipIfUnchanged !== false && regionIsUnchanged && region.alwaysEvaluate !== true;
+      // Suppress only when: the calc opts in to skip-if-unchanged, the pixel
+      // hash is genuinely stable, the post-change window has expired, and the
+      // region is not being force-evaluated because the user is editing it.
+      const isSettledAndWindowExpired = regionIsUnchanged && !isInPostChangeWindow;
+      const shouldSkip = calc.skipIfUnchanged !== false && isSettledAndWindowExpired && region.alwaysEvaluate !== true;
       if (shouldSkip) return false;
       return true;
     });
     return { ...region, stateCalculations: allowedCalcs };
   });
 
-  // Update local caches
+  // Update local hash cache
   for (const [regionId, hash] of regionPixelHashes) {
     regionPixelHashCache.set(regionId, hash);
   }
