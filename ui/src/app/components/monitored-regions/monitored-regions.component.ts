@@ -2348,7 +2348,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     const newCalc = {
       id: crypto.randomUUID(),
       name: 'New Calculation',
-      type: 'MedianPixelColor',
+      type: 'ColorThreshold',
       skipIfUnchanged: true,
       defaultValueMode: 'defaultValue',
       colorStateMappings: [],
@@ -2469,7 +2469,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     if (!calc.colorThresholdMappings) calc.colorThresholdMappings = [];
     calc.colorThresholdMappings.push({
       color: { red: 0, green: 0, blue: 0 },
-      matchThreshold: 80,
+      matchThreshold: 95,
       consecutiveRequired: 1,
       stateValue: '',
     });

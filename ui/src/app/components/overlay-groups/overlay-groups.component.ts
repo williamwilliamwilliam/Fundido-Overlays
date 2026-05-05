@@ -6,12 +6,13 @@ import { Subscription } from 'rxjs';
 import { PendingChangesComponent } from '../../guards/pending-changes.guard';
 import { ElectronService } from '../../services/electron.service';
 import { PendingChangesService } from '../../services/pending-changes.service';
+import { SearchableRegionSelectComponent } from '../shared/searchable-region-select.component';
 
 @Component({
   selector: 'app-overlay-groups',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, SearchableRegionSelectComponent],
   template: `
     <div class="page">
       <h2>Overlay Groups</h2>
@@ -228,10 +229,11 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                 <input type="checkbox" [(ngModel)]="cond.negate" (ngModelChange)="onFieldChanged()" />
                 NOT
               </label>
-              <select [(ngModel)]="cond.monitoredRegionId" (ngModelChange)="onRegionSelectedForCondition(cond)">
-                <option value="">Select Region</option>
-                <option *ngFor="let r of monitoredRegions; trackBy: trackByRegionId" [value]="r.id">{{ r.name }}</option>
-              </select>
+              <app-searchable-region-select
+                [regions]="monitoredRegions"
+                [selectedRegionId]="cond.monitoredRegionId"
+                (regionSelected)="cond.monitoredRegionId = $event; onRegionSelectedForCondition(cond)">
+              </app-searchable-region-select>
               <select [(ngModel)]="cond.stateCalculationId" (ngModelChange)="onCalculationSelectedForCondition(cond)">
                 <option value="">Select Calc</option>
                 <option *ngFor="let c of getCalcsForRegion(cond.monitoredRegionId); trackBy: trackByCalcId" [value]="c.id">{{ c.name }}</option>
@@ -401,9 +403,11 @@ import { PendingChangesService } from '../../services/pending-changes.service';
           <div *ngIf="overlay.contentType === 'regionMirror' && overlay.regionMirrorConfig" class="content-config">
             <div class="config-row">
               <label>Region
-                <select [(ngModel)]="overlay.regionMirrorConfig.monitoredRegionId" (ngModelChange)="onFieldChanged()">
-                  <option *ngFor="let region of monitoredRegions; trackBy: trackByRegionId" [ngValue]="region.id">{{ region.name }}</option>
-                </select>
+                <app-searchable-region-select
+                  [regions]="monitoredRegions"
+                  [selectedRegionId]="overlay.regionMirrorConfig.monitoredRegionId"
+                  (regionSelected)="overlay.regionMirrorConfig.monitoredRegionId = $event; onFieldChanged()">
+                </app-searchable-region-select>
               </label>
               <label>Scale <input type="number" step="0.1" [(ngModel)]="overlay.regionMirrorConfig.size.scale" (ngModelChange)="onFieldChanged()" style="width:60px" /></label>
               <label>Max W <input type="number" [(ngModel)]="overlay.regionMirrorConfig.size.maxWidth" (ngModelChange)="onFieldChanged()" style="width:60px" /></label>
@@ -455,10 +459,11 @@ import { PendingChangesService } from '../../services/pending-changes.service';
                     <input type="checkbox" [(ngModel)]="cond.negate" (ngModelChange)="onFieldChanged()" />
                     NOT
                   </label>
-                  <select [(ngModel)]="cond.monitoredRegionId" (ngModelChange)="onRegionSelectedForCondition(cond)">
-                    <option value="">Select Region</option>
-                    <option *ngFor="let region of monitoredRegions; trackBy: trackByRegionId" [ngValue]="region.id">{{ region.name }}</option>
-                  </select>
+                  <app-searchable-region-select
+                    [regions]="monitoredRegions"
+                    [selectedRegionId]="cond.monitoredRegionId"
+                    (regionSelected)="cond.monitoredRegionId = $event; onRegionSelectedForCondition(cond)">
+                  </app-searchable-region-select>
                   <select [(ngModel)]="cond.stateCalculationId" (ngModelChange)="onCalculationSelectedForCondition(cond)">
                     <option value="">Select Calc</option>
                     <option *ngFor="let calc of getCalcsForRegion(cond.monitoredRegionId); trackBy: trackByCalcId" [ngValue]="calc.id">{{ calc.name }}</option>

@@ -103,7 +103,15 @@ parentPort!.on('message', (request: EvalRequest) => {
       // Pixel changed this pass — reset the countdown. The current pass will
       // evaluate normally because regionIsUnchanged will be false. The countdown
       // covers the N passes immediately AFTER the change settles.
-      regionPostChangeEvalCountdown.set(region.id, EXTRA_EVAL_PASSES_AFTER_CHANGE);
+      //
+      // The window size is at least EXTRA_EVAL_PASSES_AFTER_CHANGE, but raised to:
+      //   - the region's maximum ColorThreshold consecutiveRequired so the
+      //     consecutive counter has enough passes to reach its target, and
+      //   - ceil(maxOcrMinDurationMs / evalIntervalMs) so the OCR duration
+      //     clock has enough time to accumulate before skipIfUnchanged fires.
+      const regionEvalIntervalMs = getRegionEvaluationIntervalMs(region, globalMinCalcIntervalMs);
+      const requiredPostChangePasses = computePostChangeEvalPasses(region, EXTRA_EVAL_PASSES_AFTER_CHANGE, regionEvalIntervalMs);
+      regionPostChangeEvalCountdown.set(region.id, requiredPostChangePasses);
       regionIsInPostChangeWindow.set(region.id, false);
     } else {
       // Pixel is unchanged — check whether we are still in the post-change window.
@@ -209,4 +217,53 @@ function getRegionEvaluationIntervalMs(region: any, globalMinCalcIntervalMs: num
   }
 
   return globalMinCalcIntervalMs;
+}
+
+/**
+ * Computes how many forced-evaluation passes should run after a pixel hash
+ * change for a given region.
+ *
+ * The base value covers transition-frame noise (see EXTRA_EVAL_PASSES_AFTER_CHANGE).
+ *
+ * ColorThreshold calculations can require N consecutive passing evaluations
+ * before a state value is committed. If skipIfUnchanged cuts off evaluations
+ * before N passes accumulate, the consecutive counter in state-calculation.service
+ * never reaches the target and the state never transitions — even though the
+ * pixel has been the correct color the whole time.
+ *
+ * OCR calculations can require a match to hold continuously for minDurationMs
+ * before a state value is committed. The OCR service is fed the throttled region
+ * list, so if skipIfUnchanged removes the OCR calc before minDurationMs has
+ * elapsed, the duration clock stalls and the state never transitions.
+ *
+ * Fix: the post-change window must be at least as long as:
+ *   - the largest consecutiveRequired across all ColorThreshold mappings, AND
+ *   - ceil(maxMinDurationMs / evalIntervalMs) for the largest OCR minDurationMs.
+ *
+ * @param evalIntervalMs  The effective per-region evaluation interval — used to
+ *                        convert OCR minDurationMs into a pass count.
+ */
+function computePostChangeEvalPasses(region: any, basePasses: number, evalIntervalMs: number): number {
+  let requiredPasses = basePasses;
+  for (const calc of (region.stateCalculations || [])) {
+    if (calc.type === 'ColorThreshold') {
+      for (const mapping of (calc.colorThresholdMappings || [])) {
+        const consecutiveRequired = (mapping.consecutiveRequired as number) || 1;
+        if (consecutiveRequired > requiredPasses) {
+          requiredPasses = consecutiveRequired;
+        }
+      }
+    } else if (calc.type === 'OCR') {
+      for (const mapping of (calc.substringMappings || [])) {
+        const minDurationMs = (mapping.minDurationMs as number) || 0;
+        if (minDurationMs > 0) {
+          const passesNeededForDuration = Math.ceil(minDurationMs / evalIntervalMs);
+          if (passesNeededForDuration > requiredPasses) {
+            requiredPasses = passesNeededForDuration;
+          }
+        }
+      }
+    }
+  }
+  return requiredPasses;
 }

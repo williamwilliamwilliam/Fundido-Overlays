@@ -608,6 +608,45 @@ const regionPixelHashCache = new Map<string, number>();
 const regionPostChangeEvalCountdown = new Map<string, number>();
 const FALLBACK_EXTRA_EVAL_PASSES_AFTER_CHANGE = 2;
 
+/**
+ * Computes the required post-change evaluation window for a region.
+ * Mirrors the same function in state-eval.worker.ts — see that file for the
+ * full explanation. Short version:
+ *   - ColorThreshold calcs with consecutiveRequired > N need at least N forced
+ *     passes on a stable pixel or the consecutive counter never reaches its target.
+ *   - OCR calcs with minDurationMs > 0 need the window to stay open long enough
+ *     for the OCR service to accumulate the full duration. The OCR service is fed
+ *     the throttled region list, so if skipIfUnchanged fires too early the duration
+ *     clock stalls and the state never transitions.
+ *
+ * @param evalIntervalMs  The effective per-region evaluation interval — used to
+ *                        convert OCR minDurationMs into a pass count.
+ */
+function computePostChangeEvalPassesForRegion(region: any, basePasses: number, evalIntervalMs: number): number {
+  let requiredPasses = basePasses;
+  for (const calc of (region.stateCalculations || [])) {
+    if (calc.type === 'ColorThreshold') {
+      for (const mapping of (calc.colorThresholdMappings || [])) {
+        const consecutiveRequired = (mapping.consecutiveRequired as number) || 1;
+        if (consecutiveRequired > requiredPasses) {
+          requiredPasses = consecutiveRequired;
+        }
+      }
+    } else if (calc.type === 'OCR') {
+      for (const mapping of (calc.substringMappings || [])) {
+        const minDurationMs = (mapping.minDurationMs as number) || 0;
+        if (minDurationMs > 0) {
+          const passesNeededForDuration = Math.ceil(minDurationMs / evalIntervalMs);
+          if (passesNeededForDuration > requiredPasses) {
+            requiredPasses = passesNeededForDuration;
+          }
+        }
+      }
+    }
+  }
+  return requiredPasses;
+}
+
 /** Rolling window of time-in-calculation per calcKey. Stores [timestamp, durationMs] pairs. */
 const calcTimeWindow = new Map<string, Array<[number, number]>>();
 const CALC_TIME_WINDOW_SECONDS = 10;
@@ -1147,7 +1186,9 @@ function startStateEvaluationLoopFallback(): void {
       const hashChanged = previousHash === undefined || previousHash !== currentHash;
 
       if (hashChanged) {
-        regionPostChangeEvalCountdown.set(region.id, FALLBACK_EXTRA_EVAL_PASSES_AFTER_CHANGE);
+        const regionEvalIntervalMs = getRegionEvaluationIntervalMs(region, minCalcIntervalMs);
+        const requiredPostChangePasses = computePostChangeEvalPassesForRegion(region, FALLBACK_EXTRA_EVAL_PASSES_AFTER_CHANGE, regionEvalIntervalMs);
+        regionPostChangeEvalCountdown.set(region.id, requiredPostChangePasses);
         regionIsInPostChangeWindow.set(region.id, false);
       } else {
         const remainingPasses = regionPostChangeEvalCountdown.get(region.id) ?? 0;
