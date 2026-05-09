@@ -257,6 +257,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
               {{ getCollapsedStateValue(region) || '' }}
             </div>
           </div>
+          <button (click)="cloneRegion(region)">Clone</button>
           <button class="danger-text" (click)="removeRegionById(region.id)">Remove</button>
         </div>
         <ng-container *ngIf="isRegionExpanded(region.id)">
@@ -2154,6 +2155,38 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     const regionIndex = this.regions.findIndex((region) => region.id === regionId);
     if (regionIndex < 0) return;
     await this.removeRegion(regionIndex);
+  }
+
+  cloneRegion(sourceRegion: any): void {
+    const clonedRegion = JSON.parse(JSON.stringify(sourceRegion));
+
+    // Assign a fresh ID to the cloned region and all nested calculations so
+    // nothing shares an ID with the original.
+    clonedRegion.id = crypto.randomUUID();
+    clonedRegion.name = `${sourceRegion.name} (copy)`;
+    clonedRegion.lastUpdatedAt = Date.now();
+    for (const calc of (clonedRegion.stateCalculations || [])) {
+      calc.id = crypto.randomUUID();
+    }
+
+    // Insert the clone immediately after its source so it's easy to find.
+    const sourceIndex = this.regions.findIndex((region) => region.id === sourceRegion.id);
+    const insertIndex = sourceIndex >= 0 ? sourceIndex + 1 : this.regions.length;
+    this.regions.splice(insertIndex, 0, clonedRegion);
+
+    // Expand the clone so the user can immediately edit it.
+    this.collapsedRegionIds.delete(clonedRegion.id);
+    this.saveCollapsedRegionState();
+    this.pushWorkingRegions();
+    this.changeDetectorRef.markForCheck();
+
+    // Focus the name field so the user can rename it straight away.
+    setTimeout(() => {
+      const nameInput = document.querySelector(`[data-region-name-id="${clonedRegion.id}"]`) as HTMLInputElement | null;
+      if (!nameInput) return;
+      nameInput.focus();
+      nameInput.select();
+    }, 0);
   }
 
   get visibleRegions(): any[] {

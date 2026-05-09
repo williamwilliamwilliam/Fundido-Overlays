@@ -1039,17 +1039,12 @@ function startStateEvaluationLoop(): void {
     const enabledOverlayGroups = getProfileActivatedOverlayGroups(currentConfigRef.config).filter((g: any) => g.enabled !== false);
     perfCounters.activeOverlayGroupCount = enabledOverlayGroups.length;
 
-    // Convert to physical pixel coordinates
-    const captureSourceString = currentConfigRef.config.gameCapture.captureSource;
-    const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
-    const captureDisplay = captureService.getDisplayMetrics(displayIndex);
-    const displayOriginX = captureDisplay.originX;
-    const displayOriginY = captureDisplay.originY;
-    const dpiScaleFactor = captureDisplay.scaleFactor || 1;
-
-    captureDisplayCache.originX = displayOriginX;
-    captureDisplayCache.originY = displayOriginY;
-    captureDisplayCache.scaleFactor = dpiScaleFactor;
+    // Convert to physical pixel coordinates using the cached display metrics.
+    // captureDisplayCache is populated at startup and refreshed whenever the
+    // capture source changes — no need to call getDisplayMetrics() here.
+    const displayOriginX = captureDisplayCache.originX;
+    const displayOriginY = captureDisplayCache.originY;
+    const dpiScaleFactor = captureDisplayCache.scaleFactor;
 
     const physicalBoundsRegions = runtimeRegions.map((region: any) => ({
       ...region,
@@ -1154,22 +1149,14 @@ function startStateEvaluationLoopFallback(): void {
     const minCalcIntervalMs = Math.round(1000 / maxCalcFrequency);
     const nowMs = Date.now();
 
-    const captureSourceString = currentConfigRef.config.gameCapture.captureSource;
-    const displayIndex = captureSourceString === 'primary' ? 0 : (parseInt(captureSourceString, 10) || 0);
-    const captureDisplay = captureService.getDisplayMetrics(displayIndex);
-
-    captureDisplayCache.originX = captureDisplay.originX;
-    captureDisplayCache.originY = captureDisplay.originY;
-    captureDisplayCache.scaleFactor = captureDisplay.scaleFactor || 1;
-
     const physicalBoundsRegions = runtimeRegions.map((region: any) => ({
       ...region,
       alwaysEvaluate: dirtyRegionIds.has(region.sourceMonitoredRegionId ?? region.id),
       bounds: {
-        x: Math.round((region.bounds.x - captureDisplay.originX) * captureDisplay.scaleFactor),
-        y: Math.round((region.bounds.y - captureDisplay.originY) * captureDisplay.scaleFactor),
-        width: Math.round(region.bounds.width * captureDisplay.scaleFactor),
-        height: Math.round(region.bounds.height * captureDisplay.scaleFactor),
+        x: Math.round((region.bounds.x - captureDisplayCache.originX) * captureDisplayCache.scaleFactor),
+        y: Math.round((region.bounds.y - captureDisplayCache.originY) * captureDisplayCache.scaleFactor),
+        width: Math.round(region.bounds.width * captureDisplayCache.scaleFactor),
+        height: Math.round(region.bounds.height * captureDisplayCache.scaleFactor),
       },
     }));
 
@@ -1298,7 +1285,14 @@ app.whenReady().then(() => {
     globalEnabledRef,
     pickerActiveRef,
     syncPreviewRuntimeState,
+    refreshCaptureDisplayCache,
   );
+
+  // Keep the display-metrics cache current if the user connects/disconnects a
+  // monitor or changes resolution while the app is running.
+  screen.on('display-added', refreshCaptureDisplayCache);
+  screen.on('display-removed', refreshCaptureDisplayCache);
+  screen.on('display-metrics-changed', refreshCaptureDisplayCache);
 
   ipcMain.on(IpcChannels.UI_ACTIVE_PAGE, (_event: any, page: string) => {
     uiActivePageRef.page = page;

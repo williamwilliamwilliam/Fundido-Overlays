@@ -26,6 +26,7 @@ export function registerIpcHandlers(
   globalEnabledRef: { enabled: boolean },
   pickerActiveRef: { active: boolean },
   syncPreviewRuntimeState: () => void,
+  refreshCaptureDisplayCache: () => void,
 ): void {
 
   // -------------------------------------------------------------------------
@@ -87,6 +88,9 @@ export function registerIpcHandlers(
     applyProfileActivationToOverlayGroups(config);
     currentConfigRef.config = config;
     configService.save(config);
+    // Capture source may have changed — refresh the display metrics cache so the
+    // eval loops immediately use the correct origin/scale without restarting.
+    refreshCaptureDisplayCache();
     // Sync overlay windows whenever config is saved
     overlayWindowManager.syncOverlayWindows(getProfileActivatedOverlayGroups(config));
     // Apply cursor frequency immediately so the change takes effect without restarting

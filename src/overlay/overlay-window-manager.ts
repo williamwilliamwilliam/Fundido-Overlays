@@ -419,6 +419,11 @@ export class OverlayWindowManager {
         contextIsolation: false,
         nodeIntegration: true,
         webSecurity: false,
+        // The overlay window is focusable: false and can never receive OS focus,
+        // so Chromium permanently classifies it as a background page and throttles
+        // its renderer task queue — causing IPC messages to stall for up to ~1s
+        // before being processed, which manifests as the overlay freezing.
+        backgroundThrottling: false,
       },
     });
 
