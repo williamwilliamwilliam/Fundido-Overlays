@@ -1,6 +1,6 @@
 {
   "name": "fundido-overlays",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Game overlay tool that captures frames, evaluates screen regions, and displays responsive overlays.",
   "main": "dist/electron/main.js",
   "scripts": {
@@ -51,18 +51,24 @@
       {
         "from": "docs/user",
         "to": "docs",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "dir",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
