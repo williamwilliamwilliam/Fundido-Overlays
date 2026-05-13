@@ -7,12 +7,13 @@ import { PendingChangesComponent } from '../../guards/pending-changes.guard';
 import { ElectronService } from '../../services/electron.service';
 import { PendingChangesService } from '../../services/pending-changes.service';
 import { SearchableRegionSelectComponent } from '../shared/searchable-region-select.component';
+import { SearchableSoundSelectComponent } from '../shared/searchable-sound-select.component';
 
 @Component({
   selector: 'app-overlay-groups',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, RouterLink, SearchableRegionSelectComponent],
+  imports: [CommonModule, FormsModule, RouterLink, SearchableRegionSelectComponent, SearchableSoundSelectComponent],
   template: `
     <div class="page">
       <h2>Overlay Groups</h2>
@@ -355,6 +356,18 @@ import { SearchableRegionSelectComponent } from '../shared/searchable-region-sel
                 (ngModelChange)="onDefaultOpacityChanged(overlay, $event)" />
               <span class="opacity-value">{{ (overlay.defaultOpacity * 100) | number:'1.0-0' }}%</span>
             </label>
+          </div>
+
+          <!-- ===== SOUND ON BECOME VISIBLE ===== -->
+          <div class="sound-row">
+            <label class="sound-row-label">Sound on Show</label>
+            <app-searchable-sound-select
+              [soundFilePaths]="soundFileIndex"
+              [selectedSoundFilePath]="overlay.soundFileOnBecomeVisible || ''"
+              [soundVolume]="soundVolume"
+              (soundFileSelected)="overlay.soundFileOnBecomeVisible = $event || undefined; onFieldChanged()"
+              (soundPreviewRequested)="previewSound($event)">
+            </app-searchable-sound-select>
           </div>
 
           <!-- ===== TEXT CONFIG ===== -->
@@ -981,6 +994,22 @@ import { SearchableRegionSelectComponent } from '../shared/searchable-region-sel
       border-bottom: 1px solid var(--color-border);
     }
 
+    .sound-row {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      padding: var(--spacing-xs) 0;
+      border-bottom: 1px solid var(--color-border);
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .sound-row-label {
+      font-size: 0.85rem;
+      color: var(--color-text-secondary);
+      white-space: nowrap;
+      min-width: 90px;
+    }
+
     .checkbox-label {
       display: flex;
       align-items: center;
@@ -1340,6 +1369,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   groups: any[] = [];
   monitoredRegions: any[] = [];
   profiles: any[] = [];
+  soundFileIndex: string[] = [];
+  soundVolume = 0.5;
   showImportDialog = false;
   showUnsavedChangesDialog = false;
   importJsonText = '';
@@ -1427,6 +1458,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.syncCollapsedGroupState();
     this.monitoredRegions = config.monitoredRegions || [];
     this.profiles = config.profiles || [];
+    this.soundFileIndex = await this.electronService.soundGetIndex();
+    this.soundVolume = config.soundVolume ?? 0.5;
     this.applyProfileActivationToGroups();
     this.buildOverlayCrossRefs();
     this.changeDetectorRef.markForCheck();
@@ -1836,6 +1869,10 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
       overlay.imageConfig.filePath = filePath;
       this.markGroupsChanged();
     }
+  }
+
+  previewSound(filePath: string): void {
+    this.electronService.soundPlayPreview(filePath, this.soundVolume);
   }
 
   // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Subscription } from 'rxjs';
 import { ElectronService } from '../../services/electron.service';
 
 @Component({
@@ -272,6 +273,78 @@ import { ElectronService } from '../../services/electron.service';
         </div>
       </div>
 
+      <div class="settings-section">
+        <h3>Sound Library</h3>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label">Playback Volume</label>
+            <span class="setting-hint">
+              Global volume for overlay sounds. Applies when an overlay transitions from hidden to visible.
+            </span>
+          </div>
+          <div class="setting-control">
+            <input
+              type="range"
+              min="0" max="100" step="1"
+              [(ngModel)]="soundVolumePercent"
+              (ngModelChange)="onSettingChanged()" />
+            <span class="setting-value">{{ soundVolumePercent }}%</span>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label">Sound Folders</label>
+            <span class="setting-hint">
+              Add folders to scan for .ogg and .mp3 files. Subfolders are included.
+              The indexed files appear in the sound picker when configuring overlay sounds.
+            </span>
+          </div>
+          <div class="setting-control setting-control-vertical">
+            <div *ngFor="let folderPath of soundLibraryFolderPaths; let i = index" class="sound-folder-row">
+              <span class="sound-folder-path" [title]="folderPath">{{ folderPath }}</span>
+              <button class="danger-text small" (click)="removeSoundFolder(i)">Remove</button>
+            </div>
+            <div *ngIf="soundLibraryFolderPaths.length === 0" class="sound-folder-empty">
+              No folders configured.
+            </div>
+            <button class="refresh-btn" (click)="addSoundFolder()">+ Add Folder</button>
+            <button class="refresh-btn" [disabled]="soundLibraryFolderPaths.length === 0 || soundIndexingInProgress" (click)="reindexSoundFolders()">
+              {{ soundIndexingInProgress ? 'Indexing...' : 'Re-index' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="setting-row" *ngIf="soundFileIndex.length > 0 || soundIndexingInProgress">
+          <div class="setting-info">
+            <label class="setting-label">Indexed Files</label>
+          </div>
+          <div class="setting-control">
+            <span class="setting-value" style="min-width: auto">{{ soundFileIndex.length }} file(s) indexed</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Indexing progress modal -->
+      <div *ngIf="soundIndexingInProgress" class="modal-backdrop">
+        <div class="modal-dialog">
+          <h3>Indexing Sound Files</h3>
+          <p class="modal-description">
+            Scanning your folders for .ogg and .mp3 files&hellip;
+          </p>
+          <p class="modal-progress">
+            {{ soundIndexProgressFilesFound }} file(s) found
+            <ng-container *ngIf="soundIndexProgressCurrentFolder">
+              &mdash; {{ soundIndexProgressCurrentFolder }}
+            </ng-container>
+          </p>
+          <div class="modal-actions">
+            <button (click)="cancelSoundIndexing()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
       <div class="save-bar" *ngIf="saveMessage">
         <span class="save-message">{{ saveMessage }}</span>
       </div>
@@ -380,6 +453,77 @@ import { ElectronService } from '../../services/electron.service';
       cursor: pointer;
     }
     .copyable-command:hover { background-color: var(--color-bg-panel); }
+
+    .setting-control-vertical {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .sound-folder-row {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      width: 100%;
+    }
+
+    .sound-folder-path {
+      flex: 1;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--color-text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .sound-folder-empty {
+      font-size: 0.85rem;
+      color: var(--color-text-secondary);
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal-dialog {
+      background: var(--color-bg-secondary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--spacing-lg);
+      min-width: 360px;
+      max-width: 560px;
+    }
+
+    .modal-dialog h3 {
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .modal-description {
+      color: var(--color-text-secondary);
+      font-size: 0.9rem;
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .modal-progress {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--color-text-primary);
+      margin-bottom: var(--spacing-md);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: var(--spacing-sm);
+    }
   `],
 })
 export class SettingsComponent implements OnInit, OnDestroy {
@@ -410,9 +554,18 @@ export class SettingsComponent implements OnInit, OnDestroy {
   ollamaKeepAlive = '5m';
   ollamaModels: Array<{ name: string; size: number }> = [];
 
+  // Sound Library settings
+  soundLibraryFolderPaths: string[] = [];
+  soundVolumePercent = 50;
+  soundFileIndex: string[] = [];
+  soundIndexingInProgress = false;
+  soundIndexProgressFilesFound = 0;
+  soundIndexProgressCurrentFolder = '';
+
   saveMessage = '';
   private saveDebounceTimer: any = null;
   private static readonly SAVE_DEBOUNCE_MS = 500;
+  private soundProgressSubscription: Subscription | null = null;
 
   constructor(private readonly electronService: ElectronService) {}
 
@@ -446,6 +599,25 @@ export class SettingsComponent implements OnInit, OnDestroy {
       this.ollamaKeepAlive = ollama.keepAlive ?? '5m';
     }
 
+    this.soundLibraryFolderPaths = [...(config.soundLibraryFolderPaths ?? [])];
+    this.soundVolumePercent = Math.round((config.soundVolume ?? 0.5) * 100);
+    this.soundFileIndex = await this.electronService.soundGetIndex();
+
+    this.soundProgressSubscription = this.electronService.soundIndexProgressStream.subscribe((progress) => {
+      this.soundIndexProgressFilesFound = progress.filesFound;
+      this.soundIndexProgressCurrentFolder = progress.currentFolder;
+
+      const scanFinished = progress.complete;
+      if (scanFinished) {
+        this.soundIndexingInProgress = false;
+        if (!progress.cancelled) {
+          this.electronService.soundGetIndex().then((index) => {
+            this.soundFileIndex = index;
+          });
+        }
+      }
+    });
+
     await this.refreshDisplays();
     await this.refreshOllamaModels();
   }
@@ -455,6 +627,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
       clearTimeout(this.saveDebounceTimer);
       this.saveSettingsNow();
     }
+    this.soundProgressSubscription?.unsubscribe();
   }
 
   async refreshDisplays(): Promise<void> {
@@ -520,9 +693,64 @@ export class SettingsComponent implements OnInit, OnDestroy {
       keepAlive: this.ollamaKeepAlive,
     };
 
+    config.soundLibraryFolderPaths = [...this.soundLibraryFolderPaths];
+    config.soundVolume = this.soundVolumePercent / 100;
+
     await this.electronService.saveConfig(config);
     await this.electronService.restartCaptureIfRunning();
     this.saveMessage = 'Saved';
+  }
+
+  // -- Sound Library methods -------------------------------------------------
+
+  async addSoundFolder(): Promise<void> {
+    const selectedFolderPath = await this.electronService.openFileDialog({
+      properties: ['openDirectory'],
+    });
+
+    const folderWasSelected = !!selectedFolderPath;
+    if (!folderWasSelected) return;
+
+    const folderAlreadyAdded = this.soundLibraryFolderPaths.includes(selectedFolderPath);
+    if (folderAlreadyAdded) return;
+
+    this.soundLibraryFolderPaths = [...this.soundLibraryFolderPaths, selectedFolderPath];
+    await this.saveSoundFoldersAndReindex();
+  }
+
+  async removeSoundFolder(folderIndex: number): Promise<void> {
+    this.soundLibraryFolderPaths = this.soundLibraryFolderPaths.filter((_, index) => index !== folderIndex);
+    await this.saveSoundFoldersAndReindex();
+  }
+
+  async reindexSoundFolders(): Promise<void> {
+    await this.startSoundIndexing();
+  }
+
+  async cancelSoundIndexing(): Promise<void> {
+    await this.electronService.soundCancelIndex();
+    // Modal will close when the progress event arrives with complete: true, cancelled: true
+  }
+
+  private async saveSoundFoldersAndReindex(): Promise<void> {
+    const config = await this.electronService.loadConfig();
+    config.soundLibraryFolderPaths = [...this.soundLibraryFolderPaths];
+    await this.electronService.saveConfig(config);
+
+    const hasFolders = this.soundLibraryFolderPaths.length > 0;
+    if (hasFolders) {
+      await this.startSoundIndexing();
+    } else {
+      // No folders left — clear the index display
+      this.soundFileIndex = [];
+    }
+  }
+
+  private async startSoundIndexing(): Promise<void> {
+    this.soundIndexingInProgress = true;
+    this.soundIndexProgressFilesFound = 0;
+    this.soundIndexProgressCurrentFolder = '';
+    await this.electronService.soundIndexFolders(this.soundLibraryFolderPaths);
   }
 
   /** Helper for template - converts number to string for select binding. */

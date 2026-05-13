@@ -97,6 +97,13 @@ export interface FundidoApi {
   onAppCloseRequested(callback: () => void): void;
   setActivePage(page: string): void;
   respondToAppCloseRequest(allowClose: boolean): void;
+  // Sound Library
+  soundIndexFolders(folderPaths: string[]): Promise<{ success: boolean }>;
+  soundGetIndex(): Promise<string[]>;
+  soundCancelIndex(): Promise<{ success: boolean }>;
+  soundPlayPreview(filePath: string, volume: number): Promise<{ success: boolean }>;
+  onSoundIndexProgress(callback: (progress: { filesFound: number; currentFolder: string; complete: boolean; cancelled: boolean }) => void): void;
+  offSoundIndexProgress(callback: (...args: any[]) => void): void;
 }
 
 declare global {

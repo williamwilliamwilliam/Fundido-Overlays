@@ -369,6 +369,11 @@ export interface Overlay {
    * If no rules match, defaultVisible and defaultOpacity apply.
    */
   rules: OverlayRule[];
+  /**
+   * Absolute path to a .ogg or .mp3 file to play when this overlay transitions
+   * from hidden to visible. Empty string or undefined means no sound.
+   */
+  soundFileOnBecomeVisible?: string;
 }
 
 /** A group that controls layout and positioning for a set of overlays. */
@@ -480,6 +485,16 @@ export interface FundidoConfig {
   profileRulesEnabled?: boolean;
   /** Max state calculation evaluations per second per calculation. Default 10. */
   maxCalcFrequency?: number;
+  /**
+   * Folder paths to scan for .ogg and .mp3 sound files.
+   * Scanned recursively. Results are used to populate the sound file picker in overlay config.
+   */
+  soundLibraryFolderPaths?: string[];
+  /**
+   * Global playback volume for overlay sounds (0.0 = silent, 1.0 = full volume).
+   * Applied to all sounds played by the overlay renderer. Default 0.5.
+   */
+  soundVolume?: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import { OverlayWindowManager } from '../overlay/overlay-window-manager';
 import { DirtyRegionOverlayManager } from '../overlay/dirty-region-overlay-manager';
 import { OcrService } from '../state/ocr.service';
 import { OllamaService } from '../state/ollama.service';
+import { SoundLibraryService } from '../sound/sound-library.service';
 import { logger, LogCategory } from '../shared/logger';
 
 /**
@@ -21,6 +22,7 @@ export function registerIpcHandlers(
   dirtyRegionOverlayManager: DirtyRegionOverlayManager,
   ocrService: OcrService,
   ollamaService: OllamaService,
+  soundLibraryService: SoundLibraryService,
   currentConfigRef: { config: FundidoConfig },
   workingRegionsRef: { regions: any[] | null },
   globalEnabledRef: { enabled: boolean },
@@ -52,7 +54,10 @@ export function registerIpcHandlers(
     }
 
     // Restore overlay windows
-    overlayWindowManager.syncOverlayWindows(getProfileActivatedOverlayGroups(currentConfigRef.config));
+    overlayWindowManager.syncOverlayWindows(
+      getProfileActivatedOverlayGroups(currentConfigRef.config),
+      currentConfigRef.config.soundVolume ?? 0.5,
+    );
     return { success: true };
   });
 
@@ -92,7 +97,10 @@ export function registerIpcHandlers(
     // eval loops immediately use the correct origin/scale without restarting.
     refreshCaptureDisplayCache();
     // Sync overlay windows whenever config is saved
-    overlayWindowManager.syncOverlayWindows(getProfileActivatedOverlayGroups(config));
+    overlayWindowManager.syncOverlayWindows(
+      getProfileActivatedOverlayGroups(config),
+      config.soundVolume ?? 0.5,
+    );
     // Apply cursor frequency immediately so the change takes effect without restarting
     const cursorFrequencyHz = config.overlay?.cursorFrequencyHz ?? 60;
     overlayWindowManager.setCursorFrequencyHz(cursorFrequencyHz);
@@ -250,12 +258,16 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IpcChannels.DIALOG_OPEN_FILE, async (_event: IpcMainInvokeEvent, options: any) => {
     const { dialog } = require('electron');
+
+    // Allow callers to request directory selection instead of file selection
+    const isDirectoryPicker = Array.isArray(options?.properties) && options.properties.includes('openDirectory');
+
     const result = await dialog.showOpenDialog({
-      properties: ['openFile'],
-      filters: options?.filters || [
+      properties: isDirectoryPicker ? ['openDirectory'] : ['openFile'],
+      filters: isDirectoryPicker ? undefined : (options?.filters || [
         { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg'] },
         { name: 'All Files', extensions: ['*'] },
-      ],
+      ]),
     });
     const wasCancelled = result.canceled || result.filePaths.length === 0;
     if (wasCancelled) return null;
@@ -268,5 +280,46 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IpcChannels.OLLAMA_LIST_MODELS, async (_event: IpcMainInvokeEvent) => {
     return ollamaService.listModels();
+  });
+
+  // -------------------------------------------------------------------------
+  // Sound Library
+  // -------------------------------------------------------------------------
+
+  ipcMain.handle(IpcChannels.SOUND_GET_INDEX, (_event: IpcMainInvokeEvent) => {
+    logger.debug(LogCategory.Ipc, 'SOUND_GET_INDEX invoked');
+    return soundLibraryService.getIndex();
+  });
+
+  ipcMain.handle(IpcChannels.SOUND_CANCEL_INDEX, (_event: IpcMainInvokeEvent) => {
+    logger.debug(LogCategory.Ipc, 'SOUND_CANCEL_INDEX invoked');
+    soundLibraryService.cancelIndexing();
+    return { success: true };
+  });
+
+  ipcMain.handle(IpcChannels.SOUND_PLAY_PREVIEW, (_event: IpcMainInvokeEvent, filePath: string, volume: number) => {
+    logger.debug(LogCategory.Ipc, `SOUND_PLAY_PREVIEW invoked for: ${filePath}`);
+    overlayWindowManager.playSound(filePath, volume);
+    return { success: true };
+  });
+
+  ipcMain.handle(IpcChannels.SOUND_INDEX_FOLDERS, async (_event: IpcMainInvokeEvent, folderPaths: string[]) => {
+    logger.info(LogCategory.Ipc, `SOUND_INDEX_FOLDERS invoked with ${folderPaths.length} folder(s)`);
+
+    const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+
+    const sendProgressToRenderer = (progress: { filesFound: number; currentFolder: string; complete: boolean; cancelled: boolean }) => {
+      const windowIsOpen = mainWindow && !mainWindow.isDestroyed();
+      if (windowIsOpen) {
+        mainWindow.webContents.send(IpcChannels.SOUND_INDEX_PROGRESS, progress);
+      }
+    };
+
+    // Run indexing without awaiting — progress arrives via IPC events
+    soundLibraryService.indexFolders(folderPaths, sendProgressToRenderer).catch((error) => {
+      logger.error(LogCategory.Ipc, 'Sound indexing failed', error);
+    });
+
+    return { success: true };
   });
 }

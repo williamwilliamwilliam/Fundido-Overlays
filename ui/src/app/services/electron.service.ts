@@ -186,6 +186,31 @@ export class ElectronService {
     return window.fundidoApi.ollamaListModels();
   }
 
+  // -- Sound Library ----------------------------------------------------------
+
+  private readonly soundIndexProgress$ = new Subject<{ filesFound: number; currentFolder: string; complete: boolean; cancelled: boolean }>();
+  public readonly soundIndexProgressStream = this.soundIndexProgress$.asObservable();
+
+  public async soundIndexFolders(folderPaths: string[]): Promise<{ success: boolean }> {
+    if (!this.isRunningInElectron) return { success: true };
+    return window.fundidoApi.soundIndexFolders(folderPaths);
+  }
+
+  public async soundGetIndex(): Promise<string[]> {
+    if (!this.isRunningInElectron) return [];
+    return window.fundidoApi.soundGetIndex();
+  }
+
+  public async soundCancelIndex(): Promise<{ success: boolean }> {
+    if (!this.isRunningInElectron) return { success: true };
+    return window.fundidoApi.soundCancelIndex();
+  }
+
+  public async soundPlayPreview(filePath: string, volume: number): Promise<{ success: boolean }> {
+    if (!this.isRunningInElectron) return { success: true };
+    return window.fundidoApi.soundPlayPreview(filePath, volume);
+  }
+
   // -- UI state ----------------------------------------------------------------
 
   public setActivePage(page: string): void {
@@ -235,6 +260,10 @@ export class ElectronService {
 
     window.fundidoApi.onAppCloseRequested(() => {
       this.ngZone.run(() => this.appCloseRequested$.next());
+    });
+
+    window.fundidoApi.onSoundIndexProgress((progress) => {
+      this.ngZone.run(() => this.soundIndexProgress$.next(progress));
     });
   }
 }

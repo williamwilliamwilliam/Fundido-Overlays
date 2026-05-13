@@ -93,3 +93,17 @@ export const APP_CLOSE_RESPONSE = 'app:close-response';
 // Preview state
 // ---------------------------------------------------------------------------
 export const PREVIEW_PAUSED = 'preview:paused';
+
+// ---------------------------------------------------------------------------
+// Sound library
+// ---------------------------------------------------------------------------
+/** Trigger a recursive scan of all configured sound library folders. */
+export const SOUND_INDEX_FOLDERS = 'sound:index-folders';
+/** Return the current list of indexed sound file paths. */
+export const SOUND_GET_INDEX = 'sound:get-index';
+/** Cancel an in-progress indexing operation. */
+export const SOUND_CANCEL_INDEX = 'sound:cancel-index';
+/** Progress update sent from main → renderer while indexing is running. */
+export const SOUND_INDEX_PROGRESS = 'sound:index-progress';
+/** Play a specific sound file at a given volume in the overlay window (for preview). */
+export const SOUND_PLAY_PREVIEW = 'sound:play-preview';

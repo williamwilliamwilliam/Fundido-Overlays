@@ -32,14 +32,20 @@ export class OverlayWindowManager {
     return this.visibleMirrorRegionIds.size;
   }
 
+  /** Current global sound volume (0.0–1.0). Sent to the overlay renderer with every groups-sync. */
+  private currentSoundVolume: number = 0.5;
+
   /**
    * Synchronises the overlay window to match the given list of groups.
    * Creates the window on first call, sends `overlay:groups-sync` to update
    * the renderer when it already exists, and closes it when no groups remain.
    * One BrowserWindow is reused across all groups — no per-group compositor pass.
    */
-  public syncOverlayWindows(overlayGroups: OverlayGroup[]): void {
+  public syncOverlayWindows(overlayGroups: OverlayGroup[], soundVolume: number = 0.5): void {
+    this.currentSoundVolume = soundVolume;
     const enabledGroups = overlayGroups.filter((group) => group.enabled !== false);
+
+    logger.info(LogCategory.Overlay, `[DIAG] syncOverlayWindows called — total groups: ${overlayGroups.length}, enabled: ${enabledGroups.length}, soundVolume: ${soundVolume}`);
 
     // Keep the main-process config map in sync for mirror-visibility evaluation.
     this.overlayGroupConfigs.clear();
@@ -48,6 +54,9 @@ export class OverlayWindowManager {
     }
 
     if (enabledGroups.length === 0) {
+      // Capture the call stack to identify which code path is sending 0 enabled groups
+      const callStack = new Error().stack?.split('\n').slice(2, 6).join(' | ') || 'no stack';
+      logger.info(LogCategory.Overlay, `[DIAG] 0 enabled groups — would close window. Call stack: ${callStack}`);
       const windowExistsAndIsOpen = this.overlayWindow && !this.overlayWindow.isDestroyed();
       if (windowExistsAndIsOpen) {
         logger.info(LogCategory.Overlay, 'No enabled overlay groups — closing overlay window.');
@@ -60,17 +69,31 @@ export class OverlayWindowManager {
     }
 
     const windowNeedsCreation = !this.overlayWindow || this.overlayWindow.isDestroyed();
+    logger.info(LogCategory.Overlay, `[DIAG] windowNeedsCreation: ${windowNeedsCreation}`);
     if (windowNeedsCreation) {
-      this.createOverlayWindow(enabledGroups);
+      this.createOverlayWindow(enabledGroups, soundVolume);
     } else {
       // Window already exists — send the updated group list; renderer diffs and patches the DOM.
-      this.overlayWindow!.webContents.send('overlay:groups-sync', enabledGroups);
+      const payload = { groups: enabledGroups, soundVolume };
+      logger.info(LogCategory.Overlay, `[DIAG] Sending overlay:groups-sync to existing window — groups: ${enabledGroups.length}, payloadIsArray: ${Array.isArray(payload)}`);
+      this.overlayWindow!.webContents.send('overlay:groups-sync', payload);
     }
 
     this.hasCursorFollowingGroups = enabledGroups.some(
       (group) => group.position.mode === 'relativeToCursor',
     );
     this.updateCursorTracking();
+  }
+
+  /**
+   * Instructs the overlay renderer to play a sound file at the given volume.
+   * Used for both live hidden→visible transitions and settings-page preview.
+   */
+  public playSound(filePath: string, volume: number): void {
+    const windowIsOpen = this.overlayWindow && !this.overlayWindow.isDestroyed();
+    if (windowIsOpen) {
+      this.overlayWindow!.webContents.send('overlay:play-sound', { filePath, volume });
+    }
   }
 
   /**
@@ -397,8 +420,8 @@ export class OverlayWindowManager {
     }
   }
 
-  private createOverlayWindow(initialGroups: OverlayGroup[]): void {
-    logger.info(LogCategory.Overlay, `Creating shared overlay window for ${initialGroups.length} group(s).`);
+  private createOverlayWindow(initialGroups: OverlayGroup[], soundVolume: number = 0.5): void {
+    logger.info(LogCategory.Overlay, `[DIAG] createOverlayWindow — ${initialGroups.length} group(s), soundVolume: ${soundVolume}`);
 
     const primaryDisplay = screen.getPrimaryDisplay();
     const displayBounds = primaryDisplay.bounds;
@@ -430,11 +453,33 @@ export class OverlayWindowManager {
     overlayWindow.setIgnoreMouseEvents(true);
     overlayWindow.setAlwaysOnTop(true, 'screen-saver');
 
+    // Relay all overlay renderer console output to the main log so we can see
+    // script errors, diagLog calls, and uncaught exceptions without needing DevTools.
+    const levelToLogFn: Record<number, 'debug' | 'info' | 'warn' | 'error'> = {
+      0: 'debug',
+      1: 'info',
+      2: 'warn',
+      3: 'error',
+    };
+    overlayWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      const logFn = levelToLogFn[level] ?? 'info';
+      logger[logFn](LogCategory.Overlay, `[OVERLAY-RENDERER-CONSOLE] ${message} (${sourceId}:${line})`);
+    });
+
+    overlayWindow.webContents.on('render-process-gone', (_event, details) => {
+      logger.error(LogCategory.Overlay, `[OVERLAY-RENDERER] render-process-gone: reason=${details.reason}, exitCode=${details.exitCode}`);
+    });
+
+    overlayWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+      logger.error(LogCategory.Overlay, `[OVERLAY-RENDERER] did-fail-load: ${errorDescription} (code ${errorCode}) URL: ${validatedURL}`);
+    });
+
     const html = buildOverlayRendererHtml();
     overlayWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
     overlayWindow.webContents.once('did-finish-load', () => {
-      overlayWindow.webContents.send('overlay:groups-sync', initialGroups);
+      logger.info(LogCategory.Overlay, `[DIAG] did-finish-load fired — sending initial groups-sync with ${initialGroups.length} group(s)`);
+      overlayWindow.webContents.send('overlay:groups-sync', { groups: initialGroups, soundVolume });
     });
 
     this.overlayWindow = overlayWindow;
@@ -473,16 +518,96 @@ function buildOverlayRendererHtml(): string {
 <script>
   const { ipcRenderer } = require('electron');
 
+  // Diagnostic helper — writes to both the main process log (via IPC) and a temp file
+  // as a double-redundant fallback. The temp file path is written to the console so
+  // the user can find it even if IPC fails.
+  var _diagLogPath = null;
+  function diagLog(msg) {
+    console.log('[OVERLAY-RENDERER]', msg);
+    try { ipcRenderer.send('debug:overlay-renderer', msg); } catch(e) {}
+    try {
+      if (!_diagLogPath) {
+        _diagLogPath = require('path').join(require('os').tmpdir(), 'fundido-renderer-debug.log');
+        console.log('[OVERLAY-RENDERER] Writing renderer debug log to:', _diagLogPath);
+      }
+      require('fs').appendFileSync(_diagLogPath, new Date().toISOString() + ' ' + msg + '\\n');
+    } catch(e) {}
+  }
+
+  diagLog('Renderer script started — ipcRenderer type: ' + typeof ipcRenderer);
+
   // All active groups, keyed by group ID
   const overlayGroupsById = new Map();
   // The root container element for each group, keyed by group ID
   const groupContainerElementById = new Map();
 
+  // Tracks last known visibility per overlay ID (true = visible, false = hidden).
+  // undefined means the overlay has not been evaluated yet (first frame is not considered a transition).
+  const overlayPreviousVisibilityById = new Map();
+
+  // Global sound volume (0.0–1.0). Updated with every groups-sync.
+  var currentSoundVolume = 0.5;
+
+  // ---------------------------------------------------------------------------
+  // overlay:play-sound — direct play request (used for preview from settings)
+  // Wrapped in try/catch so any registration failure does NOT prevent the
+  // overlay:groups-sync handler below from being set up.
+  // ---------------------------------------------------------------------------
+
+  try {
+    ipcRenderer.on('overlay:play-sound', function(_event, message) {
+      if (!message || !message.filePath) return;
+      try { playSoundFile(message.filePath, message.volume !== undefined ? message.volume : currentSoundVolume); } catch(e) {}
+    });
+    diagLog('overlay:play-sound listener registered');
+  } catch(e) {
+    diagLog('ERROR: Failed to register overlay:play-sound listener: ' + String(e));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sound playback helpers
+  // ---------------------------------------------------------------------------
+
+  // Re-use one Audio element per overlay ID to avoid creating unbounded elements
+  const soundAudioElementById = new Map();
+
+  function playSoundFile(filePath, volume) {
+    var audioEl = new Audio();
+    var fileSrc = filePath;
+    var isAbsoluteWindowsPath = /^[A-Za-z]:/.test(fileSrc);
+    if (isAbsoluteWindowsPath) {
+      fileSrc = 'file:///' + fileSrc.replace(/\\\\/g, '/');
+    }
+    audioEl.src = fileSrc;
+    audioEl.volume = Math.max(0, Math.min(1, volume));
+    audioEl.play().catch(function(err) {
+      console.error('[overlay] Failed to play sound:', err, filePath);
+    });
+  }
+
+  function playSoundForOverlay(overlayId, soundFilePath, volume) {
+    if (!soundFilePath) return;
+    playSoundFile(soundFilePath, volume);
+  }
+
   // ---------------------------------------------------------------------------
   // overlay:groups-sync — full diff/patch of the active group set
   // ---------------------------------------------------------------------------
 
-  ipcRenderer.on('overlay:groups-sync', (_event, groups) => {
+  ipcRenderer.on('overlay:groups-sync', (_event, payload) => {
+    // Accept both the new { groups, soundVolume } format and the legacy plain array format
+    // for backward compatibility during any rolling updates.
+    var isLegacyArrayPayload = Array.isArray(payload);
+    var groups = isLegacyArrayPayload ? payload : (payload && payload.groups ? payload.groups : []);
+    var soundVolume = isLegacyArrayPayload ? 0.5 : (payload && payload.soundVolume !== undefined ? payload.soundVolume : 0.5);
+    currentSoundVolume = soundVolume;
+
+    diagLog('overlay:groups-sync received — isArray: ' + isLegacyArrayPayload + ', payloadType: ' + typeof payload + ', groupCount: ' + (groups ? groups.length : 'null/undefined groups'));
+
+    if (!groups || groups.length === 0) {
+      diagLog('WARNING: groups is empty or null — no containers will be created');
+    }
+
     const incomingGroupIds = new Set(groups.map(function(g) { return g.id; }));
 
     // Remove containers for groups that are no longer in the list
@@ -500,17 +625,19 @@ function buildOverlayRendererHtml(): string {
       overlayGroupsById.set(group.id, group);
       const existingContainerEl = groupContainerElementById.get(group.id);
       if (existingContainerEl) {
-        // Group already has a container — update layout and overlay elements
+        diagLog('Refreshing existing container for group: ' + group.name + ' (' + group.id + ')');
         applyGroupLayout(group, existingContainerEl);
         renderOverlayElements(group, existingContainerEl);
         applyDefaults(group, existingContainerEl);
       } else {
-        // New group — create its container and add it to the document
+        diagLog('Creating new container for group: ' + group.name + ' (' + group.id + '), overlays: ' + (group.overlays ? group.overlays.length : 0));
         const newContainerEl = createGroupContainer(group);
         document.body.appendChild(newContainerEl);
         groupContainerElementById.set(group.id, newContainerEl);
+        diagLog('Container appended to body. Body child count: ' + document.body.children.length);
       }
     }
+    diagLog('groups-sync complete — overlayGroupsById size: ' + overlayGroupsById.size + ', containerElementById size: ' + groupContainerElementById.size);
   });
 
   function createGroupContainer(group) {
@@ -774,6 +901,11 @@ function buildOverlayRendererHtml(): string {
 
     if (groupOverride.action === 'hide') {
       containerEl.style.display = 'none';
+      // Mark every overlay in this group as hidden so that if/when the group becomes
+      // visible again, the hidden→visible transition is correctly detected and sounds play.
+      for (const ov of group.overlays) {
+        overlayPreviousVisibilityById.set(ov.id, false);
+      }
       return;
     }
 
@@ -805,6 +937,15 @@ function buildOverlayRendererHtml(): string {
       }
       el.style.display = isVisible ? '' : 'none';
       el.style.opacity = String(opacity);
+
+      // Detect hidden → visible transition and play the configured sound
+      const previouslyVisible = overlayPreviousVisibilityById.get(ov.id);
+      const isFirstEvaluation = previouslyVisible === undefined;
+      const transitionedFromHiddenToVisible = !isFirstEvaluation && previouslyVisible === false && isVisible === true;
+      if (transitionedFromHiddenToVisible && ov.soundFileOnBecomeVisible) {
+        playSoundForOverlay(ov.id, ov.soundFileOnBecomeVisible, currentSoundVolume);
+      }
+      overlayPreviousVisibilityById.set(ov.id, isVisible);
     }
   }
 

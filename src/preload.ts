@@ -47,6 +47,11 @@ const IPC = {
   APP_CLOSE_REQUESTED:         'app:close-requested',
   APP_CLOSE_RESPONSE:          'app:close-response',
   PREVIEW_PAUSED:              'preview:paused',
+  SOUND_INDEX_FOLDERS:         'sound:index-folders',
+  SOUND_GET_INDEX:             'sound:get-index',
+  SOUND_CANCEL_INDEX:          'sound:cancel-index',
+  SOUND_INDEX_PROGRESS:        'sound:index-progress',
+  SOUND_PLAY_PREVIEW:          'sound:play-preview',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -120,6 +125,29 @@ const fundidoApi = {
   // -- Ollama -----------------------------------------------------------------
   ollamaListModels: (): Promise<Array<{ name: string; size: number }>> =>
     ipcRenderer.invoke(IPC.OLLAMA_LIST_MODELS),
+
+  // -- Sound Library ----------------------------------------------------------
+  soundIndexFolders: (folderPaths: string[]): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC.SOUND_INDEX_FOLDERS, folderPaths),
+
+  soundGetIndex: (): Promise<string[]> =>
+    ipcRenderer.invoke(IPC.SOUND_GET_INDEX),
+
+  soundCancelIndex: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC.SOUND_CANCEL_INDEX),
+
+  soundPlayPreview: (filePath: string, volume: number): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke(IPC.SOUND_PLAY_PREVIEW, filePath, volume),
+
+  onSoundIndexProgress: (callback: (progress: { filesFound: number; currentFolder: string; complete: boolean; cancelled: boolean }) => void): void => {
+    ipcRenderer.on(IPC.SOUND_INDEX_PROGRESS, (_event, progress) => {
+      callback(progress);
+    });
+  },
+
+  offSoundIndexProgress: (callback: (...args: any[]) => void): void => {
+    ipcRenderer.removeListener(IPC.SOUND_INDEX_PROGRESS, callback);
+  },
 
   // -- UI state ----------------------------------------------------------------
   setActivePage: (page: string): void => {

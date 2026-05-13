@@ -10,6 +10,7 @@ import { DirtyRegionOverlayManager } from './overlay/dirty-region-overlay-manage
 import { evaluateFrameState } from './state/state-calculation.service';
 import { OcrService } from './state/ocr.service';
 import { OllamaService } from './state/ollama.service';
+import { SoundLibraryService } from './sound/sound-library.service';
 import { registerIpcHandlers } from './ipc/ipc-handlers';
 import { logger, LogCategory, WorkerLogMessage } from './shared/logger';
 import { computeRegionPixelHash } from './shared/pixel-hash';
@@ -101,6 +102,7 @@ const overlayWindowManager = new OverlayWindowManager();
 const dirtyRegionOverlayManager = new DirtyRegionOverlayManager();
 const ocrService = new OcrService();
 const ollamaService = new OllamaService();
+const soundLibraryService = new SoundLibraryService();
 
 /** Mutable reference so IPC handlers can read/write the active config. */
 const currentConfigRef: { config: FundidoConfig } = {
@@ -584,7 +586,10 @@ function applyProfileRuleResults(frameState: any): void {
     return;
   }
 
-  overlayWindowManager.syncOverlayWindows(getProfileActivatedOverlayGroups(currentConfigRef.config));
+  overlayWindowManager.syncOverlayWindows(
+    getProfileActivatedOverlayGroups(currentConfigRef.config),
+    currentConfigRef.config.soundVolume ?? 0.5,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1280,6 +1285,7 @@ app.whenReady().then(() => {
     dirtyRegionOverlayManager,
     ocrService,
     ollamaService,
+    soundLibraryService,
     currentConfigRef,
     workingRegionsRef,
     globalEnabledRef,
@@ -1299,6 +1305,11 @@ app.whenReady().then(() => {
     syncPreviewRuntimeState();
   });
 
+  // Forward diagnostic logs sent from the overlay renderer back to the main process logger
+  ipcMain.on('debug:overlay-renderer', (_event: any, message: string) => {
+    logger.info(LogCategory.Overlay, `[RENDERER] ${message}`);
+  });
+
   createMainWindow();
   setupCaptureToOverlayPipeline();
   startStateEvaluationLoop();
@@ -1312,11 +1323,24 @@ app.whenReady().then(() => {
   });
 
   // Create overlay windows for any groups defined in the saved config
-  overlayWindowManager.syncOverlayWindows(getProfileActivatedOverlayGroups(currentConfigRef.config));
+  overlayWindowManager.syncOverlayWindows(
+    getProfileActivatedOverlayGroups(currentConfigRef.config),
+    currentConfigRef.config.soundVolume ?? 0.5,
+  );
 
   // Apply the saved cursor frequency so the interval is correct from first launch
   const initialCursorFrequencyHz = currentConfigRef.config.overlay?.cursorFrequencyHz ?? 60;
   overlayWindowManager.setCursorFrequencyHz(initialCursorFrequencyHz);
+
+  // Index sound library folders from saved config on startup (silent — no UI modal on startup)
+  const startupSoundFolderPaths = currentConfigRef.config.soundLibraryFolderPaths ?? [];
+  const hasSoundFoldersConfigured = startupSoundFolderPaths.length > 0;
+  if (hasSoundFoldersConfigured) {
+    logger.info(LogCategory.General, `Auto-indexing ${startupSoundFolderPaths.length} sound library folder(s) on startup.`);
+    soundLibraryService.indexFolders(startupSoundFolderPaths, () => {}).catch((error) => {
+      logger.error(LogCategory.General, 'Startup sound indexing failed', error);
+    });
+  }
 
   // Auto-start capture if it was running when the app last closed
   const shouldAutoStartCapture = currentConfigRef.config.gameCapture.captureEnabled === true;
