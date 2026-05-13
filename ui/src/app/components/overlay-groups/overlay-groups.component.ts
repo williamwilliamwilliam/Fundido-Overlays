@@ -1928,10 +1928,18 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   // -- Overlay rules --
 
   addRule(overlay: any): void {
+    // For mirror overlays, pre-fill the first condition's region with the
+    // mirrored region — the most common use case is "show/hide this mirror
+    // based on the state of the region it's already showing."
+    const isMirrorOverlay = overlay.contentType === 'regionMirror';
+    const defaultMonitoredRegionId = isMirrorOverlay
+      ? (overlay.regionMirrorConfig?.monitoredRegionId || '')
+      : '';
+
     overlay.rules.push({
       id: crypto.randomUUID(),
       logicMode: 'AND',
-      conditions: [{ monitoredRegionId: '', stateCalculationId: '', operator: 'equals', value: '', negate: false }],
+      conditions: [{ monitoredRegionId: defaultMonitoredRegionId, stateCalculationId: '', operator: 'equals', value: '', negate: false }],
       action: 'show',
     });
     this.markGroupsChanged();

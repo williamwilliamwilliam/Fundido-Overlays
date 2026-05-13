@@ -630,18 +630,45 @@ function buildOverlayRendererHtml(): string {
     const p = group.position;
     const x = p.mode === 'relativeToCursor' ? cursorX + (p.offsetX || 0) : (p.x || 0);
     const y = p.mode === 'relativeToCursor' ? cursorY + (p.offsetY || 0) : (p.y || 0);
-    // transformOrigin is intentionally NOT set here — it is fixed at 'top left' for
-    // the lifetime of the element and is set once in applyGroupLayout. Writing it
+
+    // transformOrigin is intentionally NOT set here — it is fixed for the
+    // lifetime of the element and set once in applyGroupLayout. Writing it
     // here would be a wasted style mutation on every cursor tick at 60–120 Hz.
-    containerEl.style.transform = 'translate(' + x + 'px, ' + y + 'px) scale(' + scale + ')';
+    //
+    // The translate direction depends on which edge is the anchor:
+    //   right / down → translate from top-left (left:0, top:0 baseline)
+    //   left          → translate from top-right (right:0 baseline); x represents
+    //                   the right edge, so tx = x - 100vw places right edge at x
+    //   up            → translate from bottom-left (bottom:0 baseline); y represents
+    //                   the bottom edge, so ty = y - 100vh places bottom edge at y
+    const growsLeft = group.growDirection === 'left';
+    const growsUp   = group.growDirection === 'up';
+    const tx = growsLeft ? 'calc(' + x + 'px - 100vw)' : x + 'px';
+    const ty = growsUp   ? 'calc(' + y + 'px - 100vh)' : y + 'px';
+    containerEl.style.transform = 'translate(' + tx + ', ' + ty + ') scale(' + scale + ')';
   }
 
   function applyGroupLayout(group, containerEl) {
-    const p = group.position;
-    containerEl.style.left = '0px';
-    containerEl.style.top = '0px';
-    // Set once here — this value never changes after group init.
-    containerEl.style.transformOrigin = 'top left';
+    // Anchor edge depends on the grow direction so that the configured x,y
+    // coordinate always represents the corner where items START, not where
+    // the container's top-left corner happens to land.
+    //   right / down → anchor top-left  (items grow right / down from x,y)
+    //   left          → anchor top-right (items grow left  from x,y)
+    //   up            → anchor bottom-left (items grow up  from x,y)
+    const growsLeft = group.growDirection === 'left';
+    const growsUp   = group.growDirection === 'up';
+
+    containerEl.style.left   = growsLeft ? 'auto' : '0px';
+    containerEl.style.right  = growsLeft ? '0px'  : 'auto';
+    containerEl.style.top    = growsUp   ? 'auto' : '0px';
+    containerEl.style.bottom = growsUp   ? '0px'  : 'auto';
+
+    // Match the scale origin to the anchor corner so scale(n) zooms in/out
+    // from the position coordinate rather than from some other corner.
+    const originH = growsLeft ? 'right' : 'left';
+    const originV = growsUp   ? 'bottom' : 'top';
+    containerEl.style.transformOrigin = originV + ' ' + originH;
+
     const dirMap = { right: 'row', left: 'row-reverse', down: 'column', up: 'column-reverse' };
     containerEl.style.flexDirection = dirMap[group.growDirection] || 'row';
     const alMap = { start: 'flex-start', center: 'center', end: 'flex-end' };

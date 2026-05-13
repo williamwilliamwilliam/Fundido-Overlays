@@ -1,6 +1,6 @@
 {
   "name": "fundido-overlays",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Game overlay tool that captures frames, evaluates screen regions, and displays responsive overlays.",
   "main": "dist/electron/main.js",
   "scripts": {
@@ -12,7 +12,7 @@
     "start": "npm run build:electron && electron .",
     "start:dev": "concurrently \"npm run build:electron -- --watch\" \"cd ui && ng serve\" \"wait-on http://localhost:4241 && electron . --dev\"",
     "watch": "npm run build:native && npm run start:dev",
-    "package": "npm run build:all && electron-builder --win",
+    "package": "npm version patch && npm run build:all && electron-builder --win",
     "package:dir": "npm run build:all && electron-builder --win --dir",
     "test:electron": "jest --config jest.config.js",
     "test:ui": "cd ui && ng test",
