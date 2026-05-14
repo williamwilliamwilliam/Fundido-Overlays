@@ -40,6 +40,25 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
         <button class="tertiary-btn" (click)="expandAllGroups()"><span class="tertiary-icon">&#9662;</span>Expand All</button>
         <button class="tertiary-btn" (click)="collapseAllGroups()"><span class="tertiary-icon">&#9656;</span>Collapse All</button>
       </div>
+      <div class="group-filter-bar">
+        <label class="filter-search-label">
+          <span>Search</span>
+          <input
+            type="search"
+            [(ngModel)]="groupSearchText"
+            placeholder="Overlay Group or Overlay name" />
+        </label>
+        <label class="checkbox-label filter-checkbox">
+          <input
+            type="checkbox"
+            [(ngModel)]="hideInactiveOverlayGroups"
+            (ngModelChange)="saveInactiveGroupFilterState()" />
+          Hide Inactive Overlay Groups
+        </label>
+        <span class="filter-count" *ngIf="groups.length > 0 && visibleGroups.length !== groups.length">
+          Showing {{ visibleGroups.length }} of {{ groups.length }}
+        </span>
+      </div>
 
       <div *ngIf="showImportDialog" class="import-dialog">
         <textarea [(ngModel)]="importJsonText" placeholder="Paste overlay group JSON here..." rows="6"></textarea>
@@ -79,9 +98,12 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
       <div *ngIf="groups.length === 0" class="empty-state">
         No overlay groups defined yet. Click the button below to get started.
       </div>
+      <div *ngIf="groups.length > 0 && visibleGroups.length === 0" class="empty-state">
+        No overlay groups match the current filters.
+      </div>
 
       <!-- ======================== GROUP CARD ======================== -->
-      <div *ngFor="let group of groups; let groupIndex = index"
+      <div *ngFor="let group of visibleGroups"
         class="group-card"
         [class.group-disabled]="isGroupVisuallyDisabled(group)">
         <div class="group-header">
@@ -94,11 +116,21 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
           </button>
           <label
             class="enabled-toggle"
+            [class.enabled-toggle-active]="isGroupCurrentlyActive(group)"
+            [class.enabled-toggle-inactive]="!isGroupCurrentlyActive(group)"
             [title]="isGroupProfileManaged(group) ? 'Profiles control whether this group is enabled' : 'Enable/disable this group'">
-            <input type="checkbox"
-              [ngModel]="group.enabled !== false"
-              [disabled]="isGroupProfileManaged(group)"
-              (ngModelChange)="group.enabled = $event; onFieldChanged()" />
+            <ng-container *ngIf="isGroupProfileManaged(group); else manualEnabledToggle">
+              <span class="profile-managed-status-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.87 0-7 2.24-7 5v1h14v-1c0-2.76-3.13-5-7-5Z"/>
+                </svg>
+              </span>
+            </ng-container>
+            <ng-template #manualEnabledToggle>
+              <input type="checkbox"
+                [ngModel]="group.enabled !== false"
+                (ngModelChange)="group.enabled = $event; onFieldChanged()" />
+            </ng-template>
           </label>
           <input
             [(ngModel)]="group.name"
@@ -106,7 +138,7 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
             placeholder="Group name"
             class="name-input"
             [attr.data-group-name-id]="group.id" />
-          <button class="danger-text" (click)="removeGroup(groupIndex)">Remove</button>
+          <button class="danger-text" (click)="removeGroup(group.id)">Remove</button>
         </div>
         <ng-container *ngIf="isGroupExpanded(group.id)">
 
@@ -637,6 +669,31 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
       flex-wrap: wrap;
     }
 
+    .group-filter-bar {
+      display: flex;
+      gap: var(--spacing-md);
+      margin: var(--spacing-sm) 0 var(--spacing-md);
+      flex-wrap: wrap;
+    }
+
+    .filter-search-label {
+      display: flex;
+      flex-direction: column;
+      min-width: 280px;
+      color: var(--color-text-secondary);
+    }
+
+    .filter-search-label input {
+      min-width: 280px;
+    }
+
+    .filter-count {
+      align-self: flex-end;
+      font-size: 0.85rem;
+      color: var(--color-text-secondary);
+      padding-bottom: 2px;
+    }
+
     .tertiary-btn {
       background: transparent;
       border: none;
@@ -774,7 +831,9 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
     .enabled-toggle {
       display: flex;
       align-items: center;
-      cursor: pointer;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
       flex-shrink: 0;
     }
 
@@ -782,7 +841,49 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
       width: 18px;
       height: 18px;
       margin: 0;
-      accent-color: var(--color-accent);
+      appearance: none;
+      border: 2px solid var(--color-error);
+      border-radius: 4px;
+      background-color: color-mix(in srgb, var(--color-error) 12%, transparent);
+      cursor: pointer;
+      display: block;
+    }
+
+    .enabled-toggle input[type="checkbox"]:checked {
+      border-color: var(--color-success);
+      background-color: var(--color-success);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath fill='white' d='M5.55 10.6 2.4 7.45l1.06-1.06 2.09 2.08 4.99-4.98 1.06 1.06z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 12px 12px;
+    }
+
+    .enabled-toggle input[type="checkbox"]:focus-visible {
+      outline: 2px solid var(--color-accent);
+      outline-offset: 1px;
+    }
+
+    .profile-managed-status-icon {
+      width: 18px;
+      height: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .profile-managed-status-icon svg {
+      width: 18px;
+      height: 18px;
+      display: block;
+      fill: currentColor;
+    }
+
+    .enabled-toggle-active {
+      color: var(--color-success);
+    }
+
+    .enabled-toggle-inactive {
+      color: var(--color-error);
     }
 
     .cross-ref-row {
@@ -1415,12 +1516,15 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
 })
 export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChangesComponent {
   private static readonly STORAGE_KEY_COLLAPSED_GROUPS = 'fundido:collapsedOverlayGroups';
+  private static readonly STORAGE_KEY_HIDE_INACTIVE_GROUPS = 'fundido:hideInactiveOverlayGroups';
 
   groups: any[] = [];
   monitoredRegions: any[] = [];
   profiles: any[] = [];
   soundFileIndex: string[] = [];
   soundVolume = 0.5;
+  groupSearchText = '';
+  hideInactiveOverlayGroups = true;
   showImportDialog = false;
   showUnsavedChangesDialog = false;
   importJsonText = '';
@@ -1514,6 +1618,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
 
   async ngOnInit(): Promise<void> {
     this.uiHasFocus = document.hasFocus();
+    this.loadInactiveGroupFilterState();
     this.pendingChangesService.register(this);
     const config = await this.electronService.loadConfig();
     this.groups = config.overlayGroups || [];
@@ -1691,7 +1796,12 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     }, 0);
   }
 
-  async removeGroup(index: number): Promise<void> {
+  async removeGroup(groupId: string): Promise<void> {
+    const index = this.groups.findIndex((group) => group.id === groupId);
+    if (index < 0) {
+      return;
+    }
+
     const [removedGroup] = this.groups.splice(index, 1);
     if (removedGroup?.id) {
       this.collapsedGroupIds.delete(removedGroup.id);
@@ -1705,14 +1815,87 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     return !this.collapsedGroupIds.has(groupId);
   }
 
+  get visibleGroups(): any[] {
+    return this.groups.filter((group) => this.groupMatchesFilters(group));
+  }
+
   isGroupVisuallyDisabled(group: any): boolean {
-    const isProfileDisabled = group.enabled === false && this.isGroupProfileManaged(group);
-    if (!isProfileDisabled) {
+    const isInactive = !this.isGroupCurrentlyActive(group);
+    if (!isInactive) {
       return false;
     }
 
     // Keep inactive groups readable while the user is actively editing them.
     return !(this.uiHasFocus && this.isGroupExpanded(group.id));
+  }
+
+  isGroupCurrentlyActive(group: any): boolean {
+    const activeProfileIds = this.getActiveProfileIds();
+    if (this.isGroupProfileManaged(group)) {
+      return (group.profileIds || []).some((profileId: string) => activeProfileIds.has(profileId));
+    }
+
+    return group.enabled !== false;
+  }
+
+  private getActiveProfileIds(): Set<string> {
+    if (Array.isArray(this.currentFrameState?.profileStates)) {
+      return new Set(
+        this.currentFrameState.profileStates
+          .filter((profileState: any) => profileState.active)
+          .map((profileState: any) => profileState.id)
+      );
+    }
+
+    return new Set(
+      this.profiles
+        .filter((profile) => profile.active)
+        .map((profile) => profile.id)
+    );
+  }
+
+  private groupMatchesFilters(group: any): boolean {
+    if (this.hideInactiveOverlayGroups && !this.isGroupCurrentlyActive(group)) {
+      return false;
+    }
+
+    const search = this.groupSearchText.trim().toLowerCase();
+    if (!search) {
+      return true;
+    }
+
+    if ((group.name || '').toLowerCase().includes(search)) {
+      return true;
+    }
+
+    return (group.overlays || []).some((overlay: any) =>
+      (overlay.name || '').toLowerCase().includes(search)
+    );
+  }
+
+  private loadInactiveGroupFilterState(): void {
+    try {
+      const saved = localStorage.getItem(OverlayGroupsComponent.STORAGE_KEY_HIDE_INACTIVE_GROUPS);
+      if (saved === null) {
+        this.hideInactiveOverlayGroups = true;
+        return;
+      }
+
+      this.hideInactiveOverlayGroups = saved === 'true';
+    } catch {
+      this.hideInactiveOverlayGroups = true;
+    }
+  }
+
+  saveInactiveGroupFilterState(): void {
+    try {
+      localStorage.setItem(
+        OverlayGroupsComponent.STORAGE_KEY_HIDE_INACTIVE_GROUPS,
+        String(this.hideInactiveOverlayGroups)
+      );
+    } catch {
+      // Ignore storage errors so the editor remains usable.
+    }
   }
 
   toggleGroupExpanded(groupId: string): void {

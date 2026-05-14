@@ -62,7 +62,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
         <h2>Monitored Regions</h2>
       </div>
       <p class="description">
-        Define rectangular regions of the capture to monitor.
+        Define pixels or rectangular regions of the capture to monitor.
         Each region can have state calculations that evaluate its pixel content.
       </p>
 
@@ -90,7 +90,8 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
         <label class="checkbox-label filter-checkbox">
           <input
             type="checkbox"
-            [(ngModel)]="hideInactiveUnusedRegions" />
+            [(ngModel)]="hideInactiveUnusedRegions"
+            (ngModelChange)="saveInactiveUnusedRegionFilterState()" />
           Hide Inactive/Unused Regions
         </label>
         <span class="filter-count" *ngIf="regions.length > 0 && visibleRegions.length !== regions.length">
@@ -1768,6 +1769,7 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
 })
 export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestroy, PendingChangesComponent {
   private static readonly STORAGE_KEY_COLLAPSED_REGIONS = 'fundido:collapsedRegions';
+  private static readonly STORAGE_KEY_HIDE_INACTIVE_UNUSED_REGIONS = 'fundido:hideInactiveUnusedRegions';
   private static readonly SHARED_REGION_EXPORT_TYPE = 'FundidoMonitoredRegion';
 
   @ViewChild('regionSearchInput') private regionSearchInputRef?: ElementRef<HTMLInputElement>;
@@ -1905,6 +1907,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   async ngOnInit(): Promise<void> {
     this.pendingChangesService.register(this);
     this.electronService.setActivePage('regions');
+    this.loadInactiveUnusedRegionFilterState();
 
     const config = await this.electronService.loadConfig();
     this.regions = config.monitoredRegions || [];
@@ -3701,6 +3704,30 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
       localStorage.setItem(
         MonitoredRegionsComponent.STORAGE_KEY_COLLAPSED_REGIONS,
         JSON.stringify(Array.from(this.collapsedRegionIds))
+      );
+    } catch {
+      // Ignore storage errors so the editor remains usable.
+    }
+  }
+
+  private loadInactiveUnusedRegionFilterState(): void {
+    try {
+      const saved = localStorage.getItem(MonitoredRegionsComponent.STORAGE_KEY_HIDE_INACTIVE_UNUSED_REGIONS);
+      if (saved === null) {
+        return;
+      }
+
+      this.hideInactiveUnusedRegions = saved === 'true';
+    } catch {
+      // Ignore storage errors so the editor remains usable.
+    }
+  }
+
+  saveInactiveUnusedRegionFilterState(): void {
+    try {
+      localStorage.setItem(
+        MonitoredRegionsComponent.STORAGE_KEY_HIDE_INACTIVE_UNUSED_REGIONS,
+        String(this.hideInactiveUnusedRegions)
       );
     } catch {
       // Ignore storage errors so the editor remains usable.
