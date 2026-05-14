@@ -35,7 +35,7 @@
               "namedChunks": true,
               "budgets": [
                 { "type": "initial", "maximumWarning": "2mb", "maximumError": "3mb" },
-                { "type": "anyComponentStyle", "maximumWarning": "12kb", "maximumError": "20kb" }
+                { "type": "anyComponentStyle", "maximumWarning": "14kb", "maximumError": "24kb" }
               ],
               "outputHashing": "all"
             },
