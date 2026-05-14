@@ -44,6 +44,7 @@
     },
     "files": [
       "dist/**/*",
+      "assets/**/*",
       "native/build/Release/**/*",
       "!dist/**/*.d.ts"
     ],
@@ -57,6 +58,7 @@
       }
     ],
     "win": {
+      "icon": "assets/app-icon.png",
       "target": [
         {
           "target": "nsis",

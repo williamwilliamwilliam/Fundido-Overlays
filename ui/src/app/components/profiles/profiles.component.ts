@@ -12,7 +12,14 @@ import { PendingChangesComponent } from '../../guards/pending-changes.guard';
   imports: [CommonModule, FormsModule],
   template: `
     <div class="page">
-      <h2>Profiles</h2>
+      <div class="page-title">
+        <span class="page-title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.87 0-7 2.24-7 5v1h14v-1c0-2.76-3.13-5-7-5Z"/>
+          </svg>
+        </span>
+        <h2>Profiles</h2>
+      </div>
       <p class="description">
         Choose which profiles are active to show different sets of Overlay Groups based on your current task. Define Rules to automatically change profiles. Overlay Groups assigned to active profiles are enabled automatically.
       </p>
@@ -171,7 +178,28 @@ import { PendingChangesComponent } from '../../guards/pending-changes.guard';
   `,
   styles: [`
     .page { max-width: 900px; }
-    h2 { margin-bottom: var(--spacing-sm); }
+    .page-title {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      margin-bottom: var(--spacing-sm);
+    }
+    h2 { margin: 0; }
+    .page-title-icon {
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-accent);
+      flex: 0 0 auto;
+    }
+    .page-title-icon svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+      fill: currentColor;
+    }
     .description { color: var(--color-text-secondary); margin-bottom: var(--spacing-lg); }
     .toolbar { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-md); flex-wrap: wrap; }
     .automation-toggle {

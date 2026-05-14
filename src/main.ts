@@ -301,6 +301,7 @@ function stopPerfMetricsReporting(): void {
 let mainWindow: BrowserWindow | null = null;
 let allowMainWindowClose = false;
 let pendingCloseRequest = false;
+const appIconPath = path.resolve(__dirname, '../../assets/app-icon.png');
 
 function createMainWindow(): void {
   const isDevelopmentMode = process.argv.includes('--dev');
@@ -310,6 +311,7 @@ function createMainWindow(): void {
     width: savedBounds?.width ?? 1280,
     height: savedBounds?.height ?? 800,
     title: 'Fundido Overlays',
+    icon: appIconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

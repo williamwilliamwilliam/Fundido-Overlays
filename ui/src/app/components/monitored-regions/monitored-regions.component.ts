@@ -53,7 +53,14 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
         "Capture" tab if you're done configuring your Monitored Regions.
       </div>
 
-      <h2>Monitored Regions</h2>
+      <div class="page-title">
+        <span class="page-title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M12 7c4.63 0 8.43 2.96 9.73 5-1.3 2.04-5.1 5-9.73 5S3.57 14.04 2.27 12C3.57 9.96 7.37 7 12 7Zm0 2c-3.22 0-6.01 1.77-7.41 3 1.4 1.23 4.19 3 7.41 3s6.01-1.77 7.41-3c-1.4-1.23-4.19-3-7.41-3Zm0 1.5A2.5 2.5 0 1 1 9.5 13 2.5 2.5 0 0 1 12 10.5Z"/>
+          </svg>
+        </span>
+        <h2>Monitored Regions</h2>
+      </div>
       <p class="description">
         Define rectangular regions of the capture to monitor.
         Each region can have state calculations that evaluate its pixel content.
@@ -809,7 +816,28 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       line-height: 1.4;
       box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
     }
-    h2 { margin-bottom: var(--spacing-sm); }
+    .page-title {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      margin-bottom: var(--spacing-sm);
+    }
+    h2 { margin: 0; }
+    .page-title-icon {
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-accent);
+      flex: 0 0 auto;
+    }
+    .page-title-icon svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+      fill: currentColor;
+    }
     .description { color: var(--color-text-secondary); margin-bottom: var(--spacing-lg); }
 
     .toolbar {
@@ -1063,7 +1091,6 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
       margin-bottom: var(--spacing-sm);
       margin-top: var(--spacing-sm);
       padding: 4px var(--spacing-sm);
-      background-color: var(--color-bg-primary);
       border-radius: var(--radius-sm);
     }
     .cross-ref-label {

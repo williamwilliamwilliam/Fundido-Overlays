@@ -5,6 +5,7 @@ import { Subscription } from 'rxjs';
 import { DebugConsoleComponent } from './components/debug-console/debug-console.component';
 import { ElectronService } from './services/electron.service';
 import { PendingChangesService } from './services/pending-changes.service';
+import * as packageJson from '../../../package.json';
 
 const MINIMIZED_PANEL_HEIGHT_PX = 36;
 const DEFAULT_PANEL_HEIGHT_PX = 250;
@@ -18,7 +19,10 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
   template: `
     <div class="app-shell">
       <nav class="top-nav">
-        <span class="app-title">Fundido Overlays</span>
+        <div class="app-brand">
+          <img class="app-logo" src="assets/app-icon.png" alt="Fundido Overlays logo" />
+          <span class="app-title">Fundido Overlays ({{ appVersion }})</span>
+        </div>
         <button
           class="global-toggle"
           [class.enabled]="globalEnabled"
@@ -27,15 +31,48 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
         </button>
         <div class="nav-links">
           <a routerLink="/profiles" routerLinkActive="active" class="nav-link">
-            Profiles
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.87 0-7 2.24-7 5v1h14v-1c0-2.76-3.13-5-7-5Z"/>
+              </svg>
+            </span>
+            <span>Profiles</span>
             <span *ngIf="activeProfileNames.length > 0" class="active-profile-list">
               ({{ activeProfileNames.join(', ') }})
             </span>
           </a>
-          <a routerLink="/capture" routerLinkActive="active" class="nav-link">Capture</a>
-          <a routerLink="/regions" routerLinkActive="active" class="nav-link">Monitored Regions</a>
-          <a routerLink="/overlays" routerLinkActive="active" class="nav-link">Overlay Groups</a>
-          <a routerLink="/settings" routerLinkActive="active" class="nav-link">Settings</a>
+          <a routerLink="/capture" routerLinkActive="active" class="nav-link">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M4 5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-6l1.5 2h2.5v1H6v-1h2.5L10 18H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm0 2v9h16V7Z"/>
+              </svg>
+            </span>
+            <span>Capture</span>
+          </a>
+          <a routerLink="/regions" routerLinkActive="active" class="nav-link">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M12 7c4.63 0 8.43 2.96 9.73 5-1.3 2.04-5.1 5-9.73 5S3.57 14.04 2.27 12C3.57 9.96 7.37 7 12 7Zm0 2c-3.22 0-6.01 1.77-7.41 3 1.4 1.23 4.19 3 7.41 3s6.01-1.77 7.41-3c-1.4-1.23-4.19-3-7.41-3Zm0 1.5A2.5 2.5 0 1 1 9.5 13 2.5 2.5 0 0 1 12 10.5Z"/>
+              </svg>
+            </span>
+            <span>Monitored Regions</span>
+          </a>
+          <a routerLink="/overlays" routerLinkActive="active" class="nav-link">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M4 4h7v7H4Zm2 2v3h3V6Zm7-2h7v7h-7Zm2 2v3h3V6ZM4 13h7v7H4Zm2 2v3h3v-3Zm7-2h7v7h-7Zm2 2v3h3v-3Z"/>
+              </svg>
+            </span>
+            <span>Overlay Groups</span>
+          </a>
+          <a routerLink="/settings" routerLinkActive="active" class="nav-link">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="m19.14 12.94.04-.94-.04-.94 2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.4 7.4 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54a7.4 7.4 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.48a.5.5 0 0 0 .12.64l2.03 1.58-.04.94.04.94-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.38 1.05.69 1.63.94l.36 2.54a.5.5 0 0 0 .49.42h3.8a.5.5 0 0 0 .49-.42l.36-2.54c.58-.25 1.13-.56 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64ZM12 15.5A3.5 3.5 0 1 1 15.5 12 3.5 3.5 0 0 1 12 15.5Z"/>
+              </svg>
+            </span>
+            <span>Settings</span>
+          </a>
         </div>
       </nav>
 
@@ -85,11 +122,25 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
       border-bottom: 1px solid var(--color-border);
     }
 
+    .app-brand {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      margin-right: var(--spacing-sm);
+    }
+
+    .app-logo {
+      width: 24px;
+      height: 24px;
+      object-fit: contain;
+      flex: 0 0 auto;
+    }
+
     .app-title {
       font-size: 1rem;
       font-weight: 600;
       color: var(--color-accent);
-      margin-right: var(--spacing-sm);
+      white-space: nowrap;
     }
 
     .global-toggle {
@@ -125,6 +176,9 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
     }
 
     .nav-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       color: var(--color-text-secondary);
       text-decoration: none;
       padding: var(--spacing-xs) var(--spacing-md);
@@ -142,6 +196,22 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
       background-color: var(--color-bg-panel);
       color: var(--color-accent);
       font-weight: 500;
+    }
+
+    .nav-icon {
+      width: 16px;
+      height: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+    }
+
+    .nav-icon svg {
+      width: 16px;
+      height: 16px;
+      display: block;
+      fill: currentColor;
     }
 
     .active-profile-list {
@@ -237,6 +307,7 @@ const MAX_PANEL_HEIGHT_FRACTION = 0.7;
   `],
 })
 export class AppComponent implements OnInit, OnDestroy {
+  readonly appVersion = packageJson.version;
   globalEnabled = true;
   isDebugMinimized = true;
   activeProfileNames: string[] = [];

@@ -38,7 +38,14 @@ interface CaptureRegionOverlay {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
-      <h2>Game Capture</h2>
+      <div class="page-title">
+        <span class="page-title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M4 5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-6l1.5 2h2.5v1H6v-1h2.5L10 18H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm0 2v9h16V7Z"/>
+          </svg>
+        </span>
+        <h2>Game Capture</h2>
+      </div>
       <p class="description">Preview your capture source and control the capture loop.</p>
 
       <div class="controls">
@@ -151,7 +158,28 @@ interface CaptureRegionOverlay {
   `,
   styles: [`
     .page { max-width: 1100px; }
-    h2 { margin-bottom: var(--spacing-sm); }
+    .page-title {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      margin-bottom: var(--spacing-sm);
+    }
+    h2 { margin: 0; }
+    .page-title-icon {
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-accent);
+      flex: 0 0 auto;
+    }
+    .page-title-icon svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+      fill: currentColor;
+    }
     .description { color: var(--color-text-secondary); margin-bottom: var(--spacing-lg); }
 
     .controls {

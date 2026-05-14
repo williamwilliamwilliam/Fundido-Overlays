@@ -15,6 +15,8 @@ import { logger, LogCategory } from '../shared/logger';
 export class OverlayWindowManager {
   /** The single shared overlay window. Null when no groups are enabled. */
   private overlayWindow: BrowserWindow | null = null;
+  /** Hidden renderer used only for sound preview when no overlay window is active. */
+  private soundPreviewWindow: BrowserWindow | null = null;
 
   /** Config map used by the main process for rule evaluation (mirror visibility). */
   private overlayGroupConfigs = new Map<OverlayGroupId, OverlayGroup>();
@@ -93,7 +95,20 @@ export class OverlayWindowManager {
     const windowIsOpen = this.overlayWindow && !this.overlayWindow.isDestroyed();
     if (windowIsOpen) {
       this.overlayWindow!.webContents.send('overlay:play-sound', { filePath, volume });
+      return;
     }
+
+    const previewWindow = this.ensureSoundPreviewWindow();
+    const sendPlayRequest = () => {
+      previewWindow.webContents.send('sound-preview:play', { filePath, volume });
+    };
+
+    if (previewWindow.webContents.isLoading()) {
+      previewWindow.webContents.once('did-finish-load', sendPlayRequest);
+      return;
+    }
+
+    sendPlayRequest();
   }
 
   /**
@@ -483,6 +498,41 @@ export class OverlayWindowManager {
     });
 
     this.overlayWindow = overlayWindow;
+  }
+
+  private ensureSoundPreviewWindow(): BrowserWindow {
+    const existingWindowIsOpen = this.soundPreviewWindow && !this.soundPreviewWindow.isDestroyed();
+    if (existingWindowIsOpen) {
+      return this.soundPreviewWindow!;
+    }
+
+    const previewWindow = new BrowserWindow({
+      show: false,
+      width: 1,
+      height: 1,
+      frame: false,
+      transparent: true,
+      skipTaskbar: true,
+      resizable: false,
+      focusable: false,
+      hasShadow: false,
+      webPreferences: {
+        contextIsolation: false,
+        nodeIntegration: true,
+        webSecurity: false,
+        backgroundThrottling: false,
+      },
+    });
+
+    previewWindow.on('closed', () => {
+      if (this.soundPreviewWindow === previewWindow) {
+        this.soundPreviewWindow = null;
+      }
+    });
+
+    previewWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildSoundPreviewRendererHtml())}`);
+    this.soundPreviewWindow = previewWindow;
+    return previewWindow;
   }
 }
 
@@ -1023,6 +1073,40 @@ function buildOverlayRendererHtml(): string {
     }
     return true;
   }
+</script>
+</body>
+</html>`;
+}
+
+function buildSoundPreviewRendererHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+</head>
+<body>
+<script>
+  const { ipcRenderer } = require('electron');
+
+  function playSoundFile(filePath, volume) {
+    if (!filePath) return;
+    var audioEl = new Audio();
+    var fileSrc = filePath;
+    var isAbsoluteWindowsPath = /^[A-Za-z]:/.test(fileSrc);
+    if (isAbsoluteWindowsPath) {
+      fileSrc = 'file:///' + fileSrc.replace(/\\\\/g, '/');
+    }
+    audioEl.src = fileSrc;
+    audioEl.volume = Math.max(0, Math.min(1, volume));
+    audioEl.play().catch(function(err) {
+      console.error('[sound-preview] Failed to play sound:', err, filePath);
+    });
+  }
+
+  ipcRenderer.on('sound-preview:play', function(_event, message) {
+    if (!message || !message.filePath) return;
+    playSoundFile(message.filePath, message.volume !== undefined ? message.volume : 0.5);
+  });
 </script>
 </body>
 </html>`;

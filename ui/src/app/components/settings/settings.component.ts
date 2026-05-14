@@ -10,7 +10,14 @@ import { ElectronService } from '../../services/electron.service';
   imports: [CommonModule, FormsModule],
   template: `
     <div class="page">
-      <h2>Settings</h2>
+      <div class="page-title">
+        <span class="page-title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="m19.14 12.94.04-.94-.04-.94 2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.4 7.4 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54a7.4 7.4 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.48a.5.5 0 0 0 .12.64l2.03 1.58-.04.94.04.94-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.38 1.05.69 1.63.94l.36 2.54a.5.5 0 0 0 .49.42h3.8a.5.5 0 0 0 .49-.42l.36-2.54c.58-.25 1.13-.56 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64ZM12 15.5A3.5 3.5 0 1 1 15.5 12 3.5 3.5 0 0 1 12 15.5Z"/>
+          </svg>
+        </span>
+        <h2>Settings</h2>
+      </div>
       <p class="description">Configure capture and preview behavior.</p>
 
       <div class="settings-section">
@@ -352,7 +359,28 @@ import { ElectronService } from '../../services/electron.service';
   `,
   styles: [`
     .page { max-width: 800px; }
-    h2 { margin-bottom: var(--spacing-sm); }
+    .page-title {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      margin-bottom: var(--spacing-sm);
+    }
+    h2 { margin: 0; }
+    .page-title-icon {
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-accent);
+      flex: 0 0 auto;
+    }
+    .page-title-icon svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+      fill: currentColor;
+    }
     h3 {
       font-size: 0.95rem;
       color: var(--color-accent);

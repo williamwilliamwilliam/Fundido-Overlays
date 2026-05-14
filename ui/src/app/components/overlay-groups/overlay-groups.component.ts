@@ -16,7 +16,14 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
   imports: [CommonModule, FormsModule, RouterLink, SearchableRegionSelectComponent, SearchableSoundSelectComponent],
   template: `
     <div class="page">
-      <h2>Overlay Groups</h2>
+      <div class="page-title">
+        <span class="page-title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M4 4h7v7H4Zm2 2v3h3V6Zm7-2h7v7h-7Zm2 2v3h3V6ZM4 13h7v7H4Zm2 2v3h3v-3Zm7-2h7v7h-7Zm2 2v3h3v-3Z"/>
+          </svg>
+        </span>
+        <h2>Overlay Groups</h2>
+      </div>
       <p class="description">
         Configure groups of overlays that appear on top of your game.
         Each group controls positioning and layout for its overlays.
@@ -76,7 +83,7 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
       <!-- ======================== GROUP CARD ======================== -->
       <div *ngFor="let group of groups; let groupIndex = index"
         class="group-card"
-        [class.group-disabled]="group.enabled === false && isGroupProfileManaged(group)">
+        [class.group-disabled]="isGroupVisuallyDisabled(group)">
         <div class="group-header">
           <button
             class="collapse-toggle"
@@ -180,10 +187,10 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
         <!-- ======================== GROUP RULES ======================== -->
         <div class="section-header">
           <span class="section-label">Group Rules</span>
-          <span class="section-hint">These rules apply overall visibility changes for the entire group (Visible, Hidden, Opacity)</span>
         </div>
         <div class="rules-header group-rules-header">
           <span class="rules-label">Rules (processed top-down)</span>
+          <span class="section-hint">These rules apply overall visibility changes for the entire group (Visible, Hidden, Opacity)</span>
           <button class="add-btn" (click)="addGroupRule(group)">+ Add Rule</button>
         </div>
 
@@ -308,9 +315,12 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
         <div class="section-header">
           <span class="section-label">Overlays</span>
         </div>
+        <button class="add-overlay-btn add-overlay-top-btn" (click)="addOverlay(group, 'top')">+ Add Overlay at Top</button>
 
         <div *ngFor="let overlay of group.overlays; let overlayIndex = index"
           class="overlay-card"
+          [class.overlay-card-alt-1]="overlayIndex % 2 === 0"
+          [class.overlay-card-alt-2]="overlayIndex % 2 === 1"
           [attr.data-highlight-id]="overlay.id"
           [class.highlight-flash]="highlightId === overlay.id"
           [class.drag-over]="dragOverIndex === overlayIndex && dragOverGroupId === group.id"
@@ -567,7 +577,7 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
           </div>
         </div>
 
-        <button class="add-overlay-btn" (click)="addOverlay(group)">+ Add Overlay</button>
+        <button class="add-overlay-btn" (click)="addOverlay(group, 'bottom')">+ Add Overlay at Bottom</button>
         </ng-container>
       </div>
 
@@ -579,8 +589,32 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
       max-width: 1100px;
     }
 
-    h2 {
+    .page-title {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
       margin-bottom: var(--spacing-sm);
+    }
+
+    h2 {
+      margin: 0;
+    }
+
+    .page-title-icon {
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-accent);
+      flex: 0 0 auto;
+    }
+
+    .page-title-icon svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+      fill: currentColor;
     }
 
     .description {
@@ -758,7 +792,6 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
       flex-wrap: wrap;
       margin-bottom: var(--spacing-sm);
       padding: 4px var(--spacing-sm);
-      background-color: var(--color-bg-primary);
       border-radius: var(--radius-sm);
     }
 
@@ -927,10 +960,13 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
     }
 
     .section-label {
-      font-size: 0.85rem;
+      font-size: 1rem;
+      font-weight: bold;
       color: var(--color-text-secondary);
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      margin-top: 10px;
+      margin-left: -10px;
     }
 
     .add-btn {
@@ -939,12 +975,19 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
     }
 
     .overlay-card {
-      background-color: var(--color-bg-primary);
       border: 1px solid var(--color-border);
       border-radius: var(--radius-sm);
       padding: var(--spacing-sm);
       margin-bottom: var(--spacing-sm);
       transition: border-color 0.1s ease;
+    }
+
+    .overlay-card-alt-1 {
+      background-color: var(--color-bg-alternating1);
+    }
+
+    .overlay-card-alt-2 {
+      background-color: var(--color-bg-alternating2);
     }
 
     .overlay-save-row {
@@ -1135,7 +1178,7 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
       padding-left: 50px;
     }
 
-    .rule-row.overlay-rule-row{
+    .rule-row.overlay-rule-row {
       background-color: rgba(0, 0, 0, 0.25);
     }
 
@@ -1324,10 +1367,17 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
 
     .add-overlay-btn {
       font-size: 0.85rem;
-      background: transparent;
+      background: rgba(0, 0, 0, 0.25);
       border: 1px dashed var(--color-border);
-      width: 100%;
       padding: var(--spacing-sm);
+    }
+
+    .add-overlay-btn:hover {
+      background: rgba(0, 0, 0, 0.5);
+    }
+
+    .add-overlay-top-btn {
+      margin-bottom: var(--spacing-sm);
     }
 
     .danger-text {
@@ -1376,6 +1426,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   importJsonText = '';
   hasUnsavedChanges = false;
   isResolvingUnsavedChanges = false;
+  uiHasFocus = true;
   pickingGroupId: string | null = null;
   highlightId: string | null = null;
   copiedOverlayRule: any | null = null;
@@ -1443,6 +1494,18 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     }
   }
 
+  @HostListener('window:focus')
+  onWindowFocus(): void {
+    this.uiHasFocus = true;
+    this.changeDetectorRef.markForCheck();
+  }
+
+  @HostListener('window:blur')
+  onWindowBlur(): void {
+    this.uiHasFocus = false;
+    this.changeDetectorRef.markForCheck();
+  }
+
   @HostListener('document:click')
   onDocumentClick(): void {
     this.openProfileDropdownGroupId = null;
@@ -1450,6 +1513,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   }
 
   async ngOnInit(): Promise<void> {
+    this.uiHasFocus = document.hasFocus();
     this.pendingChangesService.register(this);
     const config = await this.electronService.loadConfig();
     this.groups = config.overlayGroups || [];
@@ -1641,6 +1705,16 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     return !this.collapsedGroupIds.has(groupId);
   }
 
+  isGroupVisuallyDisabled(group: any): boolean {
+    const isProfileDisabled = group.enabled === false && this.isGroupProfileManaged(group);
+    if (!isProfileDisabled) {
+      return false;
+    }
+
+    // Keep inactive groups readable while the user is actively editing them.
+    return !(this.uiHasFocus && this.isGroupExpanded(group.id));
+  }
+
   toggleGroupExpanded(groupId: string): void {
     if (this.collapsedGroupIds.has(groupId)) {
       this.collapsedGroupIds.delete(groupId);
@@ -1745,7 +1819,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   // Overlay CRUD
   // ---------------------------------------------------------------------------
 
-  addOverlay(group: any): void {
+  addOverlay(group: any, position: 'top' | 'bottom' = 'bottom'): void {
     const newOverlay = {
       id: crypto.randomUUID(), name: 'New Overlay', contentType: 'text',
       defaultVisible: true, defaultOpacity: 1.0,
@@ -1756,7 +1830,11 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
       },
       imageConfig: null, regionMirrorConfig: null, rules: [],
     };
-    group.overlays.push(newOverlay);
+    if (position === 'top') {
+      group.overlays.unshift(newOverlay);
+    } else {
+      group.overlays.push(newOverlay);
+    }
     this.markGroupsChanged();
     setTimeout(() => {
       const input = document.querySelector(`[data-overlay-name-id="${newOverlay.id}"]`) as HTMLInputElement | null;

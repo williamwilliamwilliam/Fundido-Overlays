@@ -1,4 +1,4 @@
-import {
+﻿import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
@@ -35,15 +35,26 @@ import { FormsModule } from '@angular/forms';
   template: `
     <div class="sound-select-wrapper" [class.is-open]="isDropdownOpen">
 
-      <!-- Trigger button — shows the currently selected filename -->
-      <button
-        type="button"
-        class="sound-select-trigger"
-        (click)="toggleDropdown()"
-        [title]="selectedSoundFilePath || 'No sound'">
-        <span class="sound-select-label">{{ selectedDisplayName }}</span>
-        <span class="sound-select-arrow">{{ isDropdownOpen ? '▲' : '▼' }}</span>
-      </button>
+      <!-- Trigger button â€” shows the currently selected filename -->
+      <div class="sound-select-trigger-row">
+        <button
+          type="button"
+          class="sound-select-trigger"
+          (click)="toggleDropdown()"
+          [title]="selectedSoundFilePath || 'No sound'">
+          <span class="sound-select-label">{{ selectedDisplayName }}</span>
+          <span class="sound-select-arrow">{{ isDropdownOpen ? '▼' : '▼' }}</span>
+        </button>
+        <button
+          *ngIf="selectedSoundFilePath"
+          type="button"
+          class="sound-option-preview-btn selected-sound-preview-btn"
+          [class.sound-option-preview-btn-playing]="playingPreviewPath === selectedSoundFilePath"
+          [title]="'Preview: ' + getBasename(selectedSoundFilePath)"
+          (click)="onPreviewClicked($event, selectedSoundFilePath)">
+          &#9654;
+        </button>
+      </div>
 
       <!-- Dropdown panel -->
       <div *ngIf="isDropdownOpen" class="sound-select-menu">
@@ -56,7 +67,7 @@ import { FormsModule } from '@angular/forms';
             class="sound-search-input"
             [(ngModel)]="searchText"
             (ngModelChange)="onSearchTextChanged()"
-            placeholder="Search files…"
+            placeholder="Search files..."
             autocomplete="off"
             (keydown.escape)="closeDropdown()"
             (keydown.enter)="selectFirstVisibleOption()"
@@ -70,7 +81,7 @@ import { FormsModule } from '@angular/forms';
             class="sound-option sound-option-empty-choice"
             [class.sound-option-selected]="!selectedSoundFilePath"
             (mousedown)="selectFile('')">
-            — No Sound —
+            -- No Sound --
           </div>
 
           <ng-container *ngIf="filteredPaths.length > 0; else noMatches">
@@ -116,11 +127,19 @@ import { FormsModule } from '@angular/forms';
       font-size: 0.8rem;
     }
 
+    .sound-select-trigger-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+    }
+
     .sound-select-trigger {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 6px;
+      flex: 1;
       min-width: 160px;
       max-width: 260px;
       padding: 3px 6px;
@@ -288,6 +307,10 @@ import { FormsModule } from '@angular/forms';
       color: var(--color-accent);
       background-color: var(--color-bg-panel);
     }
+
+    .selected-sound-preview-btn {
+      align-self: stretch;
+    }
   `],
 })
 export class SearchableSoundSelectComponent implements OnChanges {
@@ -303,7 +326,7 @@ export class SearchableSoundSelectComponent implements OnChanges {
   /** Emits a file path when the user clicks the preview button next to an option. */
   @Output() soundPreviewRequested = new EventEmitter<string>();
 
-  /** Global sound volume (0.0–1.0) passed down from the parent for preview playback. */
+  /** Global sound volume (0.0â€“1.0) passed down from the parent for preview playback. */
   @Input() soundVolume: number = 0.5;
 
   @ViewChild('searchInput') searchInputRef!: ElementRef<HTMLInputElement>;
@@ -422,3 +445,4 @@ export class SearchableSoundSelectComponent implements OnChanges {
     }
   }
 }
+

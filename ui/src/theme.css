@@ -13,7 +13,9 @@
   /* --------------------------------------------------------------------------
    * Background colors
    * -------------------------------------------------------------------------- */
-  --color-bg-primary:     #1a1a2e;    /* Main app background                   */
+  --color-bg-primary: #09090b;    /* Main app background                   */
+  --color-bg-alternating1: #051015;    /* Main app background                   */
+  --color-bg-alternating2: #04040e;    /* Main app background                   */
   --color-bg-secondary:   #16213e;    /* Cards, panels, input backgrounds       */
   --color-bg-panel:       #0f3460;    /* Elevated panels, button backgrounds    */
   --color-bg-deep:        #0d0d1a;    /* Deepest background (debug console)     */
