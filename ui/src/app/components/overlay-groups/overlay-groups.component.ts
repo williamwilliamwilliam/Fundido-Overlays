@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, HostListener, NgZone, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, ActivatedRoute, RouterLink } from '@angular/router';
+import { NavigationEnd, Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { PendingChangesComponent } from '../../guards/pending-changes.guard';
 import { ElectronService } from '../../services/electron.service';
@@ -192,7 +192,7 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
           <a *ngFor="let ref of groupRuleCrossRefs.get(group.id)"
             class="cross-ref-link"
             [routerLink]="['/regions']"
-            [queryParams]="{ highlight: ref.id }">
+            [queryParams]="{ search: ref.name }">
             {{ ref.name }}
           </a>
         </div>
@@ -338,7 +338,7 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
             <a *ngFor="let ref of overlayCrossRefs.get(overlay.id)"
               class="cross-ref-link"
               [routerLink]="['/regions']"
-              [queryParams]="{ highlight: ref.id }">
+              [queryParams]="{ search: ref.name }">
               {{ ref.name }}
             </a>
           </div>
@@ -1389,6 +1389,9 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   private groupComparableSnapshots = new Map<string, string>();
   private pendingNavigationPromise: Promise<boolean> | null = null;
   private pendingNavigationResolve: ((allowNavigation: boolean) => void) | null = null;
+  /** True while this route is the active page. Used to short-circuit expensive work while detached. */
+  private isRouteActive = true;
+  private routerEventsSubscription: Subscription | null = null;
 
   /** Cached cross-references: overlayId → monitored regions referenced by that overlay. Built once on load. */
   overlayCrossRefs = new Map<string, Array<{ id: string; name: string }>>();
@@ -1465,6 +1468,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.changeDetectorRef.markForCheck();
     this.ngZone.runOutsideAngular(() => {
       this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
+        if (!this.isRouteActive) return;
         this.currentFrameState = frameState;
         this.scheduleViewRefresh();
       });
@@ -1507,12 +1511,45 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
         }, 600);
       }, 150);
     });
+
+    // Subscribe to router navigation events to detect when this route becomes active or
+    // inactive without being destroyed (because AppRouteReuseStrategy keeps this component alive).
+    this.routerEventsSubscription = this.router.events.subscribe((event) => {
+      if (!(event instanceof NavigationEnd)) return;
+      const isNowActiveRoute = event.urlAfterRedirects.startsWith('/overlays');
+      if (isNowActiveRoute && !this.isRouteActive) {
+        this.onRouteActivated();
+      } else if (!isNowActiveRoute && this.isRouteActive) {
+        this.onRouteDeactivated();
+      }
+    });
   }
 
   ngOnDestroy(): void {
+    // Safety net: if the component is destroyed while still the active route (e.g. at app
+    // shutdown), run deactivation cleanup so IPC state is left consistent.
+    if (this.isRouteActive) {
+      this.onRouteDeactivated();
+    }
     this.pendingChangesService.unregister(this);
+    this.routerEventsSubscription?.unsubscribe();
     this.stateSubscription?.unsubscribe();
     this.resolvePendingNavigation(false);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Route reuse lifecycle — called by NavigationEnd subscription rather than
+  // Angular's own ngOnInit/ngOnDestroy because AppRouteReuseStrategy keeps this
+  // component alive across navigations.
+  // ---------------------------------------------------------------------------
+
+  private onRouteActivated(): void {
+    this.isRouteActive = true;
+    this.changeDetectorRef.markForCheck();
+  }
+
+  private onRouteDeactivated(): void {
+    this.isRouteActive = false;
   }
 
   canDeactivate(): boolean | Promise<boolean> {
@@ -2293,7 +2330,9 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   }
 
   navigateToRegion(regionId: string): void {
-    this.router.navigate(['/regions'], { queryParams: { highlight: regionId } });
+    const matchingRegion = this.monitoredRegions.find((r: any) => r.id === regionId);
+    const regionName = matchingRegion?.name ?? regionId;
+    this.router.navigate(['/regions'], { queryParams: { search: regionName } });
   }
 
   // ---------------------------------------------------------------------------

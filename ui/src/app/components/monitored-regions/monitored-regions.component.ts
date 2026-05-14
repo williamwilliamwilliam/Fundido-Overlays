@@ -14,7 +14,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, ActivatedRoute, RouterLink } from '@angular/router';
+import { NavigationEnd, Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { PendingChangesComponent } from '../../guards/pending-changes.guard';
 import { ElectronService } from '../../services/electron.service';
@@ -1866,6 +1866,9 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   private previewVisibilityObserver: IntersectionObserver | null = null;
   private previewRenderScheduled = false;
   private viewRefreshScheduled = false;
+  /** True while this route is the active page. Used to short-circuit expensive work while detached. */
+  private isRouteActive = true;
+  private routerEventsSubscription: Subscription | null = null;
   private rawPreviewCanvas: HTMLCanvasElement | null = null;
   private rawPreviewContext: CanvasRenderingContext2D | null = null;
   private rawPreviewRgbaBuffer: Uint8ClampedArray | null = null;
@@ -1972,6 +1975,7 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
 
     this.ngZone.runOutsideAngular(() => {
       this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
+        if (!this.isRouteActive) return;
         const profileStatesChanged = this.applyFrameProfileStates(frameState);
         if (this.processFrameState(frameState)) {
           this.scheduleViewRefresh();
@@ -1982,12 +1986,23 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
     });
 
     this.perfSubscription = this.electronService.perfMetricsStream.subscribe((metrics: any) => {
+      if (!this.isRouteActive) return;
       this.latestPerfMetrics = metrics;
       this.changeDetectorRef.markForCheck();
     });
 
-    // Scroll to and highlight an element if navigated here with ?highlight=id
+    // Pre-populate the search box when navigated here with ?search=name (e.g. from an
+    // Overlay Groups cross-reference link). This filters the list to the linked region
+    // and clears the saved scroll position so the page starts from the top.
+    // The ?highlight=id path is kept for any inbound links that still use the old param.
     this.route.queryParams.subscribe((params) => {
+      const incomingSearchText = params['search'];
+      if (incomingSearchText) {
+        this.regionSearchText = incomingSearchText;
+        this.changeDetectorRef.markForCheck();
+        return;
+      }
+
       const targetId = params['highlight'];
       if (!targetId) return;
 
@@ -2024,6 +2039,22 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
         }, 600);
       }, 150);
     });
+
+    // Restore scroll position now that all data is loaded and markForCheck() has been
+    // called. Using setTimeout so this runs in the next macrotask — by then Zone.js
+    // has completed its change-detection cycle and the full list is in the DOM.
+    // Skip restoration when arriving via a query param that controls scroll itself.
+    // Subscribe to router navigation events to detect when this route becomes active or
+    // inactive without being destroyed (because AppRouteReuseStrategy keeps this component alive).
+    this.routerEventsSubscription = this.router.events.subscribe((event) => {
+      if (!(event instanceof NavigationEnd)) return;
+      const isNowActiveRoute = event.urlAfterRedirects.startsWith('/regions');
+      if (isNowActiveRoute && !this.isRouteActive) {
+        this.onRouteActivated();
+      } else if (!isNowActiveRoute && this.isRouteActive) {
+        this.onRouteDeactivated();
+      }
+    });
   }
 
   ngAfterViewInit(): void {
@@ -2057,18 +2088,44 @@ export class MonitoredRegionsComponent implements OnInit, AfterViewInit, OnDestr
   }
 
   ngOnDestroy(): void {
+    // Safety net: if the component is destroyed while still the active route (e.g. at app
+    // shutdown), run deactivation cleanup so IPC state is left consistent.
+    if (this.isRouteActive) {
+      this.onRouteDeactivated();
+    }
     this.pendingChangesService.unregister(this);
+    this.routerEventsSubscription?.unsubscribe();
     this.previewSubscription?.unsubscribe();
     this.pickerUpdateSubscription?.unsubscribe();
     this.stateSubscription?.unsubscribe();
     this.perfSubscription?.unsubscribe();
     this.previewCanvasChangesSubscription?.unsubscribe();
     this.previewVisibilityObserver?.disconnect();
+    this.resolvePendingNavigation(false);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Route reuse lifecycle — called by NavigationEnd subscription rather than
+  // Angular's own ngOnInit/ngOnDestroy because AppRouteReuseStrategy keeps this
+  // component alive across navigations.
+  // ---------------------------------------------------------------------------
+
+  private onRouteActivated(): void {
+    this.isRouteActive = true;
+    this.electronService.setActivePage('regions');
+    // Re-push working regions so the overlay renderer picks up any in-memory
+    // state that accumulated while this route was detached.
+    this.electronService.setWorkingRegions(this.regions);
+    this.electronService.setDirtyRegionOverlays(this.getDirtyRegionOverlayItems());
+    this.changeDetectorRef.markForCheck();
+  }
+
+  private onRouteDeactivated(): void {
+    this.isRouteActive = false;
     this.electronService.setActivePage('');
-    // Clear working regions so the pipeline falls back to saved config
+    // Fall back to saved config while the regions page is not visible.
     this.electronService.setWorkingRegions(null as any);
     this.electronService.setDirtyRegionOverlays([]);
-    this.resolvePendingNavigation(false);
   }
 
   canDeactivate(): boolean | Promise<boolean> {

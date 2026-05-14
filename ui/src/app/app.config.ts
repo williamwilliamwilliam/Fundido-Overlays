@@ -1,6 +1,7 @@
 import { ApplicationConfig } from '@angular/core';
-import { provideRouter, Routes } from '@angular/router';
+import { provideRouter, RouteReuseStrategy, Routes } from '@angular/router';
 
+import { AppRouteReuseStrategy } from './app-route-reuse-strategy';
 import { CapturePreviewComponent } from './components/capture-preview/capture-preview.component';
 import { MonitoredRegionsComponent } from './components/monitored-regions/monitored-regions.component';
 import { OverlayGroupsComponent } from './components/overlay-groups/overlay-groups.component';
@@ -18,5 +19,8 @@ const routes: Routes = [
 ];
 
 export const appConfig: ApplicationConfig = {
-  providers: [provideRouter(routes)],
+  providers: [
+    provideRouter(routes),
+    { provide: RouteReuseStrategy, useClass: AppRouteReuseStrategy },
+  ],
 };
