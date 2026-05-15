@@ -236,20 +236,13 @@ export class OverlayWindowManager {
       return calcResult.currentValue !== cond.value;
     }
 
-    const instanceStates = (frameState as any).regionInstanceStates || [];
-    const matchingInstances = instanceStates.filter(
-      (instanceState: any) => instanceState.monitoredRegionId === cond.monitoredRegionId
-    );
+    const matchingInstances = this.getMatchingRegionInstances(frameState, cond.monitoredRegionId);
 
     if (matchingInstances.length === 0) {
       return false;
     }
 
-    const matchingValues = matchingInstances.map((instanceState: any) =>
-      instanceState.calculationResults.find(
-        (instanceCalcResult: any) => instanceCalcResult.stateCalculationId === cond.stateCalculationId
-      )?.currentValue
-    );
+    const matchingValues = this.getInstanceValues(matchingInstances, cond.stateCalculationId);
 
     if (cond.operator === 'equalsAtLeastOnceAcrossRepeatedRegions') {
       return matchingValues.some((value: string | undefined) => value === cond.value);
@@ -279,7 +272,52 @@ export class OverlayWindowManager {
       return selectedValues.some((value: string | undefined) => value === cond.value);
     }
 
+    if (cond.operator === 'repeatingRegionOccurrenceComparison') {
+      const otherMatchingInstances = this.getMatchingRegionInstances(frameState, cond.secondMonitoredRegionId || '');
+      if (otherMatchingInstances.length === 0 || !cond.secondStateCalculationId) {
+        return false;
+      }
+
+      const leftCount = matchingValues.filter((value: string | undefined) => value === cond.value).length;
+      const rightValues = this.getInstanceValues(otherMatchingInstances, cond.secondStateCalculationId);
+      const rightCount = rightValues.filter((value: string | undefined) => value === cond.value).length;
+      return this.compareOccurrenceCounts(leftCount, rightCount, cond.occurrenceComparisonOperator);
+    }
+
     return true;
+  }
+
+  private getMatchingRegionInstances(frameState: FrameState, regionId: string): any[] {
+    const instanceStates = (frameState as any).regionInstanceStates || [];
+    return instanceStates.filter(
+      (instanceState: any) => instanceState.monitoredRegionId === regionId
+    );
+  }
+
+  private getInstanceValues(instanceStates: any[], calcId: string): Array<string | undefined> {
+    return instanceStates.map((instanceState: any) =>
+      instanceState.calculationResults.find(
+        (instanceCalcResult: any) => instanceCalcResult.stateCalculationId === calcId
+      )?.currentValue
+    );
+  }
+
+  private compareOccurrenceCounts(leftCount: number, rightCount: number, operator: string | undefined): boolean {
+    switch (operator) {
+      case 'gt':
+        return leftCount > rightCount;
+      case 'lt':
+        return leftCount < rightCount;
+      case 'ne':
+        return leftCount !== rightCount;
+      case 'lte':
+        return leftCount <= rightCount;
+      case 'gte':
+        return leftCount >= rightCount;
+      case 'eq':
+      default:
+        return leftCount === rightCount;
+    }
   }
 
   /**
@@ -1026,18 +1064,10 @@ function buildOverlayRendererHtml(): string {
     if (c.operator === 'equals') return cr.currentValue === c.value;
     if (c.operator === 'notEquals') return cr.currentValue !== c.value;
 
-    const instanceStates = fs.regionInstanceStates || [];
-    const matchingInstances = instanceStates.filter(function(instanceState) {
-      return instanceState.monitoredRegionId === c.monitoredRegionId;
-    });
+    const matchingInstances = getMatchingRegionInstances(fs, c.monitoredRegionId);
     if (matchingInstances.length === 0) return false;
 
-    const matchingValues = matchingInstances.map(function(instanceState) {
-      const instanceCalcResult = instanceState.calculationResults.find(function(r) {
-        return r.stateCalculationId === c.stateCalculationId;
-      });
-      return instanceCalcResult ? instanceCalcResult.currentValue : undefined;
-    });
+    const matchingValues = getInstanceValues(matchingInstances, c.stateCalculationId);
 
     if (c.operator === 'equalsAtLeastOnceAcrossRepeatedRegions') {
       return matchingValues.some(function(value) { return value === c.value; });
@@ -1065,7 +1095,45 @@ function buildOverlayRendererHtml(): string {
       return selectedValues.some(function(value) { return value === c.value; });
     }
 
+    if (c.operator === 'repeatingRegionOccurrenceComparison') {
+      const otherMatchingInstances = getMatchingRegionInstances(fs, c.secondMonitoredRegionId || '');
+      if (otherMatchingInstances.length === 0 || !c.secondStateCalculationId) return false;
+      const leftCount = matchingValues.filter(function(value) { return value === c.value; }).length;
+      const rightValues = getInstanceValues(otherMatchingInstances, c.secondStateCalculationId);
+      const rightCount = rightValues.filter(function(value) { return value === c.value; }).length;
+      return compareOccurrenceCounts(leftCount, rightCount, c.occurrenceComparisonOperator);
+    }
+
     return true;
+  }
+
+  function getMatchingRegionInstances(fs, regionId) {
+    const instanceStates = fs.regionInstanceStates || [];
+    return instanceStates.filter(function(instanceState) {
+      return instanceState.monitoredRegionId === regionId;
+    });
+  }
+
+  function getInstanceValues(instanceStates, calcId) {
+    return instanceStates.map(function(instanceState) {
+      const instanceCalcResult = instanceState.calculationResults.find(function(r) {
+        return r.stateCalculationId === calcId;
+      });
+      return instanceCalcResult ? instanceCalcResult.currentValue : undefined;
+    });
+  }
+
+  function compareOccurrenceCounts(leftCount, rightCount, operator) {
+    switch (operator) {
+      case 'gt': return leftCount > rightCount;
+      case 'lt': return leftCount < rightCount;
+      case 'ne': return leftCount !== rightCount;
+      case 'lte': return leftCount <= rightCount;
+      case 'gte': return leftCount >= rightCount;
+      case 'eq':
+      default:
+        return leftCount === rightCount;
+    }
   }
 
   function evalConds(conds, logicMode, fs) {

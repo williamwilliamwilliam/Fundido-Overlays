@@ -323,7 +323,15 @@ export type RuleOperator =
   | 'equalsInEveryRepeatedRegion'
   | 'equalsAtLeastNTimesAcrossRepeatedRegions'
   | 'equalsInEverySelectedRepeatedRegion'
-  | 'equalsAtLeastOnceInSelectedRepeatedRegions';
+  | 'equalsAtLeastOnceInSelectedRepeatedRegions'
+  | 'repeatingRegionOccurrenceComparison';
+export type RepeatingRegionOccurrenceComparisonOperator =
+  | 'gt'
+  | 'lt'
+  | 'eq'
+  | 'ne'
+  | 'lte'
+  | 'gte';
 export type RuleLogicMode = 'AND' | 'OR';
 
 export interface RuleCondition {
@@ -338,6 +346,12 @@ export interface RuleCondition {
   /** For 'equalsInEverySelectedRepeatedRegion' / 'equalsAtLeastOnceInSelectedRepeatedRegions':
    *  selected instance keys as "{repeatIndexX}_{repeatIndexY}" strings. */
   selectedRepeatInstances?: string[];
+  /** For 'repeatingRegionOccurrenceComparison': the second repeating region to compare against. */
+  secondMonitoredRegionId?: MonitoredRegionId;
+  /** For 'repeatingRegionOccurrenceComparison': the second region's state calculation to compare against. */
+  secondStateCalculationId?: StateCalculationId;
+  /** For 'repeatingRegionOccurrenceComparison': how the two occurrence counts are compared. */
+  occurrenceComparisonOperator?: RepeatingRegionOccurrenceComparisonOperator;
 }
 
 export type RuleAction = 'show' | 'hide' | 'opacity';

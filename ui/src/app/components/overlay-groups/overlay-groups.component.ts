@@ -524,7 +524,7 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
                     <option value="">Select Calc</option>
                     <option *ngFor="let calc of getCalcsForRegion(cond.monitoredRegionId); trackBy: trackByCalcId" [ngValue]="calc.id">{{ calc.name }}</option>
                   </select>
-                  <select [(ngModel)]="cond.operator" (ngModelChange)="onFieldChanged()">
+                  <select [(ngModel)]="cond.operator" (ngModelChange)="onConditionOperatorChanged(cond)">
                     <option value="equals">=</option>
                     <option value="notEquals">≠</option>
                     <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsAtLeastOnceAcrossRepeatedRegions">
@@ -542,6 +542,31 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
                     <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="equalsAtLeastOnceInSelectedRepeatedRegions">
                       At Least One Selected Region
                     </option>
+                    <option *ngIf="isRepeatingRegion(cond.monitoredRegionId)" value="repeatingRegionOccurrenceComparison">
+                      Repeating Region Occurrence Comparison
+                    </option>
+                  </select>
+                  <select *ngIf="isOccurrenceComparisonOperator(cond.operator)"
+                    [(ngModel)]="cond.occurrenceComparisonOperator"
+                    (ngModelChange)="onFieldChanged()">
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="eq">==</option>
+                    <option value="ne">!=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="gte">&gt;=</option>
+                  </select>
+                  <app-searchable-region-select
+                    *ngIf="isOccurrenceComparisonOperator(cond.operator)"
+                    [regions]="getRepeatingRegions()"
+                    [selectedRegionId]="cond.secondMonitoredRegionId || ''"
+                    (regionSelected)="onSecondRegionSelectedForCondition(cond, $event)">
+                  </app-searchable-region-select>
+                  <select *ngIf="isOccurrenceComparisonOperator(cond.operator)"
+                    [(ngModel)]="cond.secondStateCalculationId"
+                    (ngModelChange)="onSecondCalculationSelectedForCondition(cond)">
+                    <option value="">Select Calc</option>
+                    <option *ngFor="let calc of getCalcsForRegion(cond.secondMonitoredRegionId || ''); trackBy: trackByCalcId" [ngValue]="calc.id">{{ calc.name }}</option>
                   </select>
                   <input *ngIf="cond.operator === 'equalsAtLeastNTimesAcrossRepeatedRegions'"
                     type="number" min="1" [(ngModel)]="cond.minimumCount" (ngModelChange)="onFieldChanged()"
@@ -561,12 +586,17 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
                       </label>
                     </div>
                   </div>
-                  <select *ngIf="getCalcType(cond.monitoredRegionId, cond.stateCalculationId) !== 'OllamaLLM'"
+                  <select *ngIf="isOccurrenceComparisonOperator(cond.operator)"
+                    [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()">
+                    <option value="">Select Value</option>
+                    <option *ngFor="let sv of getOccurrenceComparisonValueOptions(cond); trackBy: trackByStringValue" [ngValue]="sv">{{ sv }}</option>
+                  </select>
+                  <select *ngIf="!isOccurrenceComparisonOperator(cond.operator) && getCalcType(cond.monitoredRegionId, cond.stateCalculationId) !== 'OllamaLLM'"
                     [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()">
                     <option value="">Select Value</option>
                     <option *ngFor="let sv of getStateValuesForCalc(cond.monitoredRegionId, cond.stateCalculationId); trackBy: trackByStringValue" [ngValue]="sv">{{ sv }}</option>
                   </select>
-                  <input *ngIf="getCalcType(cond.monitoredRegionId, cond.stateCalculationId) === 'OllamaLLM'"
+                  <input *ngIf="!isOccurrenceComparisonOperator(cond.operator) && getCalcType(cond.monitoredRegionId, cond.stateCalculationId) === 'OllamaLLM'"
                     [(ngModel)]="cond.value" (ngModelChange)="onFieldChanged()"
                     placeholder="Expected response" class="condition-value-input" />
                   <span
@@ -2353,6 +2383,18 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.markGroupsChanged();
   }
 
+  onConditionOperatorChanged(condition: any): void {
+    if (this.isOccurrenceComparisonOperator(condition.operator)) {
+      this.initializeOccurrenceComparisonCondition(condition);
+    } else {
+      condition.occurrenceComparisonOperator = undefined;
+      condition.secondMonitoredRegionId = undefined;
+      condition.secondStateCalculationId = undefined;
+    }
+    this.autofillConditionValue(condition);
+    this.markGroupsChanged();
+  }
+
   onRegionSelectedForCondition(condition: any): void {
     const repeatedOnlyOperators = [
       'equalsAtLeastOnceAcrossRepeatedRegions',
@@ -2360,6 +2402,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
       'equalsAtLeastNTimesAcrossRepeatedRegions',
       'equalsInEverySelectedRepeatedRegion',
       'equalsAtLeastOnceInSelectedRepeatedRegions',
+      'repeatingRegionOccurrenceComparison',
     ];
     if (!this.isRepeatingRegion(condition.monitoredRegionId) && repeatedOnlyOperators.includes(condition.operator)) {
       condition.operator = 'equals';
@@ -2369,6 +2412,19 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   }
 
   onCalculationSelectedForCondition(condition: any): void {
+    this.autofillConditionValue(condition);
+    this.markGroupsChanged();
+  }
+
+  onSecondRegionSelectedForCondition(condition: any, regionId: string): void {
+    condition.secondMonitoredRegionId = regionId;
+    const firstCalc = this.getCalcsForRegion(regionId)[0];
+    condition.secondStateCalculationId = firstCalc?.id || '';
+    this.autofillConditionValue(condition);
+    this.markGroupsChanged();
+  }
+
+  onSecondCalculationSelectedForCondition(condition: any): void {
     this.autofillConditionValue(condition);
     this.markGroupsChanged();
   }
@@ -2444,6 +2500,10 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   getCalcsForRegion(regionId: string): any[] {
     const region = this.monitoredRegions.find((r: any) => r.id === regionId);
     return region?.stateCalculations || [];
+  }
+
+  getRepeatingRegions(): any[] {
+    return this.monitoredRegions.filter((region: any) => this.isRepeatingRegion(region.id));
   }
 
   isRepeatingRegion(regionId: string): boolean {
@@ -2538,6 +2598,10 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     return value;
   }
 
+  isOccurrenceComparisonOperator(operator: string | undefined): boolean {
+    return operator === 'repeatingRegionOccurrenceComparison';
+  }
+
   toggleInstanceDropdown(condition: any, event: Event): void {
     event.stopPropagation();
     this.openInstanceDropdownCondition = this.openInstanceDropdownCondition === condition ? null : condition;
@@ -2563,6 +2627,14 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     return allValues;
   }
 
+  getOccurrenceComparisonValueOptions(condition: any): string[] {
+    const values = [
+      ...this.getStateValuesForCalc(condition.monitoredRegionId, condition.stateCalculationId),
+      ...this.getStateValuesForCalc(condition.secondMonitoredRegionId || '', condition.secondStateCalculationId || ''),
+    ];
+    return Array.from(new Set(values.filter((value) => !!value)));
+  }
+
   getCalcType(regionId: string, calcId: string): string {
     const region = this.monitoredRegions.find((r: any) => r.id === regionId);
     if (!region) return '';
@@ -2573,12 +2645,39 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   private autofillConditionCalculationAndValue(condition: any): void {
     const firstCalc = this.getCalcsForRegion(condition.monitoredRegionId)[0];
     condition.stateCalculationId = firstCalc?.id || '';
+    if (this.isOccurrenceComparisonOperator(condition.operator)) {
+      this.initializeOccurrenceComparisonCondition(condition);
+    }
     this.autofillConditionValue(condition);
   }
 
   private autofillConditionValue(condition: any): void {
-    const firstValue = this.getStateValuesForCalc(condition.monitoredRegionId, condition.stateCalculationId)[0];
-    condition.value = firstValue || '';
+    const valueOptions = this.isOccurrenceComparisonOperator(condition.operator)
+      ? this.getOccurrenceComparisonValueOptions(condition)
+      : this.getStateValuesForCalc(condition.monitoredRegionId, condition.stateCalculationId);
+    if (!valueOptions.includes(condition.value)) {
+      condition.value = valueOptions[0] || '';
+    }
+  }
+
+  private initializeOccurrenceComparisonCondition(condition: any): void {
+    if (!condition.occurrenceComparisonOperator) {
+      condition.occurrenceComparisonOperator = 'eq';
+    }
+
+    const repeatingRegions = this.getRepeatingRegions();
+    const selectedSecondRegionIsValid = repeatingRegions.some((region: any) => region.id === condition.secondMonitoredRegionId);
+    if (!selectedSecondRegionIsValid) {
+      condition.secondMonitoredRegionId = repeatingRegions.find((region: any) => region.id !== condition.monitoredRegionId)?.id
+        || condition.monitoredRegionId
+        || '';
+    }
+
+    const secondRegionCalcs = this.getCalcsForRegion(condition.secondMonitoredRegionId || '');
+    const selectedSecondCalcIsValid = secondRegionCalcs.some((calc: any) => calc.id === condition.secondStateCalculationId);
+    if (!selectedSecondCalcIsValid) {
+      condition.secondStateCalculationId = secondRegionCalcs[0]?.id || '';
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2595,6 +2694,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
       for (const rule of (group.rules || [])) {
         for (const cond of (rule.conditions || [])) {
           if (cond.monitoredRegionId) groupRegionIds.add(cond.monitoredRegionId);
+          if (cond.secondMonitoredRegionId) groupRegionIds.add(cond.secondMonitoredRegionId);
         }
       }
       if (groupRegionIds.size > 0) {
@@ -2613,6 +2713,7 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
         for (const rule of (overlay.rules || [])) {
           for (const cond of (rule.conditions || [])) {
             if (cond.monitoredRegionId) regionIds.add(cond.monitoredRegionId);
+            if (cond.secondMonitoredRegionId) regionIds.add(cond.secondMonitoredRegionId);
           }
         }
 
@@ -2829,19 +2930,12 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
       return calcResult.currentValue !== condition.value;
     }
 
-    const instanceStates = frameState?.regionInstanceStates || [];
-    const matchingInstances = instanceStates.filter(
-      (instanceState: any) => instanceState.monitoredRegionId === condition.monitoredRegionId,
-    );
+    const matchingInstances = this.getMatchingRegionInstances(frameState, condition.monitoredRegionId);
     if (matchingInstances.length === 0) {
       return false;
     }
 
-    const matchingValues = matchingInstances.map((instanceState: any) =>
-      instanceState.calculationResults.find(
-        (instanceCalcResult: any) => instanceCalcResult.stateCalculationId === condition.stateCalculationId,
-      )?.currentValue,
-    );
+    const matchingValues = this.getInstanceValues(matchingInstances, condition.stateCalculationId);
 
     if (condition.operator === 'equalsAtLeastOnceAcrossRepeatedRegions') {
       return matchingValues.some((value: string | undefined) => value === condition.value);
@@ -2873,7 +2967,52 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
       return selectedValues.some((value: string | undefined) => value === condition.value);
     }
 
+    if (condition.operator === 'repeatingRegionOccurrenceComparison') {
+      const otherMatchingInstances = this.getMatchingRegionInstances(frameState, condition.secondMonitoredRegionId || '');
+      if (otherMatchingInstances.length === 0 || !condition.secondStateCalculationId) {
+        return false;
+      }
+
+      const leftCount = matchingValues.filter((value: string | undefined) => value === condition.value).length;
+      const rightValues = this.getInstanceValues(otherMatchingInstances, condition.secondStateCalculationId);
+      const rightCount = rightValues.filter((value: string | undefined) => value === condition.value).length;
+      return this.compareOccurrenceCounts(leftCount, rightCount, condition.occurrenceComparisonOperator);
+    }
+
     return true;
+  }
+
+  private getMatchingRegionInstances(frameState: any, regionId: string): any[] {
+    const instanceStates = frameState?.regionInstanceStates || [];
+    return instanceStates.filter(
+      (instanceState: any) => instanceState.monitoredRegionId === regionId,
+    );
+  }
+
+  private getInstanceValues(instanceStates: any[], calcId: string): Array<string | undefined> {
+    return instanceStates.map((instanceState: any) =>
+      instanceState.calculationResults.find(
+        (instanceCalcResult: any) => instanceCalcResult.stateCalculationId === calcId,
+      )?.currentValue,
+    );
+  }
+
+  private compareOccurrenceCounts(leftCount: number, rightCount: number, operator: string | undefined): boolean {
+    switch (operator) {
+      case 'gt':
+        return leftCount > rightCount;
+      case 'lt':
+        return leftCount < rightCount;
+      case 'ne':
+        return leftCount !== rightCount;
+      case 'lte':
+        return leftCount <= rightCount;
+      case 'gte':
+        return leftCount >= rightCount;
+      case 'eq':
+      default:
+        return leftCount === rightCount;
+    }
   }
 
   private scheduleViewRefresh(): void {
@@ -2943,6 +3082,11 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
         for (const rule of overlay.rules || []) {
           if (!rule.logicMode) {
             rule.logicMode = 'AND';
+          }
+          for (const condition of rule.conditions || []) {
+            if (condition.operator === 'repeatingRegionOccurrenceComparison' && !condition.occurrenceComparisonOperator) {
+              condition.occurrenceComparisonOperator = 'eq';
+            }
           }
         }
       }
