@@ -764,14 +764,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     const config = await this.electronService.loadConfig();
     config.soundLibraryFolderPaths = [...this.soundLibraryFolderPaths];
     await this.electronService.saveConfig(config);
-
-    const hasFolders = this.soundLibraryFolderPaths.length > 0;
-    if (hasFolders) {
-      await this.startSoundIndexing();
-    } else {
-      // No folders left — clear the index display
-      this.soundFileIndex = [];
-    }
+    await this.startSoundIndexing();
   }
 
   private async startSoundIndexing(): Promise<void> {

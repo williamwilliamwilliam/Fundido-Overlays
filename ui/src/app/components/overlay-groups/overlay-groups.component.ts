@@ -373,6 +373,7 @@ import { SearchableSoundSelectComponent } from '../shared/searchable-sound-selec
             <select [(ngModel)]="overlay.contentType" (ngModelChange)="onContentTypeChanged(overlay)">
               <option value="text">Text</option><option value="image">Image</option><option value="regionMirror">Region Mirror</option>
             </select>
+            <button class="small" (click)="cloneOverlay(group, overlay)">Clone</button>
             <button class="danger-text small" (click)="removeOverlay(group, overlayIndex)">Remove</button>
           </div>
           <div class="cross-ref-row" *ngIf="overlayCrossRefs.get(overlay.id)?.length">
@@ -1547,6 +1548,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
   /** True while this route is the active page. Used to short-circuit expensive work while detached. */
   private isRouteActive = true;
   private routerEventsSubscription: Subscription | null = null;
+  private configSavedSubscription: Subscription | null = null;
+  private soundIndexProgressSubscription: Subscription | null = null;
 
   /** Cached cross-references: overlayId → monitored regions referenced by that overlay. Built once on load. */
   overlayCrossRefs = new Map<string, Array<{ id: string; name: string }>>();
@@ -1635,6 +1638,18 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     this.applyProfileActivationToGroups();
     this.buildOverlayCrossRefs();
     this.changeDetectorRef.markForCheck();
+
+    this.configSavedSubscription = this.electronService.configSavedStream.subscribe((config: any) => {
+      this.refreshConfigDependencies(config);
+    });
+
+    this.soundIndexProgressSubscription = this.electronService.soundIndexProgressStream.subscribe((progress) => {
+      if (!progress.complete || progress.cancelled) {
+        return;
+      }
+      this.refreshSoundLibraryState();
+    });
+
     this.ngZone.runOutsideAngular(() => {
       this.stateSubscription = this.electronService.stateUpdateStream.subscribe((frameState: any) => {
         if (!this.isRouteActive) return;
@@ -1702,6 +1717,8 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     }
     this.pendingChangesService.unregister(this);
     this.routerEventsSubscription?.unsubscribe();
+    this.configSavedSubscription?.unsubscribe();
+    this.soundIndexProgressSubscription?.unsubscribe();
     this.stateSubscription?.unsubscribe();
     this.resolvePendingNavigation(false);
   }
@@ -1714,6 +1731,10 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
 
   private onRouteActivated(): void {
     this.isRouteActive = true;
+    this.electronService.loadConfig().then((config) => {
+      this.refreshConfigDependencies(config);
+    });
+    this.refreshSoundLibraryState();
     this.changeDetectorRef.markForCheck();
   }
 
@@ -2031,6 +2052,27 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
     group.overlays.splice(index, 1);
     this.markGroupsChanged();
     await this.saveAllGroups();
+  }
+
+  cloneOverlay(group: any, sourceOverlay: any): void {
+    const clonedOverlay = JSON.parse(JSON.stringify(sourceOverlay));
+    clonedOverlay.id = crypto.randomUUID();
+    clonedOverlay.name = `${sourceOverlay.name} (copy)`;
+    for (const rule of (clonedOverlay.rules || [])) {
+      rule.id = crypto.randomUUID();
+    }
+
+    const sourceIndex = (group.overlays || []).findIndex((overlay: any) => overlay.id === sourceOverlay.id);
+    const insertIndex = sourceIndex >= 0 ? sourceIndex + 1 : group.overlays.length;
+    group.overlays.splice(insertIndex, 0, clonedOverlay);
+
+    this.markGroupsChanged();
+    setTimeout(() => {
+      const input = document.querySelector(`[data-overlay-name-id="${clonedOverlay.id}"]`) as HTMLInputElement | null;
+      if (!input) return;
+      input.focus();
+      input.select();
+    }, 0);
   }
 
   // ---------------------------------------------------------------------------
@@ -2630,6 +2672,20 @@ export class OverlayGroupsComponent implements OnInit, OnDestroy, PendingChanges
       this.importJsonText = '';
       this.changeDetectorRef.markForCheck();
     }
+  }
+
+  private refreshConfigDependencies(config: any): void {
+    this.monitoredRegions = config.monitoredRegions || [];
+    this.profiles = config.profiles || [];
+    this.soundVolume = config.soundVolume ?? 0.5;
+    this.applyProfileActivationToGroups();
+    this.buildOverlayCrossRefs();
+    this.changeDetectorRef.markForCheck();
+  }
+
+  private async refreshSoundLibraryState(): Promise<void> {
+    this.soundFileIndex = await this.electronService.soundGetIndex();
+    this.changeDetectorRef.markForCheck();
   }
 
   private resolvePendingNavigation(allowNavigation: boolean): void {

@@ -621,14 +621,23 @@ function buildOverlayRendererHtml(): string {
   // Re-use one Audio element per overlay ID to avoid creating unbounded elements
   const soundAudioElementById = new Map();
 
+  function buildSoundFileSrc(filePath) {
+    if (!filePath) return '';
+    try {
+      const { pathToFileURL } = require('url');
+      const fs = require('fs');
+      const fileUrl = pathToFileURL(filePath);
+      const fileStat = fs.statSync(filePath);
+      fileUrl.searchParams.set('v', String(Math.round(fileStat.mtimeMs)));
+      return fileUrl.href;
+    } catch (_error) {
+      return filePath;
+    }
+  }
+
   function playSoundFile(filePath, volume) {
     var audioEl = new Audio();
-    var fileSrc = filePath;
-    var isAbsoluteWindowsPath = /^[A-Za-z]:/.test(fileSrc);
-    if (isAbsoluteWindowsPath) {
-      fileSrc = 'file:///' + fileSrc.replace(/\\\\/g, '/');
-    }
-    audioEl.src = fileSrc;
+    audioEl.src = buildSoundFileSrc(filePath);
     audioEl.volume = Math.max(0, Math.min(1, volume));
     audioEl.play().catch(function(err) {
       console.error('[overlay] Failed to play sound:', err, filePath);
@@ -1088,15 +1097,24 @@ function buildSoundPreviewRendererHtml(): string {
 <script>
   const { ipcRenderer } = require('electron');
 
+  function buildSoundFileSrc(filePath) {
+    if (!filePath) return '';
+    try {
+      const { pathToFileURL } = require('url');
+      const fs = require('fs');
+      const fileUrl = pathToFileURL(filePath);
+      const fileStat = fs.statSync(filePath);
+      fileUrl.searchParams.set('v', String(Math.round(fileStat.mtimeMs)));
+      return fileUrl.href;
+    } catch (_error) {
+      return filePath;
+    }
+  }
+
   function playSoundFile(filePath, volume) {
     if (!filePath) return;
     var audioEl = new Audio();
-    var fileSrc = filePath;
-    var isAbsoluteWindowsPath = /^[A-Za-z]:/.test(fileSrc);
-    if (isAbsoluteWindowsPath) {
-      fileSrc = 'file:///' + fileSrc.replace(/\\\\/g, '/');
-    }
-    audioEl.src = fileSrc;
+    audioEl.src = buildSoundFileSrc(filePath);
     audioEl.volume = Math.max(0, Math.min(1, volume));
     audioEl.play().catch(function(err) {
       console.error('[sound-preview] Failed to play sound:', err, filePath);

@@ -303,15 +303,12 @@ export function registerIpcHandlers(
     return { success: true };
   });
 
-  ipcMain.handle(IpcChannels.SOUND_INDEX_FOLDERS, async (_event: IpcMainInvokeEvent, folderPaths: string[]) => {
+  ipcMain.handle(IpcChannels.SOUND_INDEX_FOLDERS, async (event: IpcMainInvokeEvent, folderPaths: string[]) => {
     logger.info(LogCategory.Ipc, `SOUND_INDEX_FOLDERS invoked with ${folderPaths.length} folder(s)`);
 
-    const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-
     const sendProgressToRenderer = (progress: { filesFound: number; currentFolder: string; complete: boolean; cancelled: boolean }) => {
-      const windowIsOpen = mainWindow && !mainWindow.isDestroyed();
-      if (windowIsOpen) {
-        mainWindow.webContents.send(IpcChannels.SOUND_INDEX_PROGRESS, progress);
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(IpcChannels.SOUND_INDEX_PROGRESS, progress);
       }
     };
 

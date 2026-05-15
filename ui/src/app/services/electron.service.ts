@@ -32,6 +32,7 @@ export class ElectronService {
   private readonly perfMetrics$ = new Subject<any>();
   private readonly previewPaused$ = new Subject<boolean>();
   private readonly appCloseRequested$ = new Subject<void>();
+  private readonly configSaved$ = new Subject<any>();
 
   public readonly debugLogStream = this.debugLog$.asObservable();
   public readonly stateUpdateStream = this.stateUpdated$.asObservable();
@@ -40,6 +41,7 @@ export class ElectronService {
   public readonly perfMetricsStream = this.perfMetrics$.asObservable();
   public readonly previewPausedStream = this.previewPaused$.asObservable();
   public readonly appCloseRequestedStream = this.appCloseRequested$.asObservable();
+  public readonly configSavedStream = this.configSaved$.asObservable();
 
   public readonly isRunningInElectron: boolean;
 
@@ -61,8 +63,15 @@ export class ElectronService {
   }
 
   public async saveConfig(config: any): Promise<{ success: boolean }> {
-    if (!this.isRunningInElectron) return { success: true };
-    return window.fundidoApi.saveConfig(config);
+    if (!this.isRunningInElectron) {
+      this.configSaved$.next(config);
+      return { success: true };
+    }
+    const result = await window.fundidoApi.saveConfig(config);
+    if (result.success) {
+      this.configSaved$.next(config);
+    }
+    return result;
   }
 
   public async exportRegions(): Promise<string> {
