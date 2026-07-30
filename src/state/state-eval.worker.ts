@@ -7,7 +7,9 @@
  */
 
 import { parentPort } from 'worker_threads';
+import { performance } from 'perf_hooks';
 import { computeRegionPixelHash } from '../shared/pixel-hash';
+import { nowMonotonicMs } from '../shared/monotonic-clock';
 import { evaluateFrameState } from './state-calculation.service';
 
 interface EvalRequest {
@@ -21,6 +23,8 @@ interface EvalRequest {
   frameWidth: number;
   frameHeight: number;
   frameCapturedAt: number;
+  /** Shared-monotonic-clock reading taken just before the request was posted. */
+  sentAtMonotonicMs?: number;
   physicalBoundsRegions: any[];
   monitoredRegions: any[];
   throttleConfig: {
@@ -58,6 +62,17 @@ const EXTRA_EVAL_PASSES_AFTER_CHANGE = 2;
 parentPort!.on('message', (request: EvalRequest) => {
   if (request.type !== 'evaluate') return;
 
+  // Timed with performance.now() rather than Date.now(): these sections run in
+  // well under a millisecond, and Date.now()'s ~15ms granularity on Windows
+  // quantizes them to 0 or 1.
+  const workerStartMs = performance.now();
+
+  // Cross-thread readings must come from the shared monotonic clock, not
+  // performance.now() — see monotonic-clock.ts.
+  const inboundLatencyMs = typeof request.sentAtMonotonicMs === 'number'
+    ? nowMonotonicMs() - request.sentAtMonotonicMs
+    : null;
+
   // request.frameBuffer arrives as an ArrayBuffer (transferred from the main thread —
   // not structured-cloned). Buffer.from(ArrayBuffer) wraps the memory in-place
   // without copying it, so this is a zero-copy construction.
@@ -83,12 +98,16 @@ parentPort!.on('message', (request: EvalRequest) => {
     }
   }
 
-  // Compute pixel hashes
+  // Compute pixel hashes. Timed separately from evaluation: this loop touches
+  // every region's pixels on every pass regardless of throttling, so it is a
+  // cost that evaluation-side throttling cannot reduce.
+  const hashStartMs = performance.now();
   const regionPixelHashes = new Map<string, number>();
   for (const region of request.physicalBoundsRegions) {
     const currentHash = computeRegionPixelHash(frame as any, region.bounds);
     regionPixelHashes.set(region.id, currentHash);
   }
+  const hashDurationMs = performance.now() - hashStartMs;
 
   // Phase 1: determine per-region force-eval flags and advance the post-change
   // countdown. Must run before throttled region building so the filter can read
@@ -164,10 +183,25 @@ parentPort!.on('message', (request: EvalRequest) => {
   const ocrResultsMap = new Map<string, any>(request.ocrResults || []);
   const ollamaResultsMap = new Map<string, any>(request.ollamaResults || []);
 
+  // Only enabled regions produce instance states. Filtering here rather than
+  // letting evaluateFrameState do it internally lets us record where each
+  // produced state came from in the request's region array — which is how the
+  // main thread reattaches the static per-region fields it already holds.
+  const enabledRegionIndices: number[] = [];
+  const enabledThrottledRegions: any[] = [];
+  for (let regionIndex = 0; regionIndex < throttledRegions.length; regionIndex++) {
+    if (throttledRegions[regionIndex].enabled !== false) {
+      enabledRegionIndices.push(regionIndex);
+      enabledThrottledRegions.push(throttledRegions[regionIndex]);
+    }
+  }
+
   // Run the CPU-intensive evaluation
-  const evalStartMs = Date.now();
-  const frameState = evaluateFrameState(frame as any, throttledRegions, ocrResultsMap, ollamaResultsMap);
-  const evalDurationMs = Date.now() - evalStartMs;
+  const evalStartMs = performance.now();
+  const frameState = evaluateFrameState(frame as any, enabledThrottledRegions, ocrResultsMap, ollamaResultsMap);
+  const evalDurationMs = performance.now() - evalStartMs;
+
+  const compactFrameState = buildCompactFrameState(frameState, enabledRegionIndices);
 
   // Count calc types for metrics
   let medianColorCalcCount = 0;
@@ -195,11 +229,29 @@ parentPort!.on('message', (request: EvalRequest) => {
   // Transfer the frame buffer back so the main thread can refill and resend it
   // rather than allocating a new one every eval. Nothing below reads `frame`
   // after this point — transferring detaches it on this side.
+  // Measured up to the postMessage call, so it excludes result serialization.
+  // The main thread subtracts this from the round trip to isolate the cost of
+  // moving data across the thread boundary.
+  const workerTotalMs = performance.now() - workerStartMs;
+
+  // postMessage structured-clones on the calling thread, so timing the call
+  // itself isolates serialization CPU from queueing and delivery — which the
+  // inbound/outbound latencies cannot separate. The measurement can only be
+  // reported on the following message, which is immaterial for a per-second
+  // aggregate.
+  const serializeStartMs = performance.now();
   parentPort!.postMessage({
     type: 'result',
     frameBuffer: request.frameBuffer,
-    frameState,
+    compactFrameState,
+    previousResultSerializeMs: lastResultSerializeMs,
     evalDurationMs,
+    hashDurationMs,
+    workerTotalMs,
+    inboundLatencyMs,
+    // Read as late as possible so the main thread's outbound measurement covers
+    // result serialization and delivery, and nothing else.
+    repliedAtMonotonicMs: nowMonotonicMs(),
     throttledRegionIds: throttledRegions.map((r: any) => r.id),
     throttledCalcIdsByRegion: Object.fromEntries(
       throttledRegions.map((r: any) => [r.id, (r.stateCalculations || []).map((c: any) => c.id)])
@@ -211,8 +263,83 @@ parentPort!.on('message', (request: EvalRequest) => {
       ollamaCalcCount,
       regionCalcCounts,
     },
-  }, [request.frameBuffer]);
+  }, [
+    request.frameBuffer,
+    // Transferred rather than cloned — moves ownership instead of copying.
+    compactFrameState.regionIndices.buffer,
+    compactFrameState.medianColorBytes.buffer,
+  ]);
+  lastResultSerializeMs = performance.now() - serializeStartMs;
 });
+
+/** Serialization cost of the previous result, reported on the next one. */
+let lastResultSerializeMs = 0;
+
+/**
+ * Repackages a FrameState into the smallest form that still lets the main
+ * thread rebuild it exactly.
+ *
+ * Every region instance carries two UUID strings, a bounds object, a
+ * median-colour object and three indices — all of which the main thread already
+ * knows, since it built the region list it sent us. What it does not know is
+ * the median colour and the calculation results. Median colours are three bytes
+ * each and go into one transferable typed array; calculation results are sent
+ * only for regions that actually evaluated one this pass, which throttling
+ * usually keeps to a small subset.
+ *
+ * PERF-TRADEOFF — revisit before assuming this is worth keeping.
+ *
+ * Measured at 181 regions: serializing the full FrameState costs ~0.18ms per
+ * eval (~3.4ms/s); this compaction removes nearly all of it, and rebuilding on
+ * the main thread costs ~0.06ms. So the net saving is real but small — well
+ * under 1% of a second.
+ *
+ * It was built on the expectation of a ~1.6ms saving, which came from
+ * attributing the worker's outbound latency to serialization. Timing
+ * postMessage directly showed that latency is dominated by waiting for the
+ * receiving thread's event loop, not by marshalling. The optimisation is kept
+ * because it is measured, verified equivalent, and reduces per-eval garbage —
+ * not because it addressed the bottleneck.
+ *
+ * The cost is an invariant: the indices in `regionIndices` must line up with
+ * the region array the main thread retained when it sent the request. See
+ * `reconstructFrameState` in main.ts, which warns loudly if they ever diverge.
+ *
+ * Revert both halves and send `frameState` directly if that invariant becomes
+ * awkward to hold — for example if more than one eval is ever allowed in
+ * flight, or if the region list can change between send and reply.
+ */
+function buildCompactFrameState(frameState: any, enabledRegionIndices: number[]) {
+  const instanceStates = frameState.regionInstanceStates || [];
+  const producedCount = instanceStates.length;
+
+  // Uint16 caps the addressable region list at 65535 entries, far beyond the
+  // point where the rest of the pipeline would remain usable.
+  const regionIndices = new Uint16Array(producedCount);
+  const medianColorBytes = new Uint8Array(producedCount * 3);
+  const calculationResultsByIndex: Array<[number, any[]]> = [];
+
+  for (let stateIndex = 0; stateIndex < producedCount; stateIndex++) {
+    const instanceState = instanceStates[stateIndex];
+    regionIndices[stateIndex] = enabledRegionIndices[stateIndex];
+
+    const colorOffset = stateIndex * 3;
+    medianColorBytes[colorOffset] = instanceState.medianColor.red;
+    medianColorBytes[colorOffset + 1] = instanceState.medianColor.green;
+    medianColorBytes[colorOffset + 2] = instanceState.medianColor.blue;
+
+    if (instanceState.calculationResults.length > 0) {
+      calculationResultsByIndex.push([stateIndex, instanceState.calculationResults]);
+    }
+  }
+
+  return {
+    timestamp: frameState.timestamp,
+    regionIndices,
+    medianColorBytes,
+    calculationResultsByIndex,
+  };
+}
 
 function getRegionEvaluationIntervalMs(region: any, globalMinCalcIntervalMs: number): number {
   const regionIntervalMs = Number(region.evaluationIntervalMs);

@@ -43,10 +43,26 @@ export type PerfStage =
   | 'frameBufferAlloc'
   /** Full-frame copy into the buffer the worker handed back (worker mode). */
   | 'frameBufferReuse'
+  /** Hashing every region's pixels to detect change (worker mode). */
+  | 'regionPixelHash'
   /** Time spent inside evaluateFrameState, wherever it ran. */
   | 'stateEval'
+  /** Everything the worker did for one request, hashing and eval included. */
+  | 'workerTotal'
+  /** Round trip minus the worker's own work: serialization and transfer. */
+  | 'workerBoundary'
+  /** Main-thread CPU spent inside postMessage serializing the request. */
+  | 'requestSerialize'
+  /** Worker-thread CPU spent inside postMessage serializing the result. */
+  | 'resultSerialize'
+  /** Request posted → worker began handling it. Argument clone plus pickup. */
+  | 'workerInbound'
+  /** Worker posted the result → main thread began handling it. */
+  | 'workerOutbound'
   /** postMessage → result received: worker time plus queueing and transfer. */
   | 'workerRoundTrip'
+  /** Expanding the worker's compact result back into a full FrameState. */
+  | 'frameStateRebuild'
   /** Main-thread handling of the worker result (cache merge, fallbacks). */
   | 'evalResultHandling'
   /** Broadcasting the frame state to overlay windows and the UI. */

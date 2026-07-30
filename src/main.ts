@@ -15,6 +15,7 @@ import { registerIpcHandlers } from './ipc/ipc-handlers';
 import { logger, LogCategory, WorkerLogMessage } from './shared/logger';
 import { computeRegionPixelHash } from './shared/pixel-hash';
 import { perf } from './perf/perf-instrumentation';
+import { nowMonotonicMs } from './shared/monotonic-clock';
 import {
   applyProfileRulesToConfig,
   FundidoConfig,
@@ -1040,6 +1041,92 @@ function resolveStateEvalMode(): StateEvalMode {
   return 'worker';
 }
 let latestEvaluatedRuntimeRegions: any[] = [];
+
+/**
+ * The physical-pixel region list handed to the worker for the in-flight eval.
+ *
+ * The worker's result identifies regions by their index into this array rather
+ * than repeating their ids, bounds and instance indices, so reconstruction
+ * needs the exact array that was sent. Only one eval is ever in flight
+ * (`workerBusy` gates the send), so a single slot is sufficient.
+ */
+let latestEvaluatedPhysicalRegions: any[] = [];
+
+/**
+ * Rebuilds a full FrameState from the worker's compact result.
+ *
+ * Every consumer — overlay rule evaluation, the overlay renderer, the UI —
+ * expects the complete region list on every update. Overlay visibility in
+ * particular resolves conditions by searching `regionStates`, so a region
+ * missing from the list reads as "no state" and can flip an overlay off, which
+ * would stop a mirror that should be showing. Reconstruction happens here,
+ * before anything downstream sees the state, so the compaction stays purely a
+ * transport detail.
+ *
+ * PERF-TRADEOFF — this is the main-thread half of the compact-result
+ * optimisation. It saves a measured ~0.18ms per eval at 181 regions, which is
+ * small, and it holds an index-alignment invariant with the worker. See
+ * `buildCompactFrameState` in state-eval.worker.ts for the full rationale and
+ * the conditions under which reverting to sending `frameState` directly is the
+ * better call.
+ */
+function reconstructFrameState(compactFrameState: any, physicalRegions: any[]): any {
+  const regionIndices: Uint16Array = compactFrameState.regionIndices;
+  const medianColorBytes: Uint8Array = compactFrameState.medianColorBytes;
+  const calculationResultsByIndex = new Map<number, any[]>(compactFrameState.calculationResultsByIndex);
+
+  const regionInstanceStates: any[] = [];
+  for (let stateIndex = 0; stateIndex < regionIndices.length; stateIndex++) {
+    const region = physicalRegions[regionIndices[stateIndex]];
+    if (!region) {
+      // Indicates the retained region list and the worker's result disagree,
+      // which would silently drop a region from every consumer. Loud rather
+      // than quiet: overlay conditions referencing it would read as unmatched.
+      logger.warn(
+        LogCategory.StateCalculation,
+        `Frame state rebuild: no region at index ${regionIndices[stateIndex]} of ${physicalRegions.length} — dropping one instance state.`
+      );
+      continue;
+    }
+
+    const colorOffset = stateIndex * 3;
+    regionInstanceStates.push({
+      runtimeMonitoredRegionId: region.id,
+      monitoredRegionId: region.sourceMonitoredRegionId,
+      bounds: region.bounds,
+      medianColor: {
+        red: medianColorBytes[colorOffset],
+        green: medianColorBytes[colorOffset + 1],
+        blue: medianColorBytes[colorOffset + 2],
+      },
+      calculationResults: calculationResultsByIndex.get(stateIndex) || [],
+      instanceIndex: region.instanceIndex,
+      repeatIndexX: region.repeatIndexX,
+      repeatIndexY: region.repeatIndexY,
+    });
+  }
+
+  // First instance wins per source region — the same rule evaluateFrameState
+  // applied. The calculationResults array is shared with the instance state
+  // rather than copied, also matching the previous behaviour: main-thread
+  // post-processing mutates it in place and both views must see the result.
+  const regionStatesBySourceId = new Map<string, any>();
+  for (const instanceState of regionInstanceStates) {
+    if (!regionStatesBySourceId.has(instanceState.monitoredRegionId)) {
+      regionStatesBySourceId.set(instanceState.monitoredRegionId, {
+        monitoredRegionId: instanceState.monitoredRegionId,
+        medianColor: instanceState.medianColor,
+        calculationResults: instanceState.calculationResults,
+      });
+    }
+  }
+
+  return {
+    timestamp: compactFrameState.timestamp,
+    regionStates: Array.from(regionStatesBySourceId.values()),
+    regionInstanceStates,
+  };
+}
 const latestRuntimeRegionIdToSourceRegionId = new Map<string, string>();
 
 function fallbackFromWorkerFailure(error: unknown): void {
@@ -1101,13 +1188,37 @@ function startStateEvaluationLoop(): void {
       recycledFrameArrayBuffer = result.frameBuffer;
     }
 
-    // Round trip covers the worker's own eval time plus transfer and queueing.
-    // A large gap between workerRoundTrip and workerEval means the cost is in
-    // getting data to and from the worker, not in the pixel math.
-    perf.recordStage('workerRoundTrip', performance.now() - workerRequestSentAtMs);
+    // Round trip covers everything the worker did plus getting data to and from
+    // it. Subtracting the worker's self-reported total isolates the boundary
+    // cost: argument serialization, the transfer, and cloning the result back.
+    const roundTripMs = performance.now() - workerRequestSentAtMs;
+    perf.recordStage('workerRoundTrip', roundTripMs);
+    if (typeof result.workerTotalMs === 'number') {
+      perf.recordStage('workerTotal', result.workerTotalMs);
+      perf.recordStage('workerBoundary', Math.max(0, roundTripMs - result.workerTotalMs));
+    }
+    if (typeof result.hashDurationMs === 'number') {
+      perf.recordStage('regionPixelHash', result.hashDurationMs);
+    }
+
+    // Split the boundary cost into its two directions. Inbound is dominated by
+    // cloning the request's region configs; outbound by cloning the result and
+    // by how quickly this thread's event loop gets around to delivering it.
+    if (typeof result.previousResultSerializeMs === 'number') {
+      perf.recordStage('resultSerialize', result.previousResultSerializeMs);
+    }
+    if (typeof result.inboundLatencyMs === 'number') {
+      perf.recordStage('workerInbound', Math.max(0, result.inboundLatencyMs));
+    }
+    if (typeof result.repliedAtMonotonicMs === 'number') {
+      perf.recordStage('workerOutbound', Math.max(0, nowMonotonicMs() - result.repliedAtMonotonicMs));
+    }
+
     const resultHandlingStartMs = performance.now();
 
-    const frameState = result.frameState;
+    const frameState = perf.timeStage('frameStateRebuild', () =>
+      reconstructFrameState(result.compactFrameState, latestEvaluatedPhysicalRegions)
+    );
     const evalDurationMs = result.evalDurationMs;
     perf.recordStage('stateEval', evalDurationMs);
     const metrics = result.metrics;
@@ -1255,6 +1366,10 @@ function startStateEvaluationLoop(): void {
       },
     }));
 
+    // Retained so the worker's index-based result can be expanded back into a
+    // full FrameState when it returns.
+    latestEvaluatedPhysicalRegions = physicalBoundsRegions;
+
     // Feed OCR/Ollama services (these stay on main thread — they have their own async loops)
     ocrService.onFrameCaptured(frame);
     ocrService.setRegions(physicalBoundsRegions);
@@ -1289,13 +1404,16 @@ function startStateEvaluationLoop(): void {
 
     workerBusy = true;
     workerRequestSentAtMs = performance.now();
-    stateEvalWorker!.postMessage(
+    // Timed because postMessage structured-clones on this thread: the cost of
+    // shipping the region list out is main-thread CPU, not worker CPU.
+    perf.timeStage('requestSerialize', () => stateEvalWorker!.postMessage(
       {
         type: 'evaluate',
         frameBuffer: frameArrayBufferForWorker,
         frameWidth: frame.width,
         frameHeight: frame.height,
         frameCapturedAt: frame.capturedAt,
+        sentAtMonotonicMs: nowMonotonicMs(),
         physicalBoundsRegions,
         monitoredRegions: runtimeRegions,
         throttleConfig: {
@@ -1307,7 +1425,7 @@ function startStateEvaluationLoop(): void {
         ollamaResults: Array.from(ollamaService.getAllResults().entries()),
       },
       [frameArrayBufferForWorker], // transfer list — moves ownership, no structured clone
-    );
+    ));
   };
 
   stateEvalInterval = setInterval(sendEvalRequest, getStateEvaluationLoopIntervalMs());

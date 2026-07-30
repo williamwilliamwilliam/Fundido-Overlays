@@ -27,9 +27,17 @@ const STAGE_LABELS: Record<string, string> = {
   previewFeed: 'Preview feed',
   mirrorBroadcast: 'Mirror crops → overlay',
   evalPrep: 'Eval prep (regions)',
+  frameStateRebuild: 'Frame state rebuild',
   frameBufferAlloc: 'Frame copy (allocated)',
   frameBufferReuse: 'Frame copy (recycled)',
+  regionPixelHash: 'Pixel hashing',
   stateEval: 'State eval (pixels)',
+  workerTotal: 'Worker total',
+  workerBoundary: 'Thread boundary',
+  requestSerialize: 'Serialize request',
+  resultSerialize: 'Serialize result',
+  workerInbound: 'Boundary → worker',
+  workerOutbound: 'Boundary → main',
   workerRoundTrip: 'Worker round trip',
   evalResultHandling: 'Result handling',
   overlayStateBroadcast: 'State broadcast',
@@ -378,6 +386,13 @@ interface CaptureRegionOverlay {
       min-width: 160px;
       max-width: 340px;
       pointer-events: none;
+      /* The preview area clips its overflow, so bound the panel to the area's
+         height and let the diagnostics body scroll inside it. Without this the
+         expanded panel runs past the bottom edge and the last rows are
+         unreadable. */
+      max-height: calc(100% - var(--spacing-sm) * 2);
+      display: flex;
+      flex-direction: column;
     }
 
     /* The panel itself stays click-through so it never blocks the preview;
@@ -401,7 +416,10 @@ interface CaptureRegionOverlay {
     .metrics-toggle:hover { color: rgba(255, 255, 255, 0.9); }
 
     .metrics-diagnostics {
-      max-height: 45vh;
+      /* min-height:0 lets this shrink below its content inside the flex column,
+         which is what makes it the part that scrolls. */
+      flex: 1 1 auto;
+      min-height: 0;
       overflow-y: auto;
       pointer-events: auto;
     }
@@ -479,7 +497,7 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
   availableDisplays: Array<{ name: string; width: number; height: number }> = [];
   previewMeta: PreviewMeta | null = null;
   metrics: PerfMetrics | null = null;
-  showDiagnostics = false;
+  showDiagnostics = true;
   /** Stage timings sorted by total time consumed — the biggest cost is first. */
   sortedStages: StageTimingRow[] = [];
   /** Processes sorted by CPU, so the busiest one is always at the top. */

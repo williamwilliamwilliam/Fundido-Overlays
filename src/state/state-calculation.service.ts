@@ -44,48 +44,97 @@ function computeConfidenceFromDistance(distance: number): number {
 // ---------------------------------------------------------------------------
 
 /**
+ * Channel histograms reused across calls, one bin per possible 8-bit value.
+ *
+ * Evaluation is synchronous and single-threaded, so a single set of scratch
+ * histograms is safe to share: no call can start before the previous one has
+ * finished reading them. Reusing them keeps this function allocation-free,
+ * which matters when it runs across ~180 regions several times a second.
+ */
+const CHANNEL_VALUE_COUNT = 256;
+const redHistogram = new Uint32Array(CHANNEL_VALUE_COUNT);
+const greenHistogram = new Uint32Array(CHANNEL_VALUE_COUNT);
+const blueHistogram = new Uint32Array(CHANNEL_VALUE_COUNT);
+
+/**
+ * Finds the value at `medianIndex` in the sorted order a histogram represents,
+ * by walking the bins in ascending order until enough values are accounted for.
+ *
+ * Equivalent to sorting the samples and indexing into them, without either the
+ * sort or the array.
+ */
+function findMedianValueInHistogram(histogram: Uint32Array, medianIndex: number): number {
+    let valuesSeen = 0;
+    for (let value = 0; value < CHANNEL_VALUE_COUNT; value++) {
+        valuesSeen += histogram[value];
+        if (valuesSeen > medianIndex) {
+            return value;
+        }
+    }
+    return CHANNEL_VALUE_COUNT - 1;
+}
+
+/**
  * Extracts the median RGB color from a rectangular region of a BGRA frame buffer.
  *
  * "Median" here uses a channel-wise median: the red, green, and blue channels
  * are independently sorted and the middle value of each is taken. This is
  * more robust to outliers than a simple average.
+ *
+ * Channel values are 8-bit, so instead of collecting every pixel into three
+ * arrays and sorting them — O(n log n), with three allocations and a comparator
+ * call per comparison — the samples are counted into 256-bin histograms and the
+ * median is read off by walking the bins. That is O(n) with a fixed 768-word
+ * working set, and produces exactly the same value as sorting would.
  */
 function computeMedianColorForRegion(frame: CapturedFrame, bounds: Rectangle): RgbColor {
-    const redValues: number[] = [];
-    const greenValues: number[] = [];
-    const blueValues: number[] = [];
-
     const bytesPerPixel = 4; // BGRA
     const bytesPerRow = frame.width * bytesPerPixel;
 
+    // Clamp to the frame on all four sides. The previous implementation clamped
+    // only the far edges; a region whose origin sits above or left of the frame
+    // produced negative offsets, which read back as undefined and corrupted the
+    // result. Physical-pixel conversion can generate such bounds when a region
+    // straddles the edge of the capture display.
+    const regionStartX = Math.max(bounds.x, 0);
+    const regionStartY = Math.max(bounds.y, 0);
     const regionEndX = Math.min(bounds.x + bounds.width, frame.width);
     const regionEndY = Math.min(bounds.y + bounds.height, frame.height);
 
-    for (let y = bounds.y; y < regionEndY; y++) {
-        for (let x = bounds.x; x < regionEndX; x++) {
-            const pixelOffset = y * bytesPerRow + x * bytesPerPixel;
-            // BGRA layout
-            blueValues.push(frame.buffer[pixelOffset]);
-            greenValues.push(frame.buffer[pixelOffset + 1]);
-            redValues.push(frame.buffer[pixelOffset + 2]);
-        }
-    }
+    const regionWidth = regionEndX - regionStartX;
+    const regionHeight = regionEndY - regionStartY;
+    const sampledPixelCount = regionWidth > 0 && regionHeight > 0 ? regionWidth * regionHeight : 0;
 
-    if (redValues.length === 0) {
+    if (sampledPixelCount === 0) {
         logger.warn(LogCategory.StateCalculation, 'Region has zero pixels — returning black.');
         return { red: 0, green: 0, blue: 0 };
     }
 
-    redValues.sort((a, b) => a - b);
-    greenValues.sort((a, b) => a - b);
-    blueValues.sort((a, b) => a - b);
+    redHistogram.fill(0);
+    greenHistogram.fill(0);
+    blueHistogram.fill(0);
 
-    const medianIndex = Math.floor(redValues.length / 2);
+    const pixelBuffer = frame.buffer;
+    for (let y = regionStartY; y < regionEndY; y++) {
+        const rowStartOffset = y * bytesPerRow + regionStartX * bytesPerPixel;
+        const rowEndOffset = rowStartOffset + regionWidth * bytesPerPixel;
+        for (let pixelOffset = rowStartOffset; pixelOffset < rowEndOffset; pixelOffset += bytesPerPixel) {
+            // BGRA layout
+            blueHistogram[pixelBuffer[pixelOffset]]++;
+            greenHistogram[pixelBuffer[pixelOffset + 1]]++;
+            redHistogram[pixelBuffer[pixelOffset + 2]]++;
+        }
+    }
+
+    // Matches the previous behaviour of indexing a sorted array at
+    // floor(length / 2) — for an even count that is the upper of the two
+    // middle values, not their average.
+    const medianIndex = Math.floor(sampledPixelCount / 2);
 
     return {
-        red: redValues[medianIndex],
-        green: greenValues[medianIndex],
-        blue: blueValues[medianIndex],
+        red: findMedianValueInHistogram(redHistogram, medianIndex),
+        green: findMedianValueInHistogram(greenHistogram, medianIndex),
+        blue: findMedianValueInHistogram(blueHistogram, medianIndex),
     };
 }
 
