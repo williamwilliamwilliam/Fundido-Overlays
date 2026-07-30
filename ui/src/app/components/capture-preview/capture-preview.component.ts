@@ -14,7 +14,33 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 import { ElectronService } from '../../services/electron.service';
-import type { PreviewFrameData, PerfMetrics } from '../../models/electron-api';
+import type { PreviewFrameData, PerfMetrics, ProcessCpuSample, StageTiming } from '../../models/electron-api';
+
+interface StageTimingRow {
+  label: string;
+  timing: StageTiming;
+}
+
+/** Human-readable names for the pipeline stages reported by the main process. */
+const STAGE_LABELS: Record<string, string> = {
+  captureCallback: 'Capture callback',
+  previewFeed: 'Preview feed',
+  mirrorBroadcast: 'Mirror crops → overlay',
+  evalPrep: 'Eval prep (regions)',
+  frameBufferCopy: 'Frame buffer copy',
+  workerEval: 'Worker eval (pixels)',
+  workerRoundTrip: 'Worker round trip',
+  evalResultHandling: 'Result handling',
+  overlayStateBroadcast: 'State broadcast',
+};
+
+/** Electron process type codes mapped to something recognizable. */
+const PROCESS_TYPE_LABELS: Record<string, string> = {
+  Browser: 'Main process',
+  GPU: 'GPU process',
+  Tab: 'Renderer',
+  Utility: 'Utility',
+};
 
 type PreviewMeta = Pick<
   PreviewFrameData,
@@ -131,7 +157,10 @@ interface CaptureRegionOverlay {
             <span class="metric-label">Median Color</span>
             <span class="metric-value">{{ metrics.medianColorCalcsPerSec }}/s</span>
           </div>
-          <div class="metrics-row" *ngIf="metrics.colorThresholdCalcsPerSec > 0">
+          <!-- Always rendered, unlike the other calc rows: color threshold counts
+               fluctuate to zero constantly, and hiding the row made every panel
+               below it jump up and down. -->
+          <div class="metrics-row">
             <span class="metric-label">Color Threshold</span>
             <span class="metric-value">{{ metrics.colorThresholdCalcsPerSec }}/s</span>
           </div>
@@ -151,6 +180,57 @@ interface CaptureRegionOverlay {
           <div class="metrics-row">
             <span class="metric-label">Overlay Groups</span>
             <span class="metric-value">{{ metrics.activeOverlayGroupCount }}</span>
+          </div>
+
+          <div class="metrics-divider"></div>
+          <button type="button" class="metrics-toggle" (click)="toggleDiagnostics()">
+            {{ showDiagnostics ? '▾' : '▸' }} Diagnostics
+            <span class="metric-value">{{ metrics.diagnostics?.totalCpuPercent | number: '1.0-0' }}% CPU</span>
+          </button>
+
+          <div class="metrics-diagnostics" *ngIf="showDiagnostics && metrics.diagnostics">
+            <div class="metrics-subheading">CPU by process</div>
+            <div class="metrics-row" *ngFor="let process of sortedProcesses">
+              <span class="metric-label">{{ describeProcess(process) }}</span>
+              <span class="metric-value" [class.metric-warn]="process.cpuPercent >= 25">
+                {{ process.cpuPercent | number: '1.0-1' }}% · {{ process.memoryMb }} MB
+              </span>
+            </div>
+
+            <div class="metrics-subheading">Main thread lag (mean · p99)</div>
+            <div class="metrics-row" *ngIf="metrics.diagnostics.mainThreadLag as lag">
+              <span class="metric-label">Event loop blocked</span>
+              <span class="metric-value"
+                    [class.metric-warn]="lag.p99Ms >= 16"
+                    [class.metric-good]="lag.p99Ms < 8">
+                {{ lag.meanMs | number: '1.0-1' }} · {{ lag.p99Ms | number: '1.0-1' }} ms
+              </span>
+            </div>
+
+            <div class="metrics-subheading">Worker busy (event loop)</div>
+            <div class="metrics-row" *ngFor="let thread of metrics.diagnostics.threads">
+              <span class="metric-label">{{ thread.name }}</span>
+              <span class="metric-value"
+                    [class.metric-warn]="thread.utilization >= 0.7"
+                    [class.metric-good]="thread.utilization < 0.4">
+                {{ thread.utilization * 100 | number: '1.0-1' }}%
+              </span>
+            </div>
+
+            <div class="metrics-subheading">Pipeline stages (ms/sec · avg · max)</div>
+            <div class="metrics-row" *ngFor="let stage of sortedStages">
+              <span class="metric-label">{{ stage.label }}</span>
+              <span class="metric-value" [class.metric-warn]="stage.timing.totalMs > 200">
+                {{ stage.timing.totalMs | number: '1.0-0' }} · {{ stage.timing.avgMs | number: '1.0-2' }} · {{ stage.timing.maxMs | number: '1.0-1' }}
+              </span>
+            </div>
+            <div class="metrics-note" *ngIf="sortedStages.length === 0">
+              No stage samples yet.
+            </div>
+            <div class="metrics-note">
+              Native capture-thread CPU is included in the main process figure —
+              it has no event loop of its own.
+            </div>
           </div>
         </div>
       </div>
@@ -290,7 +370,50 @@ interface CaptureRegionOverlay {
       font-size: 0.75rem;
       line-height: 1.5;
       min-width: 160px;
+      max-width: 340px;
       pointer-events: none;
+    }
+
+    /* The panel itself stays click-through so it never blocks the preview;
+       only the toggle and the scrollable diagnostics body take pointer events. */
+    .metrics-toggle {
+      display: flex;
+      justify-content: space-between;
+      gap: var(--spacing-md);
+      width: 100%;
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: inherit;
+      line-height: inherit;
+      color: rgba(255, 255, 255, 0.6);
+      pointer-events: auto;
+    }
+
+    .metrics-toggle:hover { color: rgba(255, 255, 255, 0.9); }
+
+    .metrics-diagnostics {
+      max-height: 45vh;
+      overflow-y: auto;
+      pointer-events: auto;
+    }
+
+    .metrics-subheading {
+      margin-top: 6px;
+      color: rgba(255, 255, 255, 0.45);
+      text-transform: uppercase;
+      font-size: 0.65rem;
+      letter-spacing: 0.05em;
+    }
+
+    .metrics-note {
+      margin-top: 6px;
+      color: rgba(255, 255, 255, 0.35);
+      font-size: 0.65rem;
+      line-height: 1.35;
+      white-space: normal;
     }
 
     .metrics-row {
@@ -350,6 +473,11 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
   availableDisplays: Array<{ name: string; width: number; height: number }> = [];
   previewMeta: PreviewMeta | null = null;
   metrics: PerfMetrics | null = null;
+  showDiagnostics = false;
+  /** Stage timings sorted by total time consumed — the biggest cost is first. */
+  sortedStages: StageTimingRow[] = [];
+  /** Processes sorted by CPU, so the busiest one is always at the top. */
+  sortedProcesses: ProcessCpuSample[] = [];
   isPreviewPaused = false;
   hasPreviewFrame = false;
   captureRegionOverlays: CaptureRegionOverlay[] = [];
@@ -407,6 +535,7 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
 
     this.metricsSubscription = this.electronService.perfMetricsStream.subscribe((metrics) => {
       this.metrics = metrics;
+      this.rebuildDiagnosticsRows(metrics);
       this.changeDetectorRef.markForCheck();
     });
 
@@ -439,6 +568,41 @@ export class CapturePreviewComponent implements OnInit, AfterViewInit, OnDestroy
     this.metricsSubscription?.unsubscribe();
     this.pausedSubscription?.unsubscribe();
     this.electronService.setActivePage('');
+  }
+
+  toggleDiagnostics(): void {
+    this.showDiagnostics = !this.showDiagnostics;
+  }
+
+  describeProcess(process: ProcessCpuSample): string {
+    const typeLabel = PROCESS_TYPE_LABELS[process.type] ?? process.type;
+    const hasDistinctName = process.name && process.name !== process.type;
+    const suffix = hasDistinctName ? ` (${process.name})` : '';
+    return `${typeLabel}${suffix}`;
+  }
+
+  /**
+   * Precomputes the sorted diagnostic rows once per metrics tick rather than
+   * re-sorting inside template getters on every change detection pass.
+   */
+  private rebuildDiagnosticsRows(metrics: PerfMetrics): void {
+    const diagnostics = metrics.diagnostics;
+    if (!diagnostics) {
+      this.sortedStages = [];
+      this.sortedProcesses = [];
+      return;
+    }
+
+    this.sortedStages = Object.entries(diagnostics.stages ?? {})
+      .map(([stageName, timing]) => ({
+        label: STAGE_LABELS[stageName] ?? stageName,
+        timing,
+      }))
+      .sort((a, b) => b.timing.totalMs - a.timing.totalMs);
+
+    this.sortedProcesses = [...(diagnostics.processes ?? [])].sort(
+      (a, b) => b.cpuPercent - a.cpuPercent
+    );
   }
 
   async onDisplaySelectionChanged(displayIndex: number): Promise<void> {

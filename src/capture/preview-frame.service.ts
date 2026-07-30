@@ -134,6 +134,17 @@ export class PreviewFrameService {
     this.latestFrame = frame;
   }
 
+  /**
+   * Reads the preview worker thread's cumulative event-loop idle/active
+   * counters for performance instrumentation. Returns null when the worker is
+   * not running, so the sampler can skip it rather than report a fake zero.
+   */
+  public sampleWorkerEventLoopUtilization(): { idle: number; active: number } | null {
+    if (!this.previewWorker) return null;
+    const reading = this.previewWorker.performance.eventLoopUtilization();
+    return { idle: reading.idle, active: reading.active };
+  }
+
   public start(config: PreviewConfig, fps: number): void {
     if (this.isRunning) {
       this.stop();

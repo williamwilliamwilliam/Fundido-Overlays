@@ -14,6 +14,7 @@ import { SoundLibraryService } from './sound/sound-library.service';
 import { registerIpcHandlers } from './ipc/ipc-handlers';
 import { logger, LogCategory, WorkerLogMessage } from './shared/logger';
 import { computeRegionPixelHash } from './shared/pixel-hash';
+import { perf } from './perf/perf-instrumentation';
 import {
   applyProfileRulesToConfig,
   FundidoConfig,
@@ -224,6 +225,24 @@ let perfMetricsInterval: ReturnType<typeof setInterval> | null = null;
 
 function startPerfMetricsReporting(): void {
   if (perfMetricsInterval) return;
+
+  // Main-thread saturation is tracked as event-loop delay rather than
+  // utilization — see startEventLoopDelayMonitoring for why. The worker
+  // samplers return null while their worker is down, so they simply drop out
+  // of the report instead of showing a misleading zero.
+  perf.startEventLoopDelayMonitoring();
+  perf.registerThread('state-eval-worker', () => {
+    if (!stateEvalWorker) return null;
+    const reading = stateEvalWorker.performance.eventLoopUtilization();
+    return { idle: reading.idle, active: reading.active };
+  });
+  perf.registerThread('preview-worker', () => previewService.sampleWorkerEventLoopUtilization());
+
+  const traceFilePath = perf.startTraceFile(app.getPath('userData'));
+  if (traceFilePath) {
+    logger.info(LogCategory.General, `Performance trace: ${traceFilePath}`);
+  }
+
   perfMetricsInterval = setInterval(() => {
     const reportNowMs = Date.now();
     // Build per-region metrics snapshot including time-in-calc
@@ -267,7 +286,23 @@ function startPerfMetricsReporting(): void {
       activeRegionCount: perfCounters.activeRegionCount,
       activeOverlayGroupCount: perfCounters.activeOverlayGroupCount,
       regionMetrics,
+      diagnostics: perf.snapshot(),
     };
+
+    // Mirror the same numbers to the JSONL trace file so a session can be
+    // reviewed after the fact (or tailed live) without watching the UI.
+    perf.writeTraceRecord({
+      t: new Date(reportNowMs).toISOString(),
+      captureFps: metrics.captureFps,
+      previewFps: metrics.previewFps,
+      stateEvalPerSec: metrics.stateEvalPerSec,
+      activeRegionCount: metrics.activeRegionCount,
+      totalCpuPercent: metrics.diagnostics.totalCpuPercent,
+      processes: metrics.diagnostics.processes,
+      threads: metrics.diagnostics.threads,
+      mainThreadLag: metrics.diagnostics.mainThreadLag,
+      stages: metrics.diagnostics.stages,
+    });
 
     // Reset counters for next second
     perfCounters.captureFrames = 0;
@@ -292,6 +327,8 @@ function stopPerfMetricsReporting(): void {
     clearInterval(perfMetricsInterval);
     perfMetricsInterval = null;
   }
+  perf.stopTraceFile();
+  perf.stopEventLoopDelayMonitoring();
 }
 
 // ---------------------------------------------------------------------------
@@ -838,11 +875,16 @@ function setupCaptureToOverlayPipeline(): void {
     diagFrameCount++;
     latestFrameRef.frame = frame;
 
+    // performance.now() rather than Date.now() throughout the stage timing:
+    // these stages are often sub-millisecond, and Date.now()'s ~15ms Windows
+    // granularity would report most of them as 0.
+    const callbackStartMs = performance.now();
+
     // Feed frame to preview service (it has its own throttled interval)
-    previewService.onFrameCaptured(frame);
+    perf.timeStage('previewFeed', () => previewService.onFrameCaptured(frame));
 
     // FAST PATH: Send raw pixel crops directly to overlay windows for mirror rendering.
-    const t0 = Date.now();
+    const mirrorStartMs = performance.now();
     const monitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions ?? [];
     overlayWindowManager.broadcastMirrorCrops(
       frame.buffer,
@@ -853,14 +895,16 @@ function setupCaptureToOverlayPipeline(): void {
       captureDisplayCache.originY,
       captureDisplayCache.scaleFactor,
     );
-    const mirrorElapsed = Date.now() - t0;
+    const mirrorElapsed = performance.now() - mirrorStartMs;
+    perf.recordStage('mirrorBroadcast', mirrorElapsed);
+    perf.recordStage('captureCallback', performance.now() - callbackStartMs);
     const totalCallbackTime = Date.now() - callbackEntryTime;
 
     // Performance diagnostic logging — only active for 10s after UI loses focus
     const isDiagActive = perfDiagEndTime > 0 && callbackEntryTime <= perfDiagEndTime;
     if (isDiagActive && diagFrameCount % 30 === 0) {
       logger.info(LogCategory.General,
-        `[PERF DIAG] gap=${timeSinceLastFrame}ms callback=${totalCallbackTime}ms mirrors=${mirrorElapsed}ms visible=${overlayWindowManager.getVisibleMirrorCount()} frame#${diagFrameCount}`
+        `[PERF DIAG] gap=${timeSinceLastFrame}ms callback=${totalCallbackTime}ms mirrors=${mirrorElapsed.toFixed(2)}ms visible=${overlayWindowManager.getVisibleMirrorCount()} frame#${diagFrameCount}`
       );
     }
     if (perfDiagEndTime > 0 && callbackEntryTime > perfDiagEndTime) {
@@ -878,6 +922,8 @@ function setupCaptureToOverlayPipeline(): void {
  */
 let stateEvalWorker: Worker | null = null;
 let workerBusy = false;
+/** performance.now() at which the current eval request was posted to the worker. */
+let workerRequestSentAtMs = 0;
 let latestEvaluatedRuntimeRegions: any[] = [];
 const latestRuntimeRegionIdToSourceRegionId = new Map<string, string>();
 
@@ -925,8 +971,15 @@ function startStateEvaluationLoop(): void {
     if (result.type !== 'result') return;
     workerBusy = false;
 
+    // Round trip covers the worker's own eval time plus transfer and queueing.
+    // A large gap between workerRoundTrip and workerEval means the cost is in
+    // getting data to and from the worker, not in the pixel math.
+    perf.recordStage('workerRoundTrip', performance.now() - workerRequestSentAtMs);
+    const resultHandlingStartMs = performance.now();
+
     const frameState = result.frameState;
     const evalDurationMs = result.evalDurationMs;
+    perf.recordStage('workerEval', evalDurationMs);
     const metrics = result.metrics;
 
     // Cache fresh results and merge cached results for throttled calcs
@@ -988,7 +1041,12 @@ function startStateEvaluationLoop(): void {
     perfCounters.pipelineTotalMs += evalDurationMs;
     perfCounters.pipelineSamples++;
 
+    // Everything from the worker message arriving up to here is main-thread
+    // bookkeeping: cache merges, last-known-value fallbacks, per-calc timing.
+    perf.recordStage('evalResultHandling', performance.now() - resultHandlingStartMs);
+
     // Broadcast to overlay windows and UI
+    const broadcastStartMs = performance.now();
     applyProfileRuleResults(frameState);
     overlayWindowManager.broadcastFrameState(frameState);
     const uiIsVisible = !uiMinimizedRef.minimized && mainWindow && !mainWindow.isDestroyed();
@@ -1000,6 +1058,7 @@ function startStateEvaluationLoop(): void {
         mainWindow!.webContents.send(IpcChannels.STATE_UPDATED, frameState);
       }
     }
+    perf.recordStage('overlayStateBroadcast', performance.now() - broadcastStartMs);
   });
 
   stateEvalWorker.on('error', (err) => {
@@ -1011,6 +1070,8 @@ function startStateEvaluationLoop(): void {
 
     const frame = latestFrameRef.frame;
     if (!frame) return;
+
+    const evalPrepStartMs = performance.now();
 
     // Region filtering (stays on main thread — needs access to config refs)
     const allMonitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions;
@@ -1086,12 +1147,22 @@ function startStateEvaluationLoop(): void {
     // and detaching it would corrupt those reads.
     // slice() is typed as returning ArrayBuffer | SharedArrayBuffer, but frame.buffer
     // is always backed by a plain ArrayBuffer — the cast is safe here.
-    const frameArrayBufferForWorker = frame.buffer.buffer.slice(
-      frame.buffer.byteOffset,
-      frame.buffer.byteOffset + frame.buffer.byteLength,
-    ) as ArrayBuffer;
+    // Everything above this point is per-eval setup work on the main thread:
+    // region filtering, runtime expansion, coordinate mapping, and feeding the
+    // OCR/Ollama services. Recorded separately from the buffer copy so the two
+    // do not hide each other.
+    perf.recordStage('evalPrep', performance.now() - evalPrepStartMs);
+
+    const frameArrayBufferForWorker = perf.timeStage('frameBufferCopy', () =>
+      frame.buffer.buffer.slice(
+        frame.buffer.byteOffset,
+        frame.buffer.byteOffset + frame.buffer.byteLength,
+      ) as ArrayBuffer
+    );
 
     workerBusy = true;
+    workerRequestSentAtMs = performance.now();
+    workerRequestSentAtMs = performance.now();
     stateEvalWorker!.postMessage(
       {
         type: 'evaluate',

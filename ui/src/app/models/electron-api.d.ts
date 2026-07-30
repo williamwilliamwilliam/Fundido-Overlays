@@ -51,6 +51,45 @@ export interface RegionPerfMetrics {
   timeInCalcMs: number;
 }
 
+export interface StageTiming {
+  count: number;
+  avgMs: number;
+  maxMs: number;
+  /** Total wall time in this stage during the 1-second window. */
+  totalMs: number;
+}
+
+export interface ProcessCpuSample {
+  /** 'Browser' (main process), 'GPU', 'Tab' (renderer), 'Utility'. */
+  type: string;
+  name: string;
+  pid: number;
+  /** Percent of a single CPU core — can exceed 100 for multi-threaded processes. */
+  cpuPercent: number;
+  memoryMb: number;
+}
+
+export interface ThreadUtilizationSample {
+  name: string;
+  /** 0..1 — fraction of wall time this thread's event loop was active. */
+  utilization: number;
+}
+
+export interface EventLoopDelaySample {
+  meanMs: number;
+  p99Ms: number;
+  maxMs: number;
+}
+
+export interface PerfDiagnostics {
+  stages: Record<string, StageTiming>;
+  processes: ProcessCpuSample[];
+  totalCpuPercent: number;
+  threads: ThreadUtilizationSample[];
+  /** Main-thread event loop blocking. Null when monitoring is unavailable. */
+  mainThreadLag: EventLoopDelaySample | null;
+}
+
 export interface PerfMetrics {
   captureFps: number;
   previewFps: number;
@@ -64,6 +103,11 @@ export interface PerfMetrics {
   activeOverlayGroupCount: number;
   /** Per-region calc counts, keyed by region ID. */
   regionMetrics: Record<string, RegionPerfMetrics>;
+  /**
+   * Process CPU attribution, per-thread utilization, and pipeline stage timings.
+   * Optional so the UI stays functional against a main process that predates it.
+   */
+  diagnostics?: PerfDiagnostics;
 }
 
 export interface FundidoApi {
