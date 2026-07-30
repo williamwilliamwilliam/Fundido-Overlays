@@ -27,8 +27,9 @@ const STAGE_LABELS: Record<string, string> = {
   previewFeed: 'Preview feed',
   mirrorBroadcast: 'Mirror crops → overlay',
   evalPrep: 'Eval prep (regions)',
-  frameBufferCopy: 'Frame buffer copy',
-  workerEval: 'Worker eval (pixels)',
+  frameBufferAlloc: 'Frame copy (allocated)',
+  frameBufferReuse: 'Frame copy (recycled)',
+  stateEval: 'State eval (pixels)',
   workerRoundTrip: 'Worker round trip',
   evalResultHandling: 'Result handling',
   overlayStateBroadcast: 'State broadcast',
@@ -189,6 +190,11 @@ interface CaptureRegionOverlay {
           </button>
 
           <div class="metrics-diagnostics" *ngIf="showDiagnostics && metrics.diagnostics">
+            <div class="metrics-row">
+              <span class="metric-label">Eval mode</span>
+              <span class="metric-value">{{ metrics.diagnostics.evalMode }}</span>
+            </div>
+
             <div class="metrics-subheading">CPU by process</div>
             <div class="metrics-row" *ngFor="let process of sortedProcesses">
               <span class="metric-label">{{ describeProcess(process) }}</span>

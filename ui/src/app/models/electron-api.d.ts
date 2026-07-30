@@ -86,6 +86,8 @@ export interface PerfDiagnostics {
   processes: ProcessCpuSample[];
   totalCpuPercent: number;
   threads: ThreadUtilizationSample[];
+  /** Which state-evaluation path produced these numbers: 'worker' or 'main'. */
+  evalMode?: string;
   /** Main-thread event loop blocking. Null when monitoring is unavailable. */
   mainThreadLag: EventLoopDelaySample | null;
 }

@@ -221,6 +221,40 @@ const perfCounters = {
   regionCalcs: new Map<string, { medianColor: number; colorThreshold: number; ocr: number; ollama: number }>(),
 };
 
+/**
+ * Tallies per-calc-type counters for a set of evaluated regions.
+ *
+ * The worker path gets these counts back in its result message. The main-thread
+ * path has to compute them itself, otherwise the calc rows in the UI would read
+ * zero whenever evaluation runs inline — and the two modes could not be
+ * compared on equal footing.
+ */
+function recordCalcCountsForRegions(evaluatedRegions: any[]): void {
+  for (const region of evaluatedRegions) {
+    const regionKey = region.sourceMonitoredRegionId || region.id;
+    const regionCounts = perfCounters.regionCalcs.get(regionKey)
+      || { medianColor: 0, colorThreshold: 0, ocr: 0, ollama: 0 };
+
+    for (const calculation of (region.stateCalculations || [])) {
+      if (calculation.type === 'MedianPixelColor') {
+        perfCounters.medianColorCalcs++;
+        regionCounts.medianColor++;
+      } else if (calculation.type === 'ColorThreshold') {
+        perfCounters.colorThresholdCalcs++;
+        regionCounts.colorThreshold++;
+      } else if (calculation.type === 'OCR') {
+        perfCounters.ocrCalcs++;
+        regionCounts.ocr++;
+      } else if (calculation.type === 'OllamaLLM') {
+        perfCounters.ollamaCalcs++;
+        regionCounts.ollama++;
+      }
+    }
+
+    perfCounters.regionCalcs.set(regionKey, regionCounts);
+  }
+}
+
 let perfMetricsInterval: ReturnType<typeof setInterval> | null = null;
 
 function startPerfMetricsReporting(): void {
@@ -286,13 +320,14 @@ function startPerfMetricsReporting(): void {
       activeRegionCount: perfCounters.activeRegionCount,
       activeOverlayGroupCount: perfCounters.activeOverlayGroupCount,
       regionMetrics,
-      diagnostics: perf.snapshot(),
+      diagnostics: { ...perf.snapshot(), evalMode: activeStateEvalMode },
     };
 
     // Mirror the same numbers to the JSONL trace file so a session can be
     // reviewed after the fact (or tailed live) without watching the UI.
     perf.writeTraceRecord({
       t: new Date(reportNowMs).toISOString(),
+      evalMode: activeStateEvalMode,
       captureFps: metrics.captureFps,
       previewFps: metrics.previewFps,
       stateEvalPerSec: metrics.stateEvalPerSec,
@@ -924,11 +959,92 @@ let stateEvalWorker: Worker | null = null;
 let workerBusy = false;
 /** performance.now() at which the current eval request was posted to the worker. */
 let workerRequestSentAtMs = 0;
+
+/**
+ * Which path runs state evaluation.
+ *
+ * 'worker' — evaluate on a worker thread. Keeps the main thread's event loop
+ *            free, but every eval must ship the frame across the thread
+ *            boundary.
+ * 'main'   — evaluate inline on the main thread. No frame transfer at all, but
+ *            the pixel math blocks the event loop while it runs.
+ *
+ * Which one wins depends on how the transfer cost compares to the evaluation
+ * cost, and that ratio moves with region count and region area. Selectable via
+ * the FUNDIDO_EVAL_MODE environment variable so both can be measured against
+ * the same workload:
+ *
+ *   FUNDIDO_EVAL_MODE=main npm start
+ */
+type StateEvalMode = 'worker' | 'main';
+
+/** The mode actually in effect — reported in the diagnostics and trace file. */
+let activeStateEvalMode: StateEvalMode = 'worker';
+
+/**
+ * Reusable frame buffer, ping-ponged between the main thread and the worker.
+ *
+ * postMessage's transfer list detaches the buffer here and hands ownership to
+ * the worker, so a naive implementation must allocate a fresh 8MB ArrayBuffer
+ * every eval. That allocation is not free: the OS has to commit and zero those
+ * pages, so each tick takes a page fault on every one of them before the copy
+ * even starts.
+ *
+ * Instead the worker returns the buffer in its result's transfer list, and we
+ * refill it in place next tick — same bytes copied, but into warm pages with
+ * no allocation. Null whenever the worker currently owns it (or never
+ * returned it, e.g. after a crash), in which case we allocate a new one.
+ */
+let recycledFrameArrayBuffer: ArrayBuffer | null = null;
+
+/**
+ * Produces the transferable ArrayBuffer holding this frame's pixels.
+ *
+ * Reuses the recycled buffer when the worker has returned one of the right
+ * size. A transferred buffer is detached on this side, which reports a
+ * byteLength of 0 — so the size check also rejects any buffer we still hold a
+ * stale reference to.
+ */
+function buildFrameBufferForWorker(frame: CapturedFrame): ArrayBuffer {
+  const requiredByteLength = frame.buffer.byteLength;
+  const recycledBuffer = recycledFrameArrayBuffer;
+  const canReuseRecycledBuffer = recycledBuffer !== null && recycledBuffer.byteLength === requiredByteLength;
+
+  if (canReuseRecycledBuffer) {
+    recycledFrameArrayBuffer = null;
+    return perf.timeStage('frameBufferReuse', () => {
+      new Uint8Array(recycledBuffer!).set(frame.buffer);
+      return recycledBuffer!;
+    });
+  }
+
+  // slice() is typed as returning ArrayBuffer | SharedArrayBuffer, but
+  // frame.buffer is always backed by a plain ArrayBuffer — the cast is safe.
+  return perf.timeStage('frameBufferAlloc', () =>
+    frame.buffer.buffer.slice(
+      frame.buffer.byteOffset,
+      frame.buffer.byteOffset + frame.buffer.byteLength,
+    ) as ArrayBuffer
+  );
+}
+
+function resolveStateEvalMode(): StateEvalMode {
+  const requestedMode = (process.env.FUNDIDO_EVAL_MODE || '').trim().toLowerCase();
+  if (requestedMode === 'main') return 'main';
+  if (requestedMode === 'worker' || requestedMode === '') return 'worker';
+
+  logger.warn(
+    LogCategory.General,
+    `Unrecognized FUNDIDO_EVAL_MODE "${requestedMode}" — expected "worker" or "main". Using "worker".`
+  );
+  return 'worker';
+}
 let latestEvaluatedRuntimeRegions: any[] = [];
 const latestRuntimeRegionIdToSourceRegionId = new Map<string, string>();
 
 function fallbackFromWorkerFailure(error: unknown): void {
   workerBusy = false;
+  recycledFrameArrayBuffer = null;
   logger.error(LogCategory.General, 'State eval worker error — falling back to main thread.', error);
 
   if (stateEvalInterval) {
@@ -951,12 +1067,20 @@ function fallbackFromWorkerFailure(error: unknown): void {
 function startStateEvaluationLoop(): void {
   if (stateEvalInterval) return;
 
+  const requestedMode = resolveStateEvalMode();
+  if (requestedMode === 'main') {
+    logger.info(LogCategory.General, 'FUNDIDO_EVAL_MODE=main — evaluating state on the main thread.');
+    startStateEvaluationLoopFallback();
+    return;
+  }
+
   // Resolve the worker path — in dev it's the .ts compiled to .js in dist/electron
   const workerPath = path.join(__dirname, 'state', 'state-eval.worker.js');
   logger.info(LogCategory.General, `Starting state evaluation worker: ${workerPath}`);
 
   try {
     stateEvalWorker = new Worker(workerPath);
+    activeStateEvalMode = 'worker';
   } catch (err) {
     logger.error(LogCategory.General, 'Failed to start state eval worker — falling back to main thread.', err);
     startStateEvaluationLoopFallback();
@@ -971,6 +1095,12 @@ function startStateEvaluationLoop(): void {
     if (result.type !== 'result') return;
     workerBusy = false;
 
+    // Reclaim the frame buffer the worker transferred back so the next eval can
+    // refill it instead of allocating. Absent on a worker that predates this.
+    if (result.frameBuffer instanceof ArrayBuffer && result.frameBuffer.byteLength > 0) {
+      recycledFrameArrayBuffer = result.frameBuffer;
+    }
+
     // Round trip covers the worker's own eval time plus transfer and queueing.
     // A large gap between workerRoundTrip and workerEval means the cost is in
     // getting data to and from the worker, not in the pixel math.
@@ -979,7 +1109,7 @@ function startStateEvaluationLoop(): void {
 
     const frameState = result.frameState;
     const evalDurationMs = result.evalDurationMs;
-    perf.recordStage('workerEval', evalDurationMs);
+    perf.recordStage('stateEval', evalDurationMs);
     const metrics = result.metrics;
 
     // Cache fresh results and merge cached results for throttled calcs
@@ -1145,23 +1275,19 @@ function startStateEvaluationLoop(): void {
     // We use slice() rather than transferring frame.buffer.buffer directly because
     // the main thread still holds references to the same buffer (previewService, etc.)
     // and detaching it would corrupt those reads.
-    // slice() is typed as returning ArrayBuffer | SharedArrayBuffer, but frame.buffer
-    // is always backed by a plain ArrayBuffer — the cast is safe here.
     // Everything above this point is per-eval setup work on the main thread:
     // region filtering, runtime expansion, coordinate mapping, and feeding the
     // OCR/Ollama services. Recorded separately from the buffer copy so the two
     // do not hide each other.
     perf.recordStage('evalPrep', performance.now() - evalPrepStartMs);
 
-    const frameArrayBufferForWorker = perf.timeStage('frameBufferCopy', () =>
-      frame.buffer.buffer.slice(
-        frame.buffer.byteOffset,
-        frame.buffer.byteOffset + frame.buffer.byteLength,
-      ) as ArrayBuffer
-    );
+    // Refill the recycled buffer when the worker has handed it back and the
+    // frame size still matches; otherwise allocate a fresh one. The two paths
+    // are timed under different stage names so the cost of allocating is
+    // directly visible against the cost of copying alone.
+    const frameArrayBufferForWorker = buildFrameBufferForWorker(frame);
 
     workerBusy = true;
-    workerRequestSentAtMs = performance.now();
     workerRequestSentAtMs = performance.now();
     stateEvalWorker!.postMessage(
       {
@@ -1191,11 +1317,14 @@ function startStateEvaluationLoop(): void {
  * Fallback: runs state evaluation on the main thread if the worker fails to start.
  */
 function startStateEvaluationLoopFallback(): void {
+  activeStateEvalMode = 'main';
+
   const runStateEvaluation = () => {
     const frame = latestFrameRef.frame;
     if (!frame) return;
 
     const pipelineStartTime = Date.now();
+    const evalPrepStartMs = performance.now();
     const allMonitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions;
     const enabledRegions = allMonitoredRegions.filter((region: any) => region.enabled !== false);
 
@@ -1222,6 +1351,13 @@ function startStateEvaluationLoopFallback(): void {
     for (const runtimeRegion of runtimeRegions) {
       latestRuntimeRegionIdToSourceRegionId.set(runtimeRegion.id, runtimeRegion.sourceMonitoredRegionId);
     }
+
+    // Mirrors the worker path's bookkeeping — without these the region and
+    // overlay-group counts read zero whenever evaluation runs inline, which
+    // makes the two modes impossible to compare.
+    perfCounters.activeRegionCount = runtimeRegions.length;
+    perfCounters.activeOverlayGroupCount = getProfileActivatedOverlayGroups(currentConfigRef.config)
+      .filter((group: any) => group.enabled !== false).length;
 
     const maxCalcFrequency = currentConfigRef.config.maxCalcFrequency ?? 10;
     const minCalcIntervalMs = Math.round(1000 / maxCalcFrequency);
@@ -1290,7 +1426,18 @@ function startStateEvaluationLoopFallback(): void {
     ollamaService.onFrameCaptured(frame);
     ollamaService.setRegions(throttledRegions);
 
-    const frameState = evaluateFrameState(frame, throttledRegions, ocrService.getAllResults(), ollamaService.getAllResults());
+    // Same stage names as the worker path, minus the transfer stages, so the
+    // two modes can be compared line for line in the perf trace. Note that
+    // pixel hashing above is part of prep here but part of stateEval in the
+    // worker, which runs it inside the worker's own timed section.
+    perf.recordStage('evalPrep', performance.now() - evalPrepStartMs);
+
+    const frameState = perf.timeStage('stateEval', () =>
+      evaluateFrameState(frame, throttledRegions, ocrService.getAllResults(), ollamaService.getAllResults())
+    );
+
+    const resultHandlingStartMs = performance.now();
+    recordCalcCountsForRegions(throttledRegions);
 
     const instanceStates = frameState.regionInstanceStates || frameState.regionStates;
     for (const rs of instanceStates as any[]) {
@@ -1313,6 +1460,9 @@ function startStateEvaluationLoopFallback(): void {
     }
 
     perfCounters.stateEvals++;
+    perf.recordStage('evalResultHandling', performance.now() - resultHandlingStartMs);
+
+    const broadcastStartMs = performance.now();
     applyProfileRuleResults(frameState);
     overlayWindowManager.broadcastFrameState(frameState);
     const uiIsVisible = !uiMinimizedRef.minimized && mainWindow && !mainWindow.isDestroyed();
@@ -1324,6 +1474,8 @@ function startStateEvaluationLoopFallback(): void {
         mainWindow!.webContents.send(IpcChannels.STATE_UPDATED, frameState);
       }
     }
+    perf.recordStage('overlayStateBroadcast', performance.now() - broadcastStartMs);
+
     perfCounters.pipelineTotalMs += Date.now() - pipelineStartTime;
     perfCounters.pipelineSamples++;
   };
@@ -1340,6 +1492,7 @@ function stopStateEvaluationLoop(): void {
     stateEvalWorker.terminate();
     stateEvalWorker = null;
   }
+  recycledFrameArrayBuffer = null;
 }
 
 // ---------------------------------------------------------------------------

@@ -192,8 +192,12 @@ parentPort!.on('message', (request: EvalRequest) => {
     };
   }
 
+  // Transfer the frame buffer back so the main thread can refill and resend it
+  // rather than allocating a new one every eval. Nothing below reads `frame`
+  // after this point — transferring detaches it on this side.
   parentPort!.postMessage({
     type: 'result',
+    frameBuffer: request.frameBuffer,
     frameState,
     evalDurationMs,
     throttledRegionIds: throttledRegions.map((r: any) => r.id),
@@ -207,7 +211,7 @@ parentPort!.on('message', (request: EvalRequest) => {
       ollamaCalcCount,
       regionCalcCounts,
     },
-  });
+  }, [request.frameBuffer]);
 });
 
 function getRegionEvaluationIntervalMs(region: any, globalMinCalcIntervalMs: number): number {
