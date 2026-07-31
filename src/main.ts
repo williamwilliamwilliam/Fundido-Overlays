@@ -1,8 +1,13 @@
-import { app, BrowserWindow, screen, Menu, shell, ipcMain } from 'electron';
+import { app, BrowserWindow, screen, Menu, shell, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { Worker } from 'worker_threads';
 import { ConfigPersistenceService } from './persistence/config-persistence.service';
+import {
+  getSaveFileDisplayName,
+  isDefaultSaveFile,
+  setActiveSaveFilePath,
+} from './persistence/save-file-registry';
 import { GameCaptureService, CapturedFrame } from './capture/game-capture.service';
 import { PreviewFrameService } from './capture/preview-frame.service';
 import { OverlayWindowManager } from './overlay/overlay-window-manager';
@@ -385,7 +390,7 @@ function createMainWindow(): void {
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
     width: savedBounds?.width ?? 1280,
     height: savedBounds?.height ?? 800,
-    title: 'Fundido Overlays',
+    title: buildMainWindowTitle(),
     icon: appIconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -489,6 +494,14 @@ function createMainWindow(): void {
     dirtyRegionOverlayManager.closeAll();
   });
 
+  // The renderer's document title would otherwise replace the window title and
+  // hide which save file is open. Keeping ownership here means the title stays
+  // correct across reloads and navigations.
+  mainWindow.on('page-title-updated', (event) => {
+    event.preventDefault();
+    mainWindow?.setTitle(buildMainWindowTitle());
+  });
+
   mainWindow.on('minimize', () => {
     uiMinimizedRef.minimized = true;
     syncPreviewRuntimeState();
@@ -525,6 +538,9 @@ function createMainWindow(): void {
     {
       label: 'File',
       submenu: [
+        { label: 'New Save File...', click: () => { void promptForNewSaveFile(); } },
+        { label: 'Open Save File...', click: () => { void promptToOpenSaveFile(); } },
+        { type: 'separator' },
         { role: 'quit' },
       ],
     },
@@ -598,6 +614,142 @@ function createMainWindow(): void {
 
   const appMenu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(appMenu);
+}
+
+// ---------------------------------------------------------------------------
+// Save files
+// ---------------------------------------------------------------------------
+
+/**
+ * Set while switching save files so the before-quit handler does not write the
+ * in-memory configuration on the way out.
+ *
+ * Without this, quitting would save the OLD config — which is still what is in
+ * memory — into the NEWLY selected file, destroying the save the user just
+ * chose to open. The current config is written to its own file explicitly
+ * before the switch begins.
+ */
+let isSwitchingSaveFile = false;
+
+/**
+ * Applies a save file selection by restarting the app into it.
+ *
+ * Switching in place would mean unwinding and re-applying every piece of state
+ * derived from the configuration: capture, preview, OCR, Ollama, overlay
+ * windows, profile activation, worker-side hash and threshold caches, and the
+ * renderer's own view of the config. The startup path already does all of that
+ * correctly, in the right order, so a restart reuses it instead of duplicating
+ * it — and switching save files is a rare, deliberate action where a brief
+ * restart is a reasonable cost for not corrupting state.
+ */
+async function switchToSaveFile(saveFilePath: string): Promise<void> {
+  const displayName = getSaveFileDisplayName(saveFilePath);
+
+  const confirmation = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Restart Now', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Switch Save File',
+    message: `Restart Fundido Overlays using "${displayName}"?`,
+    detail: 'The app needs to restart to load a different save file. Your current save file is written to disk first, so nothing is lost.',
+  });
+
+  const userCancelled = confirmation.response !== 0;
+  if (userCancelled) return;
+
+  try {
+    // Write the current configuration to the file it came from, before the
+    // pointer moves anywhere else.
+    configService.save(currentConfigRef.config);
+    setActiveSaveFilePath(saveFilePath);
+  } catch (error) {
+    logger.error(LogCategory.Persistence, 'Failed to switch save file.', error);
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'Could Not Switch Save File',
+      message: 'The save file could not be switched.',
+      detail: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
+
+  isSwitchingSaveFile = true;
+
+  // The main window vetoes close events until the renderer has confirmed, which
+  // exists to catch an accidental quit. The user has already confirmed this
+  // restart in the dialog above, so bypass that second prompt — otherwise
+  // app.quit() is cancelled and the switch silently does nothing.
+  allowMainWindowClose = true;
+
+  logger.info(LogCategory.Persistence, `Restarting into save file: ${saveFilePath}`);
+  app.relaunch();
+  app.quit();
+}
+
+async function promptForNewSaveFile(): Promise<void> {
+  const result = await dialog.showSaveDialog({
+    title: 'New Save File',
+    defaultPath: path.join(app.getPath('userData'), 'my-save.json'),
+    filters: [{ name: 'Fundido Save File', extensions: ['json'] }],
+    properties: ['createDirectory'],
+  });
+
+  if (result.canceled || !result.filePath) return;
+
+  try {
+    // The save dialog has already handled confirming replacement of an existing
+    // file, so an overwrite here is a decision the user has explicitly made.
+    configService.createSaveFile(result.filePath, true);
+  } catch (error) {
+    logger.error(LogCategory.Persistence, 'Failed to create new save file.', error);
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'Could Not Create Save File',
+      message: 'The new save file could not be created.',
+      detail: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
+
+  await switchToSaveFile(result.filePath);
+}
+
+async function promptToOpenSaveFile(): Promise<void> {
+  const result = await dialog.showOpenDialog({
+    title: 'Open Save File',
+    defaultPath: app.getPath('userData'),
+    filters: [{ name: 'Fundido Save File', extensions: ['json'] }],
+    properties: ['openFile'],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) return;
+
+  const selectedPath = result.filePaths[0];
+
+  // Validate before restarting. Restarting into an unreadable file would drop
+  // the user into a defaults-only app with no indication of why.
+  const validation = ConfigPersistenceService.validateSaveFile(selectedPath);
+  if (!validation.valid) {
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'Not a Save File',
+      message: 'That file cannot be opened as a save file.',
+      detail: validation.reason,
+    });
+    return;
+  }
+
+  await switchToSaveFile(selectedPath);
+}
+
+/** Window title, showing which save file is open when it is not the default. */
+function buildMainWindowTitle(): string {
+  const activePath = configService.getConfigFilePath();
+  if (isDefaultSaveFile(activePath)) {
+    return 'Fundido Overlays';
+  }
+  return `Fundido Overlays — ${getSaveFileDisplayName(activePath)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1781,6 +1933,14 @@ app.whenReady().then(() => {
     logger.info(LogCategory.Overlay, `[RENDERER] ${message}`);
   });
 
+  // Mirror paint timings measured inside the overlay renderer. Recorded as
+  // stages so they land in the same per-second trace as everything else.
+  ipcMain.on('overlay:paint-metrics', (_event: any, stats: any) => {
+    if (stats && stats.count) {
+      perf.recordStageAggregate('mirrorPaint', stats);
+    }
+  });
+
   createMainWindow();
   setupCaptureToOverlayPipeline();
   startStateEvaluationLoop();
@@ -1845,6 +2005,15 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  // While switching save files the in-memory config belongs to the PREVIOUS
+  // file and has already been written there. Saving again here would write it
+  // into the newly selected file and overwrite the save being opened.
+  if (isSwitchingSaveFile) {
+    logger.info(LogCategory.General, 'Switching save file — skipping the exit save.');
+    logger.shutdown();
+    return;
+  }
+
   configService.save(currentConfigRef.config);
   logger.info(LogCategory.General, 'Configuration saved on exit.');
   logger.shutdown();

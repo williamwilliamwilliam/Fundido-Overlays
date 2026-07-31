@@ -47,6 +47,8 @@ export type PerfStage =
   | 'previewFeed'
   /** Cropping + IPC-ing mirror pixels to the overlay windows. */
   | 'mirrorBroadcast'
+  /** Painting mirror pixels onto canvases, timed inside the overlay renderer. */
+  | 'mirrorPaint'
   /** Region filtering and physical-bounds mapping before the worker send. */
   | 'evalPrep'
   /** Full-frame copy into a freshly allocated ArrayBuffer (worker mode). */
@@ -171,6 +173,32 @@ class PerfInstrumentation {
     accumulator.totalMs += durationMs;
     if (durationMs > accumulator.maxMs) {
       accumulator.maxMs = durationMs;
+    }
+  }
+
+  /**
+   * Merges an already-aggregated batch of samples into a stage.
+   *
+   * Used for work timed in another process — the overlay renderer aggregates
+   * its own paint timings and ships the totals over IPC. Replaying the mean
+   * once per sample would misreport both the count and the maximum, so the
+   * counters are combined directly.
+   */
+  public recordStageAggregate(
+    stage: PerfStage,
+    aggregate: { count: number; totalMs: number; maxMs: number }
+  ): void {
+    if (!aggregate.count) return;
+
+    let accumulator = this.stageAccumulators.get(stage);
+    if (!accumulator) {
+      accumulator = { count: 0, totalMs: 0, maxMs: 0 };
+      this.stageAccumulators.set(stage, accumulator);
+    }
+    accumulator.count += aggregate.count;
+    accumulator.totalMs += aggregate.totalMs;
+    if (aggregate.maxMs > accumulator.maxMs) {
+      accumulator.maxMs = aggregate.maxMs;
     }
   }
 

@@ -26,6 +26,7 @@ const STAGE_LABELS: Record<string, string> = {
   captureCallback: 'Capture callback',
   previewFeed: 'Preview feed',
   mirrorBroadcast: 'Mirror crops → overlay',
+  mirrorPaint: 'Mirror paint (renderer)',
   evalPrep: 'Eval prep (regions)',
   frameStateRebuild: 'Frame state rebuild',
   frameBufferAlloc: 'Frame copy (allocated)',
