@@ -31,6 +31,16 @@ import { monitorEventLoopDelay, performance, type IntervalHistogram } from 'perf
 
 /** Named pipeline stages, in roughly the order a frame passes through them. */
 export type PerfStage =
+  /**
+   * Interval between raw frame deliveries from the native capture thread,
+   * measured before the target-FPS throttle drops any of them.
+   *
+   * Desktop Duplication produces a frame whenever the desktop changes, so in a
+   * fullscreen game this tracks the game's presentation rate — an in-app proxy
+   * for game FPS that needs no OCR. The mean interval converts to frames per
+   * second, and the max exposes hitches an averaged counter would hide.
+   */
+  | 'frameArrivalGap'
   /** Total time spent inside the native capture callback on the main thread. */
   | 'captureCallback'
   /** Handing the frame to the preview service. */

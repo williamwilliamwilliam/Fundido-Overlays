@@ -43,9 +43,15 @@ export interface CaptureDisplayMetrics extends DisplayInfo {
  */
 interface NativeDxgiCapture {
   listDisplays(): DisplayInfo[];
-  startCapture(displayIndex: number, callback?: (frame: { buffer: Buffer; width: number; height: number }) => void): boolean;
+  startCapture(
+    displayIndex: number,
+    callback?: (frame: { buffer: Buffer; width: number; height: number }) => void,
+    targetFps?: number,
+  ): boolean;
   stopCapture(): void;
   getLatestFrame(): { buffer: Buffer; width: number; height: number } | null;
+  /** Present only in addon builds that throttle on the capture thread. */
+  setTargetFps?(targetFps: number): boolean;
 }
 
 /**
@@ -102,6 +108,31 @@ export class GameCaptureService {
 
   public getIsNativeAvailable(): boolean {
     return this.isNativeAvailable;
+  }
+
+  /**
+   * Whether the addon rate-limits on the capture thread.
+   *
+   * When it does, the caller must not also drop frames itself: the native
+   * thread already delivers at the requested rate, and a second throttle on
+   * top of it drops frames that arrive a fraction early, cutting the effective
+   * rate roughly in half.
+   */
+  public getSupportsNativeThrottling(): boolean {
+    return typeof this.nativeCapture?.setTargetFps === 'function';
+  }
+
+  /**
+   * Updates the capture rate without restarting capture. Frames above this rate
+   * are released before any GPU copy is done for them.
+   */
+  public setTargetFps(targetFps: number): void {
+    if (!this.nativeCapture?.setTargetFps) return;
+    try {
+      this.nativeCapture.setTargetFps(targetFps);
+    } catch (error) {
+      logger.error(LogCategory.Capture, 'Native setTargetFps threw an error.', error);
+    }
   }
 
   public getLatestFrame(): CapturedFrame | null {
@@ -205,7 +236,11 @@ export class GameCaptureService {
       };
 
       try {
-        const startedSuccessfully = this.nativeCapture.startCapture(displayIndex, nativeFrameCallback);
+        const startedSuccessfully = this.nativeCapture.startCapture(
+          displayIndex,
+          nativeFrameCallback,
+          config.targetFps,
+        );
         if (!startedSuccessfully) {
           logger.error(LogCategory.Capture, 'Native startCapture returned false.');
           return;

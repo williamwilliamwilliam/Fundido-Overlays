@@ -458,6 +458,20 @@ export interface OverlayConfig {
    * high-refresh-rate displays. Default 60.
    */
   cursorFrequencyHz: 60 | 120;
+  /**
+   * How many times per second mirror overlays are repainted with fresh pixels.
+   *
+   * Mirror crops were previously pushed on every captured frame, so this rate
+   * was whatever the capture was running at. Each repaint dirties a canvas in
+   * the transparent always-on-top overlay window, which forces the desktop
+   * compositor to recomposite it — work that competes with the game for the
+   * GPU. Decoupling the two lets the mirror update slower than capture without
+   * slowing state evaluation, which continues at the capture rate.
+   *
+   * Lower is cheaper; the mirror stays live at any value, it simply refreshes
+   * less often. Defaults to 30.
+   */
+  overlayFps?: number;
 }
 
 // ---------------------------------------------------------------------------

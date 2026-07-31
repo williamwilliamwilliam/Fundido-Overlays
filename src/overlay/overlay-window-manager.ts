@@ -34,6 +34,24 @@ export class OverlayWindowManager {
     return this.visibleMirrorRegionIds.size;
   }
 
+  /**
+   * Fraction of visible mirrors actually broadcast, 0..1. Always 1 in normal
+   * operation; the FPS experiment lowers it to isolate how much of the cost
+   * scales with mirror count rather than with repaint rate.
+   */
+  private mirrorBroadcastFraction = 1;
+
+  /** Number of mirrors included in the most recent broadcast. */
+  private lastBroadcastMirrorCount = 0;
+
+  public setMirrorBroadcastFraction(fraction: number): void {
+    this.mirrorBroadcastFraction = Math.max(0, Math.min(1, fraction));
+  }
+
+  public getLastBroadcastMirrorCount(): number {
+    return this.lastBroadcastMirrorCount;
+  }
+
   /** Current global sound volume (0.0–1.0). Sent to the overlay renderer with every groups-sync. */
   private currentSoundVolume: number = 0.5;
 
@@ -352,8 +370,12 @@ export class OverlayWindowManager {
     dpiScaleFactor: number,
   ): void {
     const windowIsOpen = this.overlayWindow && !this.overlayWindow.isDestroyed();
-    if (!windowIsOpen) return;
-    if (this.visibleMirrorRegionIds.size === 0) return;
+    if (!windowIsOpen || this.visibleMirrorRegionIds.size === 0) {
+      // Reset so diagnostics report zero rather than a stale count from the
+      // last time mirrors were actually broadcast.
+      this.lastBroadcastMirrorCount = 0;
+      return;
+    }
 
     const regionById = new Map<string, any>();
     for (const region of monitoredRegions) {
@@ -367,7 +389,14 @@ export class OverlayWindowManager {
     const cropInfos: Array<{ id: string; clampedX: number; clampedY: number; clampedW: number; clampedH: number; cropBytes: number }> = [];
     let totalBytes = 0;
 
+    // Diagnostic cap: normally 1 (every visible mirror). The FPS experiment
+    // lowers it to measure how the cost scales with the number of mirrors being
+    // pushed, which is what the reported symptom scales with.
+    const mirrorBudget = Math.round(this.visibleMirrorRegionIds.size * this.mirrorBroadcastFraction);
+
     for (const regionId of this.visibleMirrorRegionIds) {
+      if (cropInfos.length >= mirrorBudget) break;
+
       const region = regionById.get(regionId);
       if (!region || !region.bounds) continue;
 
@@ -388,6 +417,7 @@ export class OverlayWindowManager {
       totalBytes += cropBytes;
     }
 
+    this.lastBroadcastMirrorCount = cropInfos.length;
     if (cropInfos.length === 0) return;
 
     // Grow the pre-allocated buffer if needed (never shrinks — avoids GC churn)

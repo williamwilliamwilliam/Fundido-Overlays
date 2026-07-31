@@ -16,6 +16,7 @@ import { logger, LogCategory, WorkerLogMessage } from './shared/logger';
 import { computeRegionPixelHash } from './shared/pixel-hash';
 import { perf } from './perf/perf-instrumentation';
 import { nowMonotonicMs } from './shared/monotonic-clock';
+import { fpsExperiment, FpsExperiment } from './perf/fps-experiment';
 import {
   applyProfileRulesToConfig,
   FundidoConfig,
@@ -329,6 +330,7 @@ function startPerfMetricsReporting(): void {
     perf.writeTraceRecord({
       t: new Date(reportNowMs).toISOString(),
       evalMode: activeStateEvalMode,
+      ...(fpsExperiment.getTraceFields() ?? {}),
       captureFps: metrics.captureFps,
       previewFps: metrics.previewFps,
       stateEvalPerSec: metrics.stateEvalPerSec,
@@ -647,6 +649,7 @@ function getRegionIdsRequiredForRuntimeAutomation(): Set<string> {
   for (const regionId of getRegionIdsReferencedByProfileRules(currentConfigRef.config)) {
     referencedIds.add(regionId);
   }
+
   return referencedIds;
 }
 
@@ -885,24 +888,120 @@ function startPerfDiagWindow(): void {
   logger.info(LogCategory.General, '[PERF DIAG] Starting 10-second capture performance diagnostic window.');
 }
 
+/** Default mirror repaint rate when the setting is absent. */
+const DEFAULT_OVERLAY_FPS = 30;
+
+function getOverlayRepaintIntervalMs(): number {
+  const configuredFps = currentConfigRef.config.overlay?.overlayFps ?? DEFAULT_OVERLAY_FPS;
+  // Zero or less disables repainting entirely: the overlay window stays open
+  // with whatever it last drew. Not reachable from the settings slider — the
+  // FPS experiment uses it to separate the window's fixed cost from the cost
+  // of repainting it.
+  if (configuredFps <= 0) return Number.POSITIVE_INFINITY;
+  const clampedFps = Math.max(1, Math.min(240, configuredFps));
+  return 1000 / clampedFps;
+}
+
+// ---------------------------------------------------------------------------
+// FPS experiment support
+// ---------------------------------------------------------------------------
+
+/** Mirror repaints since the FPS experiment last sampled, for its per-step check. */
+let mirrorRepaintsSinceStepStart = 0;
+
+/**
+ * Starts the overlay FPS sweep when FUNDIDO_FPS_EXPERIMENT=1.
+ *
+ * Frame rate is measured entirely from capture frame-arrival intervals — see
+ * the 'frameArrivalGap' stage. Nothing is read off the screen: an OCR'd in-game
+ * counter reports coarse integers, needs a maintained region, and adds OCR work
+ * to every condition being compared.
+ *
+ * All hooks mutate runtime state only: overlayFps is written into the in-memory
+ * config object, and the overlay window and mirror budget are driven directly
+ * through the window manager. Nothing is persisted, so the saved settings
+ * survive the run even if it is interrupted.
+ */
+function startFpsExperimentIfEnabled(): void {
+  if (!FpsExperiment.isEnabled()) return;
+
+  const originalOverlayFps = currentConfigRef.config.overlay?.overlayFps ?? DEFAULT_OVERLAY_FPS;
+
+  // Give capture and the overlay window a moment to reach steady state before
+  // the first condition is applied and timed.
+  setTimeout(() => {
+    fpsExperiment.start(
+      {
+        setOverlayFps: (overlayFps: number) => {
+          const overlayConfig = currentConfigRef.config.overlay ?? { cursorFrequencyHz: 60 as const };
+          currentConfigRef.config.overlay = { ...overlayConfig, overlayFps };
+        },
+        setOverlayWindowOpen: (open: boolean) => {
+          const groups = open ? getProfileActivatedOverlayGroups(currentConfigRef.config) : [];
+          overlayWindowManager.syncOverlayWindows(groups, currentConfigRef.config.soundVolume ?? 0.5);
+        },
+        setMirrorFraction: (fraction: number) => {
+          overlayWindowManager.setMirrorBroadcastFraction(fraction);
+        },
+        readStepObservation: () => {
+          const observation = {
+            repaints: mirrorRepaintsSinceStepStart,
+            mirrors: overlayWindowManager.getLastBroadcastMirrorCount(),
+          };
+          mirrorRepaintsSinceStepStart = 0;
+          return observation;
+        },
+      },
+      originalOverlayFps,
+    );
+  }, 10_000);
+}
+
 function setupCaptureToOverlayPipeline(): void {
   refreshCaptureDisplayCache();
   let diagFrameCount = 0;
   let lastFrameTimestamp = 0;
+  let lastMirrorBroadcastAtMs = 0;
+
+  let lastNativeFrameAtMs = 0;
+  let lastPushedTargetFps = -1;
 
   captureService.setFrameCapturedCallback((frame) => {
+    // Recorded before the target-FPS throttle below, so this counts every frame
+    // the capture thread delivered rather than every frame we chose to use.
+    // That makes it a proxy for how fast the desktop — and so the game — is
+    // actually updating, independent of our own capture settings.
+    const nativeArrivalMs = performance.now();
+    if (lastNativeFrameAtMs > 0) {
+      perf.recordStage('frameArrivalGap', nativeArrivalMs - lastNativeFrameAtMs);
+    }
+    lastNativeFrameAtMs = nativeArrivalMs;
+
     const callbackEntryTime = Date.now();
     const timeSinceLastFrame = lastFrameTimestamp > 0 ? callbackEntryTime - lastFrameTimestamp : 0;
 
-    // Throttle to the configured target FPS. The native addon pushes frames at the
-    // display refresh rate regardless of this setting, so we drop frames here when
-    // they arrive faster than the target interval. Reading the config each callback
-    // means setting changes take effect immediately without restarting capture.
+    // Throttle to the configured target FPS.
+    //
+    // Addons that rate-limit on the capture thread already deliver at the
+    // target, and they do it before spending a GPU copy on a frame they will
+    // discard. Throttling again here would only drop frames that arrived a
+    // fraction early, roughly halving the delivered rate. Older addons without
+    // that support still need this fallback, which pays the GPU cost first.
     const targetFps = currentConfigRef.config.gameCapture?.targetFps ?? 30;
-    const minFrameIntervalMs = 1000 / targetFps;
-    const frameArrivedBeforeTargetInterval = lastFrameTimestamp > 0 && timeSinceLastFrame < minFrameIntervalMs;
-    if (frameArrivedBeforeTargetInterval) {
-      return;
+
+    if (captureService.getSupportsNativeThrottling()) {
+      // Push rate changes down as they happen, so the setting still applies
+      // immediately without restarting capture.
+      if (targetFps !== lastPushedTargetFps) {
+        lastPushedTargetFps = targetFps;
+        captureService.setTargetFps(targetFps);
+      }
+    } else {
+      const minFrameIntervalMs = 1000 / targetFps;
+      const frameArrivedBeforeTargetInterval = lastFrameTimestamp > 0 && timeSinceLastFrame < minFrameIntervalMs;
+      if (frameArrivedBeforeTargetInterval) {
+        return;
+      }
     }
 
     lastFrameTimestamp = callbackEntryTime;
@@ -919,20 +1018,48 @@ function setupCaptureToOverlayPipeline(): void {
     // Feed frame to preview service (it has its own throttled interval)
     perf.timeStage('previewFeed', () => previewService.onFrameCaptured(frame));
 
-    // FAST PATH: Send raw pixel crops directly to overlay windows for mirror rendering.
+    // FAST PATH: Send raw pixel crops directly to overlay windows for mirror
+    // rendering, at the configured overlay rate rather than the capture rate.
+    //
+    // Skipping a repaint never makes a mirror stale in the sense that matters:
+    // the next one it does receive is the newest captured frame, not a queued
+    // older one. What it costs is temporal resolution, not liveness. State
+    // evaluation is unaffected — it runs on its own loop off the latest frame.
     const mirrorStartMs = performance.now();
-    const monitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions ?? [];
-    overlayWindowManager.broadcastMirrorCrops(
-      frame.buffer,
-      frame.width,
-      frame.height,
-      monitoredRegions,
-      captureDisplayCache.originX,
-      captureDisplayCache.originY,
-      captureDisplayCache.scaleFactor,
-    );
-    const mirrorElapsed = performance.now() - mirrorStartMs;
-    perf.recordStage('mirrorBroadcast', mirrorElapsed);
+    const timeSinceMirrorBroadcast = mirrorStartMs - lastMirrorBroadcastAtMs;
+    const overlayRepaintIntervalMs = getOverlayRepaintIntervalMs();
+
+    // Repaints can only happen when a frame arrives, so the deadline almost
+    // never falls exactly on one. Requiring the full interval to have elapsed
+    // means a frame landing a hair early is dropped and the next one is a whole
+    // frame late — at capture rates near the overlay rate that halves the
+    // effective rate (30fps requested, 19fps delivered). Accepting the frame
+    // nearest the deadline instead keeps the average on target, and degrades to
+    // the capture rate when that is the lower of the two.
+    const nearestFrameTolerance = timeSinceLastFrame > 0 ? timeSinceLastFrame / 2 : 0;
+    const mirrorRepaintIsDue = lastMirrorBroadcastAtMs === 0
+      || timeSinceMirrorBroadcast >= overlayRepaintIntervalMs - nearestFrameTolerance;
+
+    let mirrorElapsed = 0;
+    if (mirrorRepaintIsDue) {
+      lastMirrorBroadcastAtMs = mirrorStartMs;
+      const monitoredRegions = workingRegionsRef.regions ?? currentConfigRef.config.monitoredRegions ?? [];
+      overlayWindowManager.broadcastMirrorCrops(
+        frame.buffer,
+        frame.width,
+        frame.height,
+        monitoredRegions,
+        captureDisplayCache.originX,
+        captureDisplayCache.originY,
+        captureDisplayCache.scaleFactor,
+      );
+      // Recorded only when a repaint actually happened, so the stage's call
+      // count is the real overlay repaint rate and can be read against the
+      // capture rate to confirm the two are decoupled.
+      mirrorElapsed = performance.now() - mirrorStartMs;
+      perf.recordStage('mirrorBroadcast', mirrorElapsed);
+      mirrorRepaintsSinceStepStart++;
+    }
     perf.recordStage('captureCallback', performance.now() - callbackStartMs);
     const totalCallbackTime = Date.now() - callbackEntryTime;
 
@@ -1658,6 +1785,7 @@ app.whenReady().then(() => {
   setupCaptureToOverlayPipeline();
   startStateEvaluationLoop();
   startPerfMetricsReporting();
+  startFpsExperimentIfEnabled();
 
   // Preview frames go to overlay windows for mirror rendering (fast path)
   previewService.setOnPreviewFrameSent((previewData) => {

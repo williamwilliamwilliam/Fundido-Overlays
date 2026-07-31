@@ -27,6 +27,7 @@
 #include <atomic>
 #include <cstring>
 #include <condition_variable>
+#include <chrono>
 
 // ---------------------------------------------------------------------------
 // Global DXGI state
@@ -54,6 +55,21 @@ static UINT                    g_frameBufferSize      = 0;
 static std::atomic<int>        g_writeSlot{0};       // Capture thread writes here
 static std::atomic<int>        g_readSlot{1};        // Node reads from here
 static std::atomic<bool>       g_frameReady{false};  // Set by capture thread after swap
+
+/**
+ * Minimum nanoseconds between delivered frames. 0 means deliver everything.
+ *
+ * Desktop Duplication hands us a frame every time the desktop changes, which
+ * during gameplay is far more often than the app's configured capture rate.
+ * Throttling on the JavaScript side meant the expensive part had already
+ * happened by the time a frame was discarded: a full-screen GPU-to-staging
+ * CopyResource plus a Map readback, which also forces a GPU sync point and so
+ * costs the running game more than the raw bandwidth suggests.
+ *
+ * Enforcing the interval here instead lets an unwanted frame be released
+ * immediately, before any GPU work is done for it.
+ */
+static std::atomic<int64_t>    g_minFrameIntervalNs{0};
 
 // Thread-safe function for signaling Node.js
 static napi_threadsafe_function g_tsCallback = nullptr;
@@ -188,6 +204,11 @@ static void CaptureThreadFunc() {
     // (reverted automatically when thread exits)
     timeBeginPeriod(1);
 
+    auto lastDeliveredAt = std::chrono::steady_clock::now();
+    bool hasDeliveredFrame = false;
+    auto lastAcquiredAt = lastDeliveredAt;
+    bool hasAcquiredFrame = false;
+
     while (!g_threadShouldStop.load()) {
         IDXGIResource* desktopResource = nullptr;
         DXGI_OUTDUPL_FRAME_INFO frameInfo;
@@ -214,6 +235,48 @@ static void CaptureThreadFunc() {
         if (FAILED(hr) || !desktopResource) {
             if (desktopResource) desktopResource->Release();
             continue;
+        }
+
+        // Rate limit BEFORE any GPU work. Releasing the frame here costs
+        // nothing; copying it and then discarding it on the JS side costs a
+        // full-screen GPU copy and readback.
+        //
+        // The deadline is compared with a half-interval tolerance so a frame
+        // arriving slightly early is still taken. Requiring the full interval
+        // to elapse would drop it and wait for the next one, which at capture
+        // rates near the target roughly halves the delivered rate — the reason
+        // a 20fps target was previously measured delivering about 15.6fps.
+        const int64_t minIntervalNs = g_minFrameIntervalNs.load();
+        if (minIntervalNs > 0) {
+            const auto now = std::chrono::steady_clock::now();
+            const int64_t sinceLastDeliveryNs =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(now - lastDeliveredAt).count();
+
+            // Frames only arrive when the desktop changes, so a deadline rarely
+            // falls exactly on one. The tolerance is half the observed gap
+            // between arrivals, which takes whichever frame lands nearest the
+            // deadline: close enough to hold the target rate, without the
+            // doubling that a tolerance derived from the target interval would
+            // allow, or the halving that demanding the full interval causes.
+            const int64_t sinceLastAcquireNs = hasAcquiredFrame
+                ? std::chrono::duration_cast<std::chrono::nanoseconds>(now - lastAcquiredAt).count()
+                : 0;
+            lastAcquiredAt = now;
+            hasAcquiredFrame = true;
+
+            int64_t toleranceNs = sinceLastAcquireNs / 2;
+            if (toleranceNs > minIntervalNs / 2) {
+                toleranceNs = minIntervalNs / 2;
+            }
+
+            if (hasDeliveredFrame && sinceLastDeliveryNs < (minIntervalNs - toleranceNs)) {
+                desktopResource->Release();
+                g_outputDuplication->ReleaseFrame();
+                continue;
+            }
+
+            lastDeliveredAt = now;
+            hasDeliveredFrame = true;
         }
 
         // Get the texture
@@ -318,6 +381,31 @@ static void TsCallbackHandler(napi_env env, napi_value /*js_callback*/, void* /*
 // startCapture(displayIndex: number, callback: (frame) => void)
 // ---------------------------------------------------------------------------
 
+/**
+ * setTargetFps(fps: number): boolean
+ *
+ * Sets the maximum rate at which frames are copied and delivered. Zero or less
+ * disables throttling. Takes effect on the next acquired frame, so the capture
+ * rate can be changed without restarting capture.
+ */
+Napi::Value SetTargetFps(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+
+    double requestedFps = 0.0;
+    if (info.Length() > 0 && info[0].IsNumber()) {
+        requestedFps = info[0].As<Napi::Number>().DoubleValue();
+    }
+
+    if (requestedFps <= 0.0) {
+        g_minFrameIntervalNs.store(0);
+    } else {
+        const int64_t nanosecondsPerSecond = 1000000000LL;
+        g_minFrameIntervalNs.store((int64_t)(nanosecondsPerSecond / requestedFps));
+    }
+
+    return Napi::Boolean::New(env, true);
+}
+
 Napi::Value StartCapture(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
     std::lock_guard<std::mutex> lock(g_captureMutex);
@@ -342,6 +430,18 @@ Napi::Value StartCapture(const Napi::CallbackInfo& info) {
     // Optional callback argument for threaded mode
     if (info.Length() > 1 && info[1].IsFunction()) {
         g_jsCallback = Napi::Persistent(info[1].As<Napi::Function>());
+    }
+
+    // Optional target FPS so throttling is in force from the very first frame
+    // rather than only once the caller sets it separately.
+    if (info.Length() > 2 && info[2].IsNumber()) {
+        const double requestedFps = info[2].As<Napi::Number>().DoubleValue();
+        if (requestedFps <= 0.0) {
+            g_minFrameIntervalNs.store(0);
+        } else {
+            const int64_t nanosecondsPerSecond = 1000000000LL;
+            g_minFrameIntervalNs.store((int64_t)(nanosecondsPerSecond / requestedFps));
+        }
     }
 
     // Find the adapter and output
@@ -612,6 +712,7 @@ Napi::Value GetLatestFrame(const Napi::CallbackInfo& info) {
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("listDisplays",  Napi::Function::New(env, ListDisplays));
     exports.Set("startCapture",  Napi::Function::New(env, StartCapture));
+    exports.Set("setTargetFps",  Napi::Function::New(env, SetTargetFps));
     exports.Set("stopCapture",   Napi::Function::New(env, StopCapture));
     exports.Set("getLatestFrame", Napi::Function::New(env, GetLatestFrame));
     return exports;

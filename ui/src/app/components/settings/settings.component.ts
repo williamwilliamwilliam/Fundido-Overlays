@@ -64,6 +64,27 @@ import { ElectronService } from '../../services/electron.service';
 
         <div class="setting-row">
           <div class="setting-info">
+            <label class="setting-label">Overlay FPS</label>
+            <span class="setting-hint">
+              How often mirror overlays repaint with fresh pixels. Independent of
+              capture rate — state detection is unaffected by this setting.
+              Each repaint makes the desktop compositor redraw the overlay
+              window, so lowering this is the main lever if overlays are costing
+              you in-game frames.
+            </span>
+          </div>
+          <div class="setting-control">
+            <input
+              type="range"
+              min="1" max="120" step="1"
+              [(ngModel)]="overlayFps"
+              (ngModelChange)="onSettingChanged()" />
+            <span class="setting-value">{{ overlayFps }} fps</span>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
             <label class="setting-label">Cursor Frequency</label>
             <span class="setting-hint">
               How often cursor-following overlays update their position.
@@ -557,6 +578,7 @@ import { ElectronService } from '../../services/electron.service';
 export class SettingsComponent implements OnInit, OnDestroy {
   // Overlay settings
   cursorFrequencyHz: 60 | 120 = 60;
+  overlayFps = 30;
 
   // Capture settings
   captureTargetFps = 30;
@@ -601,6 +623,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     const config = await this.electronService.loadConfig();
 
     this.cursorFrequencyHz = (config.overlay?.cursorFrequencyHz ?? 60) as 60 | 120;
+    this.overlayFps = config.overlay?.overlayFps ?? 30;
 
     this.captureTargetFps = config.gameCapture?.targetFps ?? 30;
     this.captureSource = config.gameCapture?.captureSource ?? 'primary';
@@ -696,6 +719,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
     config.overlay = {
       cursorFrequencyHz: this.cursorFrequencyHz,
+      overlayFps: this.overlayFps,
     };
 
     config.gameCapture.targetFps = this.captureTargetFps;
